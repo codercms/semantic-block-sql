@@ -1,0 +1,2 @@
+# The supplied Russian wiki uses Markdown's two-space hard line break.
+docs/semantic-block-sql-style-guide-ru.md whitespace=-blank-at-eol

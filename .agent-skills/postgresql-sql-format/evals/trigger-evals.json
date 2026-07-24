@@ -1,0 +1,50 @@
+[
+  {
+    "query": "Format this PostgreSQL query without changing its behavior.",
+    "should_trigger": true
+  },
+  {
+    "query": "Can you clean up the indentation and line breaks in this SQL migration?",
+    "should_trigger": true
+  },
+  {
+    "query": "Reformat this INSERT ON CONFLICT statement to our PostgreSQL house style.",
+    "should_trigger": true
+  },
+  {
+    "query": "Make this CTE and window-function query readable, but do not optimize it.",
+    "should_trigger": true
+  },
+  {
+    "query": "Standardize the formatting of this PL/pgSQL DO block.",
+    "should_trigger": true
+  },
+  {
+    "query": "Please format these CREATE TABLE and CREATE INDEX statements.",
+    "should_trigger": true
+  },
+  {
+    "query": "Why is this PostgreSQL query slow?",
+    "should_trigger": false
+  },
+  {
+    "query": "Rewrite this correlated subquery as a join.",
+    "should_trigger": false
+  },
+  {
+    "query": "Design a database schema for a marketplace.",
+    "should_trigger": false
+  },
+  {
+    "query": "Explain the difference between MERGE and ON CONFLICT.",
+    "should_trigger": false
+  },
+  {
+    "query": "Fix the SQL syntax error in this query.",
+    "should_trigger": false
+  },
+  {
+    "query": "Convert this PostgreSQL query to MySQL.",
+    "should_trigger": false
+  }
+]
