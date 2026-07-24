@@ -1,0 +1,1 @@
+select item.id from public.items item left join match_new.source_links link on link.kp_id = item.kp_id and link.status = 'approved' and (link.model_version = item.model_version or link.match_method = 'manual');

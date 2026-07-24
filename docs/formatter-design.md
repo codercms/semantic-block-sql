@@ -1,6 +1,6 @@
 # Formatter design
 
-Status: **Batch 0 specification**
+Status: **Batch 1 backend selected**
 
 Last updated: **2026-07-25**
 
@@ -241,26 +241,20 @@ The exact Rust types are a Batch 1 design output after evaluating the backend.
 
 ## PostgreSQL backend strategy
 
-The preferred direction remains a `libpgfmt` extension with:
+Batch 1 rejected a `libpgfmt` fork after running its unmodified tests and a
+focused characterization suite. The blockers are cross-cutting inline-comment
+loss, intentional disallowed rewrites, no authored-group model, permissive
+`ERROR` recovery, and missing `MERGE` grammar support. A Cargo patch would also
+need a grammar patch and a separate safety parser.
 
-```rust
-Style::SemanticBlock
-```
+The selected MVP backend is exactly pinned `pg_query 6.1.1`. It supplies the
+real PostgreSQL 17.4 parser, scanner, token ranges, comments, and protobuf AST.
+Semantic Block layout is the only project-specific formatting layer.
 
-Batch 0 inspection found that public `Style` alone is not a sufficient extension
-point: the formatter and style configuration are private, widths are absent,
-and source-preserving grouping/comments need deeper changes. A pinned fork or
-upstream patch is therefore expected for the spike.
-
-The decision order is:
-
-1. demonstrate required behavior in a focused upstream-based spike;
-2. propose generally useful correctness and extension changes upstream;
-3. keep a small pinned fork if release timing or project-specific layout makes
-   upstream-only development impractical;
-4. vendor only with a documented operational reason;
-5. choose an alternative backend only after recording concrete failed
-   requirements.
+The formatter validates canonical PostgreSQL parse-tree equality after removing
+only source-location fields. It separately compares protected token text and
+order, then requires a byte-identical second formatting pass. See
+`docs/batch-1-backend-spike.md` for evidence and the dependency update policy.
 
 See `docs/upstream-baseline.md`.
 

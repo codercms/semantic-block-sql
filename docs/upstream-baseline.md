@@ -1,6 +1,6 @@
 # Upstream baseline
 
-Status: **Batch 0 research snapshot**
+Status: **Batch 1 decision recorded**
 
 Snapshot date: **2026-07-25**
 
@@ -18,6 +18,7 @@ actually introduced.
 | [`gmr/tree-sitter-postgres`](https://github.com/gmr/tree-sitter-postgres) | `19.0.0-beta.2`, commit [`10163f8`](https://github.com/gmr/tree-sitter-postgres/commit/10163f867437b3527592624ef1ecb9fca0853971) | BSD-3-Clause | edition 2024 | Grammar is generated from PostgreSQL `REL_19_BETA2`; pin and test because this is a beta grammar line. |
 | [`tree-sitter/tree-sitter-go`](https://github.com/tree-sitter/tree-sitter-go) | `0.25.0`, default-branch snapshot [`2346a3a`](https://github.com/tree-sitter/tree-sitter-go/commit/2346a3ab1bb3857b48b29d779a1ef9799a248cd7) | MIT | edition 2021 | Suitable Go CST candidate; runtime compatibility with tree-sitter 0.26 must be compiled and tested. |
 | [`BurntSushi/ripgrep` `ignore`](https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore) | `0.4.31`, default-branch snapshot [`f9c05a9`](https://github.com/BurntSushi/ripgrep/commit/f9c05a949d1a0dc8e16dee28ca9605d38611faeb) | Unlicense OR MIT | Rust 1.88 | Preferred traversal candidate; supports `.gitignore`-aware recursive walking and lower-level matchers. |
+| [`pganalyze/pg_query.rs`](https://github.com/pganalyze/pg_query.rs) | crate `6.1.1`, source commit [`66eb7be`](https://github.com/pganalyze/pg_query.rs/commit/66eb7becea1a40e315fee3f90197a35a89d20c25), PostgreSQL 17.4 | MIT | edition 2021; no declared MSRV | **Selected Batch 1 backend** for PostgreSQL parsing, scanning, token ranges, and structural AST comparison. |
 
 The versions above were verified from upstream manifests and current commits,
 not inferred from the original handoff.
@@ -113,13 +114,17 @@ Go extraction, directive model, post-format parse, or idempotence gate. The
 
 ### Toolchain availability
 
-The Batch 0 execution environment did not have `rustc` or `cargo` installed.
-Batch 1 cannot claim that upstream tests pass until a Rust 1.88+ toolchain is
-available and the exact pinned source is compiled.
+Batch 1 installed and verified Rust 1.88.0 and Cargo 1.88.0. The exact
+`libpgfmt v1.3.0` upstream suite passed unchanged. `pg_query` additionally
+requires a C toolchain and libclang while compiling its bundled PostgreSQL
+parser.
 
 ## Batch 1 verification gate
 
-Before selecting the backend strategy:
+Completed evidence and the final decision are recorded in
+`docs/batch-1-backend-spike.md`.
+
+The original gate was:
 
 - obtain and record the exact `libpgfmt v1.3.0` source tree;
 - run its complete upstream test suite on Rust 1.88+;

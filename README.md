@@ -1,17 +1,23 @@
 # semblock
 
-`semblock` is a planned fast, deterministic PostgreSQL formatter implementing
+`semblock` is a fast, deterministic PostgreSQL formatter implementing
 the **Semantic Block SQL** style.
 
-The repository is currently at **Batch 0: durable specification**. Formatter
-code is intentionally absent until the specification, upstream baseline, agent
-skill, and implementation checklist have been committed.
+The repository has completed **Batch 1: backend spike**. The reusable Rust
+formatter facade and the first golden layouts are implemented; the project CLI,
+full statement coverage, width/group policy, and Go extraction remain later
+batches.
+
+The formatter uses the existing `pg_query` crate for the real PostgreSQL
+parser, scanner, token ranges, comments, and AST. Project code implements the
+Semantic Block layout policy, not another SQL parser.
 
 ## Project documents
 
 - [Formatter design](docs/formatter-design.md)
 - [Implementation checklist](docs/implementation-checklist.md)
 - [Upstream baseline](docs/upstream-baseline.md)
+- [Batch 1 backend spike](docs/batch-1-backend-spike.md)
 - [Technical handoff](docs/semantic-block-sql-work-handoff.md)
 - [Russian style guide](docs/semantic-block-sql-style-guide-ru.md)
 - [Source artifact provenance](docs/source/README.md)
@@ -35,3 +41,14 @@ semblock fmt --language go ./internal/...
 See the design and checklist for the implementation gates. No syntax is
 considered supported until it has a parsing, semantic-safety, idempotence, and
 golden fixture.
+
+## Development
+
+Rust 1.88, a C toolchain, and libclang are required to build the pinned
+`pg_query` backend.
+
+```text
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+```

@@ -1,6 +1,6 @@
 # Durable implementation checklist
 
-Status: **Batch 0 complete; Batch 1 not started**
+Status: **Batch 1 complete; Batch 2 not started**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
@@ -15,9 +15,10 @@ and a self-review; syntax support also requires a fixture.
 - [x] Preserve the repository owner's existing MIT license.
 - [x] Keep formatter source code out of Batch 0.
 - [x] Commit Batch 0 before formatter implementation.
-- [ ] Keep formatter API reusable by CLI, stdin, Go extraction, and IDEs.
-- [ ] Maintain parse-before/after, idempotence, and no-partial-write invariants.
-- [ ] Do not claim syntax support without a fixture.
+- [x] Keep formatter API reusable by CLI, stdin, Go extraction, and IDEs.
+- [x] Maintain parse-before/after and idempotence invariants in the formatter
+  facade; no-partial-write remains a Batch 4 filesystem gate.
+- [x] Do not claim syntax support without a fixture.
 
 ## Batch 0 — Durable specification
 
@@ -50,48 +51,58 @@ Batch 0 evidence:
 
 ### Environment and source
 
-- [ ] Obtain Rust 1.88+ and record `rustc --version --verbose`.
-- [ ] Obtain Cargo and record `cargo --version`.
-- [ ] Fetch exact `libpgfmt v1.3.0` source.
-- [ ] Verify source tag/commit and BSD-3-Clause notice.
-- [ ] Run complete upstream tests unchanged.
-- [ ] Record baseline test results and timing.
+- [x] Obtain Rust 1.88+ and record `rustc --version --verbose`.
+- [x] Obtain Cargo and record `cargo --version`.
+- [x] Fetch exact `libpgfmt v1.3.0` source.
+- [x] Verify source tag/commit and BSD-3-Clause notice.
+- [x] Run complete upstream tests unchanged.
+- [x] Record baseline test results and timing.
 
 ### Characterization
 
-- [ ] Add fixtures for inline and standalone comments.
-- [ ] Add fixtures for invalid SQL and tolerated `ERROR` nodes.
-- [ ] Add fixtures for multiple statements and no trailing semicolon.
-- [ ] Add fixtures for dollar quoting and PL/pgSQL.
-- [ ] Add fixtures for compact and complex joins.
-- [ ] Add fixtures for authored result-list line groups.
-- [ ] Add fixtures for `MERGE`.
-- [ ] Verify whether original source spans/group hints remain usable.
+- [x] Add characterization cases for inline and standalone comments.
+- [x] Add characterization cases for invalid SQL and tolerated `ERROR` nodes.
+- [x] Add characterization cases for multiple statements and no trailing
+  semicolon.
+- [x] Add characterization cases for dollar quoting and PL/pgSQL.
+- [x] Add characterization cases for compact and complex joins.
+- [x] Add characterization cases for authored result-list line groups.
+- [x] Add a characterization case for `MERGE`.
+- [x] Verify whether original source spans/group hints remain usable.
 
 ### Minimal Semantic Block proof
 
-- [ ] Add `Style::SemanticBlock` in the spike.
-- [ ] Uppercase keywords and special values.
-- [ ] Lowercase ordinary function and type names safely.
-- [ ] Use four-space indentation.
-- [ ] Keep a simple `SELECT` compact.
-- [ ] Expand mixed `AND`/`OR` visibly.
-- [ ] Render expanded `JOIN ... ON` without an indentation storm.
-- [ ] Preserve comments in all spike fixtures.
-- [ ] Parse formatted output.
-- [ ] Require idempotence.
+- [x] Add `Style::SemanticBlock` in the spike.
+- [x] Uppercase keywords and special values.
+- [x] Lowercase ordinary function and type names safely.
+- [x] Use four-space indentation.
+- [x] Keep a simple `SELECT` compact.
+- [x] Expand mixed `AND`/`OR` visibly.
+- [x] Render expanded `JOIN ... ON` without an indentation storm.
+- [x] Preserve comments in all spike fixtures.
+- [x] Parse formatted output.
+- [x] Require idempotence.
 
 ### Decision
 
-- [ ] Compare upstream patch, pinned fork, and vendoring.
-- [ ] Document exact required internal/public API changes.
-- [ ] Decide and record backend strategy.
-- [ ] Record dependency pin and update policy.
-- [ ] Run Batch 1 focused and full tests.
-- [ ] Perform Batch 1 self-review.
-- [ ] Update this checklist and design decisions.
-- [ ] Remove spike dead code.
-- [ ] Commit Batch 1.
+- [x] Compare upstream patch, pinned fork, and vendoring.
+- [x] Document exact required internal/public API changes.
+- [x] Decide and record backend strategy.
+- [x] Record dependency pin and update policy.
+- [x] Run Batch 1 focused and full tests.
+- [x] Perform Batch 1 self-review.
+- [x] Update this checklist and design decisions.
+- [x] Remove spike dead code.
+- [x] Commit Batch 1.
+
+Batch 1 evidence:
+
+- `docs/batch-1-backend-spike.md` records exact upstream versions, commands,
+  results, blockers, patch/fork analysis, and the backend decision.
+- `tests/fixtures/batch1/` contains every layout shape claimed by this batch.
+- `tests/batch1_semantic_block.rs` requires PostgreSQL parse-before/after,
+  protected-token preservation, canonical AST equality, and idempotence.
+- The commit carrying this checklist is the coherent Batch 1 commit.
 
 ## Batch 2 — Core layout
 

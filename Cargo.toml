@@ -1,0 +1,22 @@
+[package]
+name = "semblock"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Semantic Block SQL formatter for PostgreSQL"
+license = "MIT"
+repository = "https://github.com/codercms/semantic-block-sql"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+pg_query = "=6.1.1"
+serde_json = "1.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+
+[profile.dev.package.pg_query]
+debug = 0
