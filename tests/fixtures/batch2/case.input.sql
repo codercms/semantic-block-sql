@@ -1,0 +1,1 @@
+select case when item.id is null then 0 when item.deleted_at is not null then -1 else item.score + 1 end as priority, status = case when source.approved then 'approved' else 'rejected' end from public.items item join staging.source source on source.id = item.id;

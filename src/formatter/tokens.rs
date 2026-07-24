@@ -7,7 +7,12 @@ pub(super) struct SqlToken<'a> {
     pub kind: Token,
     pub keyword_kind: KeywordKind,
     pub text: &'a str,
-    pub newline_before: bool,
+    pub start: usize,
+    pub end: usize,
+    /// Number of authored line boundaries between the previous token and this
+    /// token. Two or more line boundaries represent a hard blank-line
+    /// boundary.
+    pub line_breaks_before: usize,
 }
 
 impl SqlToken<'_> {
@@ -46,7 +51,9 @@ pub(super) fn tokenize(source: &str) -> Result<Vec<SqlToken<'_>>, FormatDiagnost
             kind,
             keyword_kind,
             text,
-            newline_before: gap.contains('\n'),
+            start,
+            end,
+            line_breaks_before: gap.bytes().filter(|byte| *byte == b'\n').count(),
         });
         previous_end = end;
     }

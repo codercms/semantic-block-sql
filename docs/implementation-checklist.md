@@ -1,6 +1,6 @@
 # Durable implementation checklist
 
-Status: **Batch 1 complete; Batch 2 not started**
+Status: **Batch 2 complete; Batch 3 not started**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
@@ -108,43 +108,58 @@ Batch 1 evidence:
 
 ### Layout engine
 
-- [ ] Define `FormatOptions` and stable formatter facade.
-- [ ] Implement compact/expanded decisions.
-- [ ] Implement configurable four-space indentation.
-- [ ] Implement soft line width.
-- [ ] Implement hard line width and safe-break enforcement.
-- [ ] Allow indivisible over-hard tokens with diagnostics/metadata as designed.
-- [ ] Implement trailing commas.
-- [ ] Implement binary/cast/function spacing.
-- [ ] Implement `<>` to `!=` lexical normalization without touching literals or
+- [x] Define `FormatOptions` and stable formatter facade.
+- [x] Implement compact/expanded decisions.
+- [x] Implement configurable four-space indentation.
+- [x] Implement soft line width.
+- [x] Implement hard line width and safe-break enforcement.
+- [x] Allow indivisible over-hard tokens with diagnostics/metadata as designed.
+- [x] Implement trailing commas.
+- [x] Implement binary/cast/function spacing.
+- [x] Implement `<>` to `!=` lexical normalization without touching literals or
   comments.
 
 ### Authored groups and comments
 
-- [ ] Capture original line boundaries as soft list-group hints.
-- [ ] Preserve blank lines as hard group boundaries.
-- [ ] Preserve comments as hard group boundaries.
-- [ ] Prevent merges across blank lines/comments.
-- [ ] Preserve cohesive over-soft groups.
-- [ ] Split over-hard groups only at safe argument boundaries.
-- [ ] Deterministically pack simple one-line input to soft width.
-- [ ] Place complex arguments on independent lines.
-- [ ] Preserve comment attachment to the same syntax node.
+- [x] Capture original line boundaries as soft list-group hints.
+- [x] Preserve blank lines as hard group boundaries.
+- [x] Preserve comments as hard group boundaries.
+- [x] Prevent merges across blank lines/comments.
+- [x] Preserve cohesive over-soft groups.
+- [x] Split over-hard groups only at safe argument boundaries.
+- [x] Deterministically pack simple one-line input to soft width.
+- [x] Place complex arguments on independent lines.
+- [x] Preserve comment attachment to the same syntax node.
 
 ### Core constructs
 
-- [ ] Compact and expanded `SELECT`.
-- [ ] Boolean expressions with mixed `AND`/`OR`.
-- [ ] Compact and expanded joins.
-- [ ] Compact and expanded `CASE`.
-- [ ] CTEs.
-- [ ] Recursive CTE anchor/recursive branches.
-- [ ] Golden fixtures for every supported shape.
-- [ ] Idempotence property tests.
-- [ ] Parse-before/after tests.
-- [ ] Hard-limit property tests.
-- [ ] Batch 2 full tests and self-review.
-- [ ] Dead-code removal, docs, checklist, and commit.
+- [x] Compact and expanded `SELECT`.
+- [x] Boolean expressions with mixed `AND`/`OR`.
+- [x] Compact and expanded joins.
+- [x] Compact and expanded `CASE`.
+- [x] CTEs.
+- [x] Recursive CTE anchor/recursive branches.
+- [x] Golden fixtures for every supported shape.
+- [x] Idempotence property tests.
+- [x] Parse-before/after tests.
+- [x] Hard-limit property tests.
+- [x] Batch 2 full tests and self-review.
+- [x] Dead-code removal, docs, checklist, and commit.
+
+Batch 2 evidence:
+
+- `docs/batch-2-core-mvp.md` records the implemented scope, algorithm,
+  warnings, limitations, and verification commands.
+- `tests/fixtures/batch2/` covers authored groups, comments, width packing,
+  compact/expanded `CASE`, function arguments, multiple CTEs, and a recursive
+  CTE.
+- `tests/batch2_core_layout.rs` requires PostgreSQL structural equivalence,
+  protected-token preservation, idempotence, configurable indentation,
+  compact/expanded JOIN width behavior, hard-width enforcement, and
+  indivisible-token warnings.
+- Batch 2 adds no dependency; layout continues to consume the scanner and parse
+  tree supplied by the exactly pinned `pg_query`.
+- The commit carrying this checklist is the coherent Batch 2 commit.
 
 ## Batch 3 — PostgreSQL statement coverage
 

@@ -3,10 +3,11 @@
 `semblock` is a fast, deterministic PostgreSQL formatter implementing
 the **Semantic Block SQL** style.
 
-The repository has completed **Batch 1: backend spike**. The reusable Rust
-formatter facade and the first golden layouts are implemented; the project CLI,
-full statement coverage, width/group policy, and Go extraction remain later
-batches.
+The repository has completed **Batch 2: formatter-core MVP**. The reusable Rust
+formatter facade now implements source-aware result and function-argument
+lists, authored logical groups, soft/hard widths, comments, compact/expanded
+`CASE`, joins, CTEs, and recursive CTE layout. The project CLI, broader
+statement coverage, and Go extraction remain later batches.
 
 The formatter uses the existing `pg_query` crate for the real PostgreSQL
 parser, scanner, token ranges, comments, and AST. Project code implements the
@@ -18,6 +19,7 @@ Semantic Block layout policy, not another SQL parser.
 - [Implementation checklist](docs/implementation-checklist.md)
 - [Upstream baseline](docs/upstream-baseline.md)
 - [Batch 1 backend spike](docs/batch-1-backend-spike.md)
+- [Batch 2 formatter-core MVP](docs/batch-2-core-mvp.md)
 - [Technical handoff](docs/semantic-block-sql-work-handoff.md)
 - [Russian style guide](docs/semantic-block-sql-style-guide-ru.md)
 - [Source artifact provenance](docs/source/README.md)

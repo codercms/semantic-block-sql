@@ -1,6 +1,6 @@
 # Formatter design
 
-Status: **Batch 1 backend selected**
+Status: **Batch 2 formatter-core MVP complete**
 
 Last updated: **2026-07-25**
 
@@ -135,6 +135,38 @@ The formatter:
 Group hints require original source spans to survive parsing and layout. This is
 a primary backend-selection criterion.
 
+Batch 2 implements this model for `SELECT` result lists and parenthesized
+function-argument lists. Scanner gap metadata records authored line and blank
+line boundaries without adding another parser. Completely one-line lists are
+packed deterministically to soft width; authored groups are retained through
+soft width and split only at comma boundaries when hard width requires it.
+
+Comments remain in the scanner token order. Line comments always retain a
+physical line ending so they cannot consume a following token. Blank lines and
+standalone comments remain hard list boundaries when their preservation option
+is enabled.
+
+### Hard-width result
+
+After layout, the formatter validates every output line. A remaining
+over-hard, breakable line is an error rather than silently violating the
+contract. When an indivisible string, quoted identifier, identifier, or comment
+necessarily exceeds hard width, formatting succeeds and returns
+`FormatWarning::IndivisibleTokenExceedsHardWidth { line, width }`.
+
+`FormatOptions` exposes:
+
+```rust
+FormatOptions {
+    style,
+    indent_width,
+    soft_line_width,
+    hard_line_width,
+    preserve_list_groups,
+    preserve_blank_lines,
+}
+```
+
 ### Connectors do not own empty levels
 
 `ON`, `THEN`, and comparable connector keywords stay attached to their owning
@@ -237,7 +269,8 @@ The API must serve:
 - tests;
 - future VS Code and IDEA adapters.
 
-The exact Rust types are a Batch 1 design output after evaluating the backend.
+Batch 2 keeps this facade pure and adds non-fatal width warnings to
+`FormattedSql`; it still performs no filesystem writes.
 
 ## PostgreSQL backend strategy
 

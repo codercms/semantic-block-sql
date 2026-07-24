@@ -1,0 +1,1 @@
+select jsonb_build_object('identity', item.id, 'external_ids', jsonb_build_array(item.kp_id, item.imdb_id), 'title', coalesce(item.title_rus, item.title_orig, '')) as payload, item.created_at from public.items item;
