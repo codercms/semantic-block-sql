@@ -1,6 +1,6 @@
 # Durable implementation checklist
 
-Status: **Batch 2 complete; Batch 3 not started**
+Status: **Runnable CLI MVP complete; Batch 3 statement coverage not started**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
@@ -191,88 +191,115 @@ Batch 2 evidence:
 
 ## Batch 4 — Project CLI
 
+Batch 4 and the raw-string subset of Batch 5 were implemented together as one
+runnable MVP slice after Batch 2. Batch 3 remains deliberately deferred; this
+does not expand the formatter-core syntax claims.
+
 ### Contract
 
-- [ ] `semblock fmt`.
-- [ ] `semblock check`.
-- [ ] `semblock diff`.
-- [ ] Stable documented exit codes.
-- [ ] `--config`.
-- [ ] `--stdin`.
-- [ ] `--filename`.
-- [ ] `--language auto|sql|go`.
-- [ ] `--jobs`.
-- [ ] `--verbose`.
-- [ ] `--quiet`.
+- [x] `semblock fmt`.
+- [x] `semblock check`.
+- [x] `semblock diff`.
+- [x] Stable documented exit codes.
+- [x] `--config`.
+- [x] `--stdin`.
+- [x] `--filename`.
+- [x] `--language auto|sql|go`.
+- [x] `--jobs`.
+- [x] `--verbose`.
+- [x] `--quiet`.
 
 ### Configuration and discovery
 
-- [ ] Parse and validate `semblock.toml`.
-- [ ] Document config search and precedence.
-- [ ] Reject invalid widths and unsupported dialects.
-- [ ] Recursively discover `.sql`.
-- [ ] Respect `.gitignore` by default.
-- [ ] Support `.semblockignore`.
-- [ ] Document and test ignore precedence.
-- [ ] Deliberately configure hidden-file behavior.
-- [ ] Handle explicit ignored paths consistently.
+- [x] Parse and validate `semblock.toml`.
+- [x] Document config search and precedence.
+- [x] Reject invalid widths and unsupported dialects.
+- [x] Recursively discover `.sql`.
+- [x] Respect `.gitignore` by default.
+- [x] Support `.semblockignore`.
+- [x] Document and test ignore precedence.
+- [x] Deliberately configure hidden-file behavior.
+- [x] Handle explicit ignored paths consistently.
 
 ### Safety and diagnostics
 
-- [ ] SQL file-level ignore.
-- [ ] SQL block off/on state machine.
-- [ ] Diagnostics for unmatched/nested/misplaced directives.
-- [ ] Original parse.
-- [ ] Formatted parse.
-- [ ] Idempotence gate.
-- [ ] Atomic replacement preserving permissions.
-- [ ] No partial file writes.
-- [ ] Unified diff output.
-- [ ] Preserve newline convention where practical.
-- [ ] Integration tests for files, directories, ignores, stdin, commands, exit
+- [x] SQL file-level ignore.
+- [x] SQL block off/on state machine.
+- [x] Diagnostics for unmatched/nested/misplaced directives.
+- [x] Original parse.
+- [x] Formatted parse.
+- [x] Idempotence gate.
+- [x] Atomic replacement preserving permissions.
+- [x] No partial file writes.
+- [x] Unified diff output.
+- [x] Preserve newline convention where practical.
+- [x] Integration tests for files, directories, ignores, stdin, commands, exit
   codes, parse failure, and atomicity.
-- [ ] Batch 4 full tests and self-review.
-- [ ] Dead-code removal, docs, checklist, and commit.
+- [x] Batch 4 full tests and self-review.
+- [x] Dead-code removal, docs, checklist, and commit.
+
+Batch 4 evidence:
+
+- `tests/cli_mvp.rs` covers the three commands, stdin, configuration,
+  recursive discovery, both ignore sources, nested custom ignores, explicit
+  ignored paths, stable exit classes, unified diff, CRLF, permissions, and
+  pre-write planning.
+- Discovery uses pinned `ignore 0.4.31`; `.semblockignore` is registered as a
+  highest-precedence custom ignore filename.
+- The CLI plans and validates every source before the first `fmt` write, then
+  replaces each changed file through a same-directory temporary file.
 
 ## Batch 5 — Go extraction
 
 ### CST and candidates
 
-- [ ] Integrate and pin `tree-sitter-go`.
-- [ ] Parse complete Go files.
-- [ ] Locate raw string literal nodes with exact byte ranges.
-- [ ] Cover const declarations.
-- [ ] Cover var declarations.
-- [ ] Cover regular assignments.
-- [ ] Cover short assignments.
-- [ ] Reject ordinary non-SQL strings cheaply.
-- [ ] Accept explicit SQL markers before prefix classification.
-- [ ] Validate complete SQL through the PostgreSQL parser.
-- [ ] Reject incomplete fragments.
-- [ ] Keep interpreted strings disabled.
+- [x] Integrate and pin `tree-sitter-go`.
+- [x] Parse complete Go files.
+- [x] Locate raw string literal nodes with exact byte ranges.
+- [x] Cover const declarations.
+- [x] Cover var declarations.
+- [x] Cover regular assignments.
+- [x] Cover short assignments.
+- [x] Reject ordinary non-SQL strings cheaply.
+- [x] Accept explicit SQL markers before prefix classification.
+- [x] Validate complete SQL through the PostgreSQL parser.
+- [x] Reject incomplete fragments.
+- [x] Keep interpreted strings disabled.
 
 ### Directives
 
-- [ ] Go file-level `semblock:file-ignore`.
-- [ ] Declaration-level `semblock:ignore`.
-- [ ] Explicit `semblock:sql`.
-- [ ] JetBrains `language=SQL`.
-- [ ] Structural comment-to-declaration attachment.
-- [ ] Diagnostics for misplaced/ambiguous directives.
+- [x] Go file-level `semblock:file-ignore`.
+- [x] Declaration-level `semblock:ignore`.
+- [x] Explicit `semblock:sql`.
+- [x] JetBrains `language=SQL`.
+- [x] Structural comment-to-declaration attachment.
+- [x] Diagnostics for misplaced/ambiguous directives.
 
 ### Rewrite safety
 
-- [ ] Format each eligible literal independently.
-- [ ] Abort the whole Go file when a mandatory literal fails.
-- [ ] Replace spans from end to start.
-- [ ] Preserve backticks and correct host indentation.
-- [ ] Reparse the complete resulting Go source.
-- [ ] Atomically replace only after validation.
-- [ ] Test multiple literals and atomic rollback.
-- [ ] Test malformed SQL and malformed Go.
-- [ ] Test full Go reparse after rewrite.
-- [ ] Batch 5 full tests and self-review.
-- [ ] Dead-code removal, docs, checklist, and commit.
+- [x] Format each eligible literal independently.
+- [x] Abort the whole Go file when a mandatory literal fails.
+- [x] Replace spans from end to start.
+- [x] Preserve backticks and correct host indentation.
+- [x] Reparse the complete resulting Go source.
+- [x] Atomically replace only after validation.
+- [x] Test multiple literals and atomic rollback.
+- [x] Test malformed SQL and malformed Go.
+- [x] Test full Go reparse after rewrite.
+- [x] Batch 5 full tests and self-review.
+- [x] Dead-code removal, docs, checklist, and commit.
+
+Batch 5 MVP evidence:
+
+- `tree-sitter 0.26.11` and `tree-sitter-go 0.25.0` locate source-owned raw
+  literal and comment byte ranges.
+- Directive attachment is resolved against supported CST owners, never by
+  scanning Go strings as plain source text.
+- `tests/cli_mvp.rs` covers automatic and explicit SQL, all four supported
+  owner shapes, non-SQL and incomplete strings, every directive, malformed Go,
+  malformed embedded SQL, whole-file rollback, indentation, and host reparse.
+- Interpreted strings remain explicitly disabled and produce a diagnostic when
+  targeted by an explicit SQL marker.
 
 ## Batch 6 — Performance and release polish
 

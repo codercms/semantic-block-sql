@@ -1,6 +1,6 @@
 # Formatter design
 
-Status: **Batch 2 formatter-core MVP complete**
+Status: **Runnable CLI and raw-Go MVP complete**
 
 Last updated: **2026-07-25**
 
@@ -343,8 +343,10 @@ Rules:
 - SQL block-off regions remain byte-identical.
 - Nested, unmatched, or misplaced control directives are errors with spans.
 
-The detailed state machine and attachment rules are a Batch 4/5 deliverable
-before implementation.
+The CLI MVP implements the state machine above. SQL control directives must
+occupy their own lines. Go declaration directives are attached to supported
+CST owners through adjacent comment nodes. Unmatched, nested, conflicting, or
+misplaced directives fail the complete source without a write.
 
 ## CLI contract
 
@@ -368,7 +370,7 @@ Required options:
 --quiet
 ```
 
-Provisional exit codes:
+Stable CLI exit codes:
 
 | Code | Meaning |
 | --- | --- |
@@ -378,8 +380,8 @@ Provisional exit codes:
 | `3` | SQL or host-language parse/validation failure. |
 | `4` | Discovery, filesystem, or atomic rewrite failure. |
 
-Exit codes become stable when Batch 4 integration tests and CLI documentation
-land. Until then, changing them requires updating this table and the checklist.
+Changing these codes requires an explicit compatibility decision and updated
+integration tests.
 
 ## Discovery and ignore behavior
 
@@ -387,10 +389,11 @@ The default is recursive discovery of `.sql` and enabled host-language files
 while respecting `.gitignore`. `.semblockignore` adds gitignore-compatible
 project rules.
 
-Nested ignore semantics and precedence will follow the selected traversal
-library only after they are explicitly documented and tested. Hidden-file
-behavior must be configured deliberately because the `ignore` crate skips
-hidden paths by default.
+Discovery uses `ignore 0.4.31`. Custom `.semblockignore` files have higher
+precedence than ordinary ignore files; more deeply nested custom files win
+within that level. `.gitignore` is enabled by default. Hidden paths and
+symlink traversal are disabled. An explicit file argument bypasses directory
+ignore matching and is processed.
 
 ## Rewrite validation
 
@@ -441,8 +444,11 @@ raw_strings = true
 interpreted_strings = false
 ```
 
-Configuration discovery, precedence, validation, and unknown-key behavior must
-be specified and tested in Batch 4.
+Configuration starts with built-in defaults, then applies the first
+`semblock.toml` found from the current directory upward. `--config` replaces
+that search with an explicit path. Unknown keys, invalid widths, unsupported
+dialects, path-like ignore filenames, and enabled interpreted Go strings are
+configuration errors.
 
 ## MVP non-goals
 
@@ -459,12 +465,12 @@ be specified and tested in Batch 4.
 
 ## Open decisions
 
-- Upstream contribution vs pinned fork vs vendoring of `libpgfmt`.
-- Strict validation policy for parse trees containing error nodes.
-- Structural equivalence checks beyond reparsing and lexical invariants.
-- Exact representation of authored group hints in the layout engine.
-- Cross-platform atomic replace behavior.
-- Nested `.semblockignore` behavior and precedence.
-- Diagnostic output format for editor integration.
+- broader Batch 3 statement layout coverage;
+- Windows/macOS atomic replacement verification beyond the Unix integration
+  gate;
+- machine-readable diagnostic output for editor integration;
+- a proven interpreted-Go-string decode/format/re-encode round trip;
+- formatting-worker parallelism after measurement (project discovery is
+  already bounded by `--jobs`).
 
 No open decision authorizes bypassing the safety invariants.

@@ -231,3 +231,17 @@ fn quoted_function_and_type_identifiers_are_never_case_normalized() {
     assert!(output.contains("\"MyFunc\"(item.id)"));
     assert!(output.contains("item.value::\"MyType\""));
 }
+
+#[test]
+fn inline_block_comment_keeps_a_lexical_separator() {
+    let source = "/* injected */ select item.id from public.items item;";
+    let output = format_sql(source, &FormatOptions::default())
+        .expect("format succeeds")
+        .output;
+
+    assert_eq!(
+        output,
+        "/* injected */ SELECT item.id FROM public.items item;\n"
+    );
+    validate_equivalent(source, &output).expect("comment attachment remains equivalent");
+}

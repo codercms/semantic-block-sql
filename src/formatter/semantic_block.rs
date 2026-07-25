@@ -1120,7 +1120,9 @@ fn needs_space(tokens: &[SqlToken<'_>], previous: Option<usize>, current: usize)
     };
     let previous = &tokens[previous_index];
     let current = &tokens[current];
-    if previous.is_comment() {
+    if previous.kind == Token::SqlComment
+        || (previous.kind == Token::CComment && current.line_breaks_before > 0)
+    {
         return false;
     }
     if matches!(

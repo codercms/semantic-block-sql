@@ -1,6 +1,6 @@
 # Upstream baseline
 
-Status: **Batch 1 decision recorded**
+Status: **CLI MVP dependencies recorded**
 
 Snapshot date: **2026-07-25**
 
@@ -23,22 +23,22 @@ actually introduced.
 The versions above were verified from upstream manifests and current commits,
 not inferred from the original handoff.
 
-## Candidate support crates
+## CLI MVP support crates
 
-These are provisional candidates only.
-
-| Crate | Upstream manifest observed | License | Notes |
+| Crate | Selected version | License | Notes |
 | --- | --- | --- | --- |
-| `clap` | `4.6.4` | MIT OR Apache-2.0 | Derive-based CLI; Rust 1.85 upstream MSRV. |
-| `serde` | `1.0.229` | MIT OR Apache-2.0 | Configuration data model candidate. |
-| `toml` | `1.1.3+spec-1.1.0` | MIT OR Apache-2.0 | Configuration parser candidate; Rust 1.85 upstream MSRV. |
-| `similar` | `3.1.1` | Apache-2.0 | Unified diff candidate; Rust 1.85 upstream MSRV. |
-| `tempfile` | `3.27.0` | MIT OR Apache-2.0 | Temporary-file helper candidate, not by itself proof of correct atomic replacement. |
-| `rayon` | `1.12.0` | MIT OR Apache-2.0 | Optional Batch 6 parallelism only after measurement. |
+| `clap` | `4.6.4` | MIT OR Apache-2.0 | Selected derive-based CLI; Rust 1.85 upstream MSRV. |
+| `ignore` | `0.4.31` | Unlicense OR MIT | Selected project walker and ignore engine; Rust 1.88 upstream MSRV. |
+| `tree-sitter` | `0.26.11` | MIT | Selected Go CST runtime; Rust 1.77 upstream MSRV. |
+| `tree-sitter-go` | `0.25.0` | MIT | Selected Go grammar. |
+| `serde` | `1.0.229` | MIT OR Apache-2.0 | Selected strict configuration data model. |
+| `toml` | `1.1.3+spec-1.1.0` | MIT OR Apache-2.0 | Selected configuration parser; Rust 1.85 upstream MSRV. |
+| `similar` | `3.1.1` | Apache-2.0 | Selected unified diff implementation; Rust 1.85 upstream MSRV. |
+| `tempfile` | `3.27.0` | MIT OR Apache-2.0 | Selected same-directory temporary-file helper; semblock owns validation, permissions, syncing, and persistence policy. |
 
-Do not add all candidates up front. In particular, parallelism is not part of
-the correctness core, and atomic replacement semantics must be designed per
-platform rather than delegated blindly to a crate name.
+`rayon` was not added. `--jobs` bounds the parallel `ignore` walker; source
+formatting remains deterministic and sequential until performance work proves
+another dependency useful.
 
 ## Verified `libpgfmt` extension points
 
