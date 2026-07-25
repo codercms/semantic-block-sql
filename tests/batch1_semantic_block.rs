@@ -91,6 +91,7 @@ fn options_are_validated() {
         indent_width: 4,
         soft_line_width: 160,
         hard_line_width: 120,
+        ..FormatOptions::default()
     };
     assert!(matches!(
         format_sql("SELECT 1;", &invalid),

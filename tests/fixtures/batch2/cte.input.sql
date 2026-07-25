@@ -1,0 +1,1 @@
+with active_items as (select item.id, item.parent_id from public.items item where item.deleted_at is null), root_items as (select active_items.id from active_items where active_items.parent_id is null) select root_items.id from root_items;

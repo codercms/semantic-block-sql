@@ -6,5 +6,6 @@
 mod formatter;
 
 pub use formatter::{
-    FormatDiagnostic, FormatOptions, FormattedSql, Style, format_sql, validate_equivalent,
+    FormatDiagnostic, FormatOptions, FormatWarning, FormattedSql, Style, format_sql,
+    validate_equivalent,
 };

@@ -21,6 +21,8 @@ pub struct FormatOptions {
     pub indent_width: usize,
     pub soft_line_width: usize,
     pub hard_line_width: usize,
+    pub preserve_list_groups: bool,
+    pub preserve_blank_lines: bool,
 }
 
 impl Default for FormatOptions {
@@ -30,6 +32,8 @@ impl Default for FormatOptions {
             indent_width: 4,
             soft_line_width: 120,
             hard_line_width: 160,
+            preserve_list_groups: true,
+            preserve_blank_lines: true,
         }
     }
 }
@@ -60,6 +64,15 @@ impl FormatOptions {
 pub struct FormattedSql {
     pub output: String,
     pub changed: bool,
+    pub warnings: Vec<FormatWarning>,
+}
+
+/// Non-fatal layout condition that callers may surface to users.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormatWarning {
+    /// A source token cannot be split, so its output line is necessarily wider
+    /// than the configured hard limit.
+    IndivisibleTokenExceedsHardWidth { line: usize, width: usize },
 }
 
 /// A formatter or safety-gate failure.
@@ -77,6 +90,14 @@ pub enum FormatDiagnostic {
     ProtectedTokenChanged(String),
     #[error("formatter is not idempotent")]
     NotIdempotent,
+    #[error(
+        "formatter left a breakable line {line} at width {width}, above hard limit {hard_limit}"
+    )]
+    HardLineExceeded {
+        line: usize,
+        width: usize,
+        hard_limit: usize,
+    },
 }
 
 /// Formats one or more complete PostgreSQL statements without touching files.
@@ -98,8 +119,11 @@ pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql,
         return Err(FormatDiagnostic::NotIdempotent);
     }
 
+    let warnings = semantic_block::validate_hard_width(&output, options)?;
+
     Ok(FormattedSql {
         changed: output != source,
         output,
+        warnings,
     })
 }

@@ -1,0 +1,1 @@
+with recursive item_tree as (select item.id, item.parent_id from public.items item where item.parent_id is null union all select child.id, child.parent_id from public.items child join item_tree parent on parent.id = child.parent_id) select item_tree.id from item_tree;
