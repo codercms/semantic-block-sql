@@ -385,6 +385,13 @@ fn layout_rule(
         previous.map(|index| tokens[index].kind),
         current.map(|index| tokens[index].kind),
     ];
+    if kinds
+        .iter()
+        .flatten()
+        .any(|kind| matches!(kind, Token::Conflict | Token::Do))
+    {
+        return "layout.on_conflict";
+    }
     if kinds.iter().flatten().any(|kind| {
         matches!(
             kind,

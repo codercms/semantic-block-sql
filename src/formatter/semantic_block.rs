@@ -92,6 +92,16 @@ struct ParenthesizedList {
     expanded: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct OnConflictBlock {
+    start: usize,
+    target_open: Option<usize>,
+    action: usize,
+    update: bool,
+    set: Option<usize>,
+    action_where: Option<usize>,
+}
+
 #[derive(Debug, Clone)]
 struct InsertBlock {
     start: usize,
@@ -100,6 +110,7 @@ struct InsertBlock {
     target_open: Option<usize>,
     values: usize,
     rows: Vec<(usize, usize)>,
+    on_conflict: Option<OnConflictBlock>,
     returning: Option<usize>,
 }
 
@@ -171,7 +182,14 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
             continue;
         }
 
-        let planned_break = plan.before.get(&index).copied();
+        // An inline comment belongs to the expression immediately before it.
+        // Never let a later layout pass move it onto a standalone line; comment
+        // attachment outranks width and canonical-layout preferences.
+        let planned_break = plan
+            .before
+            .get(&index)
+            .copied()
+            .filter(|_| !token.is_comment() || token.line_breaks_before > 0);
         if let Some(line_break) = planned_break {
             writer.newline(line_break.lines, line_break.indent);
         } else if token.is_comment() && token.line_breaks_before > 0 {
@@ -441,7 +459,46 @@ fn insert_blocks(
         };
         let returning = (values + 1..end)
             .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Returning);
-        let rows_end = returning.unwrap_or(end);
+        let conflict_start = (values + 1..returning.unwrap_or(end)).find(|&index| {
+            depths[index] == base_depth
+                && tokens[index].kind == Token::On
+                && tokens
+                    .get(index + 1)
+                    .is_some_and(|next| next.kind == Token::Conflict)
+        });
+        let on_conflict = conflict_start.and_then(|conflict| {
+            let boundary = returning.unwrap_or(end);
+            let action = (conflict + 2..boundary)
+                .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Do)?;
+            let target_open = (conflict + 2..action).find(|&index| {
+                depths[index] == base_depth
+                    && tokens[index].kind == Token::Ascii40
+                    && parens.get(&index).is_some_and(|close| *close < action)
+            });
+            let update = tokens
+                .get(action + 1)
+                .is_some_and(|token| token.kind == Token::Update);
+            let set = if update {
+                (action + 1..boundary)
+                    .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Set)
+            } else {
+                None
+            };
+            let action_where = set.and_then(|set| {
+                (set + 1..boundary).find(|&index| {
+                    depths[index] == base_depth && tokens[index].kind == Token::Where
+                })
+            });
+            Some(OnConflictBlock {
+                start: conflict,
+                target_open,
+                action,
+                update,
+                set,
+                action_where,
+            })
+        });
+        let rows_end = conflict_start.or(returning).unwrap_or(end);
         let target_open = (start + 1..values).find(|&index| {
             depths[index] == base_depth
                 && tokens[index].kind == Token::Ascii40
@@ -463,6 +520,7 @@ fn insert_blocks(
             target_open,
             values,
             rows,
+            on_conflict,
             returning,
         });
     }
@@ -472,7 +530,11 @@ fn insert_blocks(
 
 fn is_insert_list_open(inserts: &[InsertBlock], open: usize) -> bool {
     inserts.iter().any(|insert| {
-        insert.target_open == Some(open) || insert.rows.iter().any(|&(row, _)| row == open)
+        insert.target_open == Some(open)
+            || insert.rows.iter().any(|&(row, _)| row == open)
+            || insert
+                .on_conflict
+                .is_some_and(|conflict| conflict.target_open == Some(open))
     })
 }
 
@@ -492,12 +554,16 @@ fn plan_insert_statements(
         let has_expanded_list = lists.iter().any(|list| {
             list.expanded
                 && (insert.target_open == Some(list.open)
-                    || insert.rows.iter().any(|&(open, _)| open == list.open))
+                    || insert.rows.iter().any(|&(open, _)| open == list.open)
+                    || insert
+                        .on_conflict
+                        .is_some_and(|conflict| conflict.target_open == Some(list.open)))
         });
         let compact_statement_width = insert.base_depth * INDENT_WIDTH
             + compact_width(tokens, insert.start, insert.end, options);
         let width_driven = compact_statement_width > options.soft_line_width;
-        let expanded = authored || has_expanded_list || width_driven;
+        let has_update = insert.on_conflict.is_some_and(|conflict| conflict.update);
+        let expanded = authored || has_expanded_list || width_driven || has_update;
         if !expanded {
             continue;
         }
@@ -513,6 +579,35 @@ fn plan_insert_statements(
             for &(open, close) in &insert.rows {
                 plan.set_indent(open..close + 1, insert.base_depth + 1);
                 plan.break_before(open, 1, insert.base_depth + 1);
+            }
+        }
+
+        if let Some(conflict) = insert.on_conflict {
+            plan.break_before(conflict.start, 1, insert.base_depth);
+            if conflict.update {
+                plan.break_before(conflict.action, 1, insert.base_depth);
+                if let Some(set) = conflict.set {
+                    plan.break_before(set, 1, insert.base_depth);
+                    let set_end = conflict
+                        .action_where
+                        .or(insert.returning)
+                        .unwrap_or(insert.end);
+                    plan_keyword_list(
+                        tokens,
+                        depths,
+                        cases,
+                        lists,
+                        set,
+                        set_end,
+                        insert.base_depth,
+                        true,
+                        options,
+                        plan,
+                    );
+                }
+                if let Some(action_where) = conflict.action_where {
+                    plan.break_before(action_where, 1, insert.base_depth);
+                }
             }
         }
 
@@ -578,7 +673,7 @@ fn plan_keyword_list(
         base_depth * INDENT_WIDTH + compact_width(tokens, keyword, list_end, options);
     let expanded = authored
         || has_complex
-        || (force_expand && items.len() > 1)
+        || (force_expand && (tokens[keyword].kind == Token::Set || items.len() > 1))
         || compact_line_width > options.soft_line_width;
     if !expanded {
         return;
@@ -747,21 +842,25 @@ fn split_list_items(
         if tokens[index].kind != Token::Ascii44 || depths[index] != base_depth {
             continue;
         }
+        let item_end = tokens
+            .get(index + 1)
+            .filter(|next| next.is_comment() && next.line_breaks_before == 0)
+            .map_or(index, |_| index + 2);
         result.push(ListItem {
             start: item_start,
-            end: index,
+            end: item_end,
             comma: Some(index),
             complex: item_is_complex(
                 tokens,
                 cases,
                 parenthesized_lists,
                 item_start,
-                index,
+                item_end,
                 base_depth,
                 depths,
             ),
         });
-        item_start = index + 1;
+        item_start = item_end.max(index + 1);
     }
     if item_start < end {
         result.push(ListItem {
@@ -920,7 +1019,11 @@ fn split_groups_at_width(
 
         for index in group_start..group_end {
             let item_width = compact_width(tokens, items[index].start, items[index].end, options)
-                + usize::from(items[index].comma.is_some());
+                + usize::from(
+                    items[index]
+                        .comma
+                        .is_some_and(|comma| comma >= items[index].end),
+                );
             let separator = usize::from(index > line_start);
             if index > line_start
                 && (items[index].complex
@@ -1015,7 +1118,11 @@ fn boolean_ranges(
                             || is_join_start(tokens, candidate)
                             || matches!(
                                 tokens[candidate].kind,
-                                Token::Ascii59 | Token::Union | Token::Intersect | Token::Except
+                                Token::Ascii59
+                                    | Token::Do
+                                    | Token::Union
+                                    | Token::Intersect
+                                    | Token::Except
                             )))
             })
             .unwrap_or(tokens.len());
@@ -1320,6 +1427,9 @@ pub(super) fn render_token(
             NotEqualPolicy::PreferBang => "!=".into(),
         };
     }
+    if is_on_conflict_excluded(tokens, index) {
+        return token.text.to_uppercase();
+    }
     if token.kind == Token::Interval {
         return if next.is_some_and(|next| is_string_literal(next.kind)) {
             token.text.to_uppercase()
@@ -1429,6 +1539,54 @@ pub(super) fn is_uppercase_builtin(name: &str) -> bool {
     )
 }
 
+fn is_on_conflict_excluded(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if tokens[index].kind != Token::Ident
+        || !tokens[index].text.eq_ignore_ascii_case("excluded")
+        || tokens
+            .get(index + 1)
+            .is_none_or(|next| next.kind != Token::Ascii46)
+    {
+        return false;
+    }
+
+    let statement_start = tokens[..index]
+        .iter()
+        .rposition(|token| token.kind == Token::Ascii59)
+        .map_or(0, |semicolon| semicolon + 1);
+    let statement = &tokens[statement_start..index];
+    let Some(conflict) = statement
+        .iter()
+        .rposition(|token| token.kind == Token::Conflict)
+    else {
+        return false;
+    };
+    let Some(action) = statement[conflict + 1..]
+        .iter()
+        .position(|token| token.kind == Token::Do)
+        .map(|offset| conflict + 1 + offset)
+    else {
+        return false;
+    };
+    let Some(update) = statement[action + 1..]
+        .iter()
+        .position(|token| token.kind == Token::Update)
+        .map(|offset| action + 1 + offset)
+    else {
+        return false;
+    };
+    let Some(set) = statement[update + 1..]
+        .iter()
+        .position(|token| token.kind == Token::Set)
+        .map(|offset| update + 1 + offset)
+    else {
+        return false;
+    };
+
+    !statement[set + 1..]
+        .iter()
+        .any(|token| token.kind == Token::Returning)
+}
+
 fn is_string_literal(kind: Token) -> bool {
     matches!(kind, Token::Sconst | Token::Usconst)
 }
@@ -1442,6 +1600,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::By
             | Token::Case
             | Token::Coalesce
+            | Token::Conflict
             | Token::Cross
             | Token::CurrentDate
             | Token::CurrentRole
@@ -1451,6 +1610,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::CurrentUser
             | Token::DayP
             | Token::Distinct
+            | Token::Do
             | Token::Else
             | Token::EndP
             | Token::Except
@@ -1472,6 +1632,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::MinuteP
             | Token::MonthP
             | Token::Natural
+            | Token::Nothing
             | Token::Not
             | Token::NullP
             | Token::Nullif
@@ -1485,10 +1646,12 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Right
             | Token::SecondP
             | Token::Select
+            | Token::Set
             | Token::SessionUser
             | Token::Then
             | Token::TrueP
             | Token::Union
+            | Token::Update
             | Token::Values
             | Token::When
             | Token::Where

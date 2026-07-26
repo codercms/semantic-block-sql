@@ -55,7 +55,6 @@ fn long_ungrouped_insert_lists_expand_one_item_per_line() {
 fn unsupported_insert_variants_remain_unchanged() {
     for source in [
         "INSERT INTO public.items (id) SELECT id FROM staging.items;",
-        "INSERT INTO public.items (id) VALUES (1) ON CONFLICT (id) DO NOTHING;",
         "WITH source AS (SELECT 1 AS id) INSERT INTO public.items (id) VALUES (1);",
         "INSERT INTO public.items (id) OVERRIDING SYSTEM VALUE VALUES (1);",
         "INSERT INTO public.items DEFAULT VALUES;",

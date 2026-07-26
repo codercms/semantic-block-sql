@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use pg_query::NodeRef;
 use pg_query::protobuf::node::Node as NodeEnum;
-use pg_query::protobuf::{InsertStmt, OverridingKind, RawStmt, SelectStmt, SetOperation, Token};
+use pg_query::protobuf::{
+    InsertStmt, OnConflictAction, OverridingKind, RawStmt, SelectStmt, SetOperation, Token,
+};
 use serde_json::Value;
 
 use super::FormatDiagnostic;
@@ -69,8 +71,8 @@ fn validate_insert(
     if insert.with_clause.is_some() {
         return Err("INSERT WITH clause");
     }
-    if insert.on_conflict_clause.is_some() {
-        return Err("INSERT ON CONFLICT clause");
+    if let Some(conflict) = &insert.on_conflict_clause {
+        validate_on_conflict(conflict)?;
     }
     if matches!(
         OverridingKind::try_from(insert.r#override).unwrap_or(OverridingKind::Undefined),
@@ -108,6 +110,33 @@ fn validate_insert(
     supported
         .insert_values
         .insert(select.as_ref() as *const SelectStmt as usize);
+    Ok(())
+}
+
+fn validate_on_conflict(
+    conflict: &pg_query::protobuf::OnConflictClause,
+) -> Result<(), &'static str> {
+    match OnConflictAction::try_from(conflict.action).unwrap_or(OnConflictAction::Undefined) {
+        OnConflictAction::OnconflictNothing => {
+            if !conflict.target_list.is_empty() || conflict.where_clause.is_some() {
+                return Err("invalid ON CONFLICT DO NOTHING action");
+            }
+        }
+        OnConflictAction::OnconflictUpdate => {
+            if conflict.target_list.is_empty() {
+                return Err("ON CONFLICT DO UPDATE without assignments");
+            }
+        }
+        OnConflictAction::Undefined | OnConflictAction::OnconflictNone => {
+            return Err("unknown ON CONFLICT action");
+        }
+    }
+
+    if let Some(infer) = &conflict.infer {
+        if infer.index_elems.is_empty() && infer.conname.is_empty() {
+            return Err("empty ON CONFLICT target");
+        }
+    }
     Ok(())
 }
 

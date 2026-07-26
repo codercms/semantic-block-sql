@@ -357,13 +357,17 @@ classifier is extended in the same batch that introduces each new statement
 planner; generic token normalization is never the fallback for unsupported
 syntax.
 
-The first Batch 3 extension admits only `INSERT ... VALUES ... RETURNING`.
-Column lists, individual VALUES rows, and RETURNING expressions share the
-source-aware list planner: short forms stay compact, authored row groups remain
+The first Batch 3 extensions admit `INSERT ... VALUES ... RETURNING` and
+fixture-backed `ON CONFLICT`. Column lists, individual VALUES rows, RETURNING
+expressions, conflict targets, and `DO UPDATE SET` assignments share the
+source-aware list planner: short forms stay compact, authored groups remain
 stable, width-driven ungrouped lists expand one item per line, and complex rows
-may expand independently. `INSERT ... SELECT`, `WITH`, `OVERRIDING`, `DEFAULT
-VALUES`, and `ON CONFLICT` remain explicitly unsupported until their own
-fixture-backed planners are implemented.
+may expand independently. `ON CONFLICT DO NOTHING` may remain compact; `DO
+UPDATE` separates the conflict target, action, `SET`, and action `WHERE`. A
+conflict-target predicate remains owned by `ON CONFLICT`, while the later
+predicate remains owned by the update action. `INSERT ... SELECT`, `WITH`,
+`OVERRIDING`, and `DEFAULT VALUES` remain explicitly unsupported until their
+own fixture-backed planners are implemented.
 
 See `docs/batch-1-backend-spike.md` for evidence and the dependency update policy.
 

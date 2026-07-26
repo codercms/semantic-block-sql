@@ -1,6 +1,6 @@
 # Durable implementation checklist
 
-Status: **Runnable CLI MVP complete; Batch 3 statement coverage not started**
+Status: **Runnable CLI MVP complete; Batch 3 statement coverage in progress**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
@@ -165,8 +165,8 @@ Batch 2 evidence:
 
 - [x] `INSERT` (`VALUES` subset; source queries remain unsupported).
 - [x] Simple and independently complex `VALUES` rows.
-- [ ] `ON CONFLICT` target predicate.
-- [ ] `ON CONFLICT DO UPDATE` action predicate.
+- [x] `ON CONFLICT` target predicate.
+- [x] `ON CONFLICT DO UPDATE` action predicate.
 - [ ] `UPDATE ... FROM`.
 - [ ] `DELETE ... USING`.
 - [x] `RETURNING` for fixture-backed `INSERT`.
@@ -383,6 +383,21 @@ INSERT / VALUES / RETURNING checkpoint evidence:
   unsupported UPDATE statement now that basic INSERT is supported.
 - The checkpoint passes formatting, Clippy with warnings denied, all 67 tests,
   documentation, and `git diff --check` in the packaged offline environment.
+
+ON CONFLICT checkpoint evidence:
+
+- PostgreSQL AST classification admits fixture-backed `DO NOTHING`, named or
+  inferred conflict targets, target predicates, and `DO UPDATE` assignments.
+- The planner distinguishes the conflict-target predicate from the later update
+  action `WHERE`, keeps `DO UPDATE`, `SET`, and action predicates in separate
+  ownership tiers, and preserves compact `DO NOTHING` when readable.
+- `EXCLUDED` is normalized only inside the owned `DO UPDATE` action; an ordinary identifier or target-table alias named `excluded` remains lowercase elsewhere.
+- Inline comma-adjacent comments remain attached to the preceding assignment;
+  later layout passes cannot move an authored inline comment to a standalone
+  line.
+- `tests/batch3_on_conflict.rs` covers compact and expanded forms, named
+  constraints, both predicate owners, exact comments, structural equivalence,
+  idempotence, clean formatted `check`, and `layout.on_conflict` diagnostics.
 
 Unsupported-syntax checkpoint evidence:
 
