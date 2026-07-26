@@ -321,7 +321,7 @@ Batch 5 MVP evidence:
 - [x] Introduce rule-level diagnostics and a shared `fmt` / `check` analysis.
 - [x] Return unchanged source plus diagnostics for parse, scan, and formatter
   safety failures.
-- [ ] Detect unsupported syntax explicitly and return `syntax.unsupported`.
+- [x] Detect unsupported syntax explicitly and return `syntax.unsupported`.
 - [x] Preserve final-newline presence.
 - [ ] Preserve every existing compliant alternative layout.
 - [ ] Add acceptance fixtures for every mandatory rule and statement family.
@@ -360,6 +360,20 @@ Mandatory-layout checkpoint evidence:
 - `tests/batch2_core_layout.rs` requires four-space nesting and mandatory authored
   list, blank-line, and comment boundaries.
 - `tests/cli_mvp.rs` proves the strict configuration rejection end to end.
+
+Unsupported-syntax checkpoint evidence:
+
+- PostgreSQL AST classification admits only fixture-backed statement and SELECT
+  shapes before the token planner runs.
+- Unsupported DML, DDL, `MERGE`, routines, unowned SELECT clauses, general set
+  operations, advanced aggregate/window forms, and lateral sources return the
+  original source with `syntax.unsupported`.
+- `tests/spec_v1_unsupported.rs` proves unchanged fail-safe results and preserves
+  the supported recursive CTE `UNION ALL` fixture.
+- `tests/cli_mvp.rs` proves an unsupported project file prevents every planned
+  write.
+- The checkpoint passes formatting, Clippy with warnings denied, all 60 tests,
+  documentation, and `git diff --check` in the packaged offline environment.
 
 ## Batch 6 — Performance and release polish
 

@@ -581,3 +581,25 @@ fn malformed_go_and_unmatched_sql_directives_never_rewrite() {
         );
     }
 }
+
+#[test]
+fn unsupported_statement_prevents_every_planned_project_write() {
+    let project = TempDir::new().expect("temp project");
+    let valid = "select id from public.items;\n";
+    let unsupported = "insert into public.items (id) values (1);\n";
+    write(project.path(), "a-valid.sql", valid);
+    write(project.path(), "z-unsupported.sql", unsupported);
+
+    let output = run(project.path(), &["fmt", "."], None);
+
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unsupported PostgreSQL syntax"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("a-valid.sql")).expect("read valid"),
+        valid
+    );
+    assert_eq!(
+        fs::read_to_string(project.path().join("z-unsupported.sql")).expect("read unsupported"),
+        unsupported
+    );
+}

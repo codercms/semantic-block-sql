@@ -163,16 +163,21 @@ pub(super) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diag
         FormatDiagnostic::PostgreSqlParse(_) | FormatDiagnostic::PostgreSqlScan(_) => {
             "syntax.parse_failure"
         }
+        FormatDiagnostic::UnsupportedSyntax { .. } => "syntax.unsupported",
         FormatDiagnostic::HardLineExceeded { .. } => "layout.hard_line_width",
         FormatDiagnostic::SemanticMismatch
         | FormatDiagnostic::ProtectedTokenChanged(_)
         | FormatDiagnostic::NotIdempotent => "format.safety_failure",
     };
+    let source_range = match error {
+        FormatDiagnostic::UnsupportedSyntax { start, end, .. } => SourceRange::new(*start, *end),
+        _ => SourceRange::new(0, source.len()),
+    };
     Diagnostic {
         rule_id: rule_id.into(),
         severity: Severity::Error,
         message: error.to_string(),
-        source_range: SourceRange::new(0, source.len()),
+        source_range,
         fix_available: false,
     }
 }

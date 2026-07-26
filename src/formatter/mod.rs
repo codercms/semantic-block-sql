@@ -181,6 +181,12 @@ pub enum FormatDiagnostic {
     PostgreSqlParse(String),
     #[error("PostgreSQL scan failed: {0}")]
     PostgreSqlScan(String),
+    #[error("unsupported PostgreSQL syntax: {feature}")]
+    UnsupportedSyntax {
+        feature: String,
+        start: usize,
+        end: usize,
+    },
     #[error("formatted SQL is not structurally equivalent to the input")]
     SemanticMismatch,
     #[error("protected token changed during formatting: {0}")]
@@ -200,13 +206,13 @@ pub enum FormatDiagnostic {
 /// Formats one or more complete PostgreSQL statements without touching files.
 pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql, FormatDiagnostic> {
     options.validate()?;
-    validation::parse_postgresql(source)?;
+    validation::parse_supported_postgresql(source)?;
 
     let output = match options.style {
         Style::SemanticBlock => semantic_block::format(source, options)?,
     };
 
-    validation::parse_postgresql(&output)?;
+    validation::parse_supported_postgresql(&output)?;
     validation::validate_equivalent(source, &output)?;
 
     let second_pass = match options.style {

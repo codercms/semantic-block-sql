@@ -44,8 +44,9 @@ policy, default `<>` preservation, and final-newline preservation are now
 implemented. Rule-level diagnostics, fail-safe formatting results, mandatory
 four-space
 indentation, and mandatory authored boundaries are also available. Complete
-alternative-layout preservation and explicit unsupported-syntax detection remain
-to be reconciled.
+alternative-layout preservation remains to be reconciled. Explicit support
+classification now prevents unimplemented syntax from falling through to generic
+token normalization.
 
 Earlier project requests also clarified these application-level points:
 
@@ -345,8 +346,18 @@ Semantic Block layout is the only project-specific formatting layer.
 
 The formatter validates canonical PostgreSQL parse-tree equality after removing
 only source-location fields. It separately compares protected token text and
-order, then requires a byte-identical second formatting pass. See
-`docs/batch-1-backend-spike.md` for evidence and the dependency update policy.
+order, then requires a byte-identical second formatting pass.
+
+Before layout, the same PostgreSQL AST is classified against the fixture-backed
+support boundary. Unsupported statement families, unowned SELECT clauses,
+general set operations, advanced aggregate/window forms, and lateral sources
+return `syntax.unsupported` over the original statement range. The recursive CTE
+`UNION ALL` shape remains supported because it has dedicated fixtures. This
+classifier is extended in the same batch that introduces each new statement
+planner; generic token normalization is never the fallback for unsupported
+syntax.
+
+See `docs/batch-1-backend-spike.md` for evidence and the dependency update policy.
 
 See `docs/upstream-baseline.md`.
 

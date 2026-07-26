@@ -8,10 +8,11 @@ files and complete PostgreSQL statements inside Go raw backtick strings,
 recursively walks projects, respects ignore files, and supports local/CI
 `fmt`, `check`, and `diff` workflows.
 
-The current formatter-core coverage is `SELECT`, authored result/function
-argument groups, booleans, compact/expanded `CASE`, joins, CTEs, and recursive
-CTEs. Broader DML, DDL, `MERGE`, and PL/pgSQL layout remain Batch 3 and are not
-claimed without fixtures.
+The current formatter-core coverage is fixture-backed `SELECT`, authored
+result/function argument groups, booleans, compact/expanded `CASE`, joins, CTEs,
+and recursive CTEs. Unimplemented statement families and unowned SELECT shapes
+return the original source with `syntax.unsupported`; broader DML, DDL, `MERGE`,
+and PL/pgSQL layout remain later batches.
 
 The formatter uses the existing `pg_query` crate for the real PostgreSQL
 parser, scanner, token ranges, comments, and AST. Project code implements the
