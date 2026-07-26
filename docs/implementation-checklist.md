@@ -302,6 +302,28 @@ Batch 5 MVP evidence:
 - Interpreted strings remain explicitly disabled and produce a diagnostic when
   targeted by an explicit SQL marker.
 
+## Core specification v1 reconciliation
+
+### Durable inputs and precedence
+
+- [x] Preserve the 2026-07-26 core specification and latest skill ZIP with
+  SHA-256 provenance.
+- [x] Install the latest skill content as monotonic repository version `2.0.0`.
+- [x] Make the core specification authoritative for machine `fmt` / `check`.
+- [x] Record conflicts with the pre-spec implementation in the formatter design.
+
+### Required implementation work
+
+- [ ] Replace optional indentation/group-preservation switches with mandatory
+  four-space and authored-boundary behavior.
+- [ ] Add semicolon and not-equal policies with specification defaults.
+- [ ] Implement the exact casing whitelist and contextual `INTERVAL`.
+- [ ] Introduce rule-level diagnostics and a shared `fmt` / `check` analysis.
+- [ ] Return unchanged source plus diagnostics for parse/unsupported failures.
+- [ ] Preserve existing compliant layouts and final-newline presence.
+- [ ] Add acceptance fixtures for every mandatory rule and statement family.
+- [ ] Complete the reconciliation self-review and checkpoint.
+
 ## Batch 6 — Performance and release polish
 
 - [ ] Establish correctness-preserving benchmarks.

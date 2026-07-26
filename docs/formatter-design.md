@@ -2,7 +2,7 @@
 
 Status: **Runnable CLI and raw-Go MVP complete**
 
-Last updated: **2026-07-25**
+Last updated: **2026-07-26**
 
 ## Purpose
 
@@ -16,8 +16,34 @@ business-semantic grouping engine.
 
 ## Requirement precedence
 
-The initial technical handoff remains the detailed source of truth. The current
-project request clarifies or overrides it in these places:
+`docs/semantic-block-sql-fmt-check-core-spec.md` is the authoritative contract
+for formatter and style-checker behavior. The older handoff and style guide are
+historical design inputs where they do not conflict with that specification.
+The repository agent skill guides human/agent formatting but does not define a
+second machine contract.
+
+The current core specification supersedes earlier project decisions in these
+places:
+
+- terminal semicolons are controlled by `preserve` (default), `require`, or
+  `omit`;
+- `<>` is preserved by default and may become `!=` only under
+  `not_equal_policy = prefer_bang`;
+- the exact uppercase built-in whitelist includes `COUNT`, `SUM`, `AVG`,
+  `MIN`, `MAX`, `COALESCE`, `NULLIF`, `GREATEST`, `LEAST`, `NOW`, and
+  `EXTRACT`; all other unquoted functions remain lowercase;
+- four-space indentation, authored-group preservation, and blank-line/comment
+  boundaries are mandatory core behavior rather than optional style switches;
+- `check` must return rule-level diagnostics with ranges and fix metadata;
+- parse or unsupported-format failures return the original source unchanged
+  with diagnostics instead of partial output.
+
+The runnable CLI and raw-Go MVP predate this contract and are being reconciled
+batch by batch. In particular, the current formatter still has known
+non-conformities for casing, `<>`, semicolon policy, optional layout switches,
+and diagnostic granularity.
+
+Earlier project requests also clarified these application-level points:
 
 - Go interpreted strings are **disabled for MVP**. Raw backtick strings come
   first; interpreted strings require a separately proven
@@ -32,10 +58,6 @@ project request clarifies or overrides it in these places:
   interpreted_strings = false
   ```
 
-- Function names and type names are lowercase. Parser-recognized SQL constructs
-  such as `COALESCE`, `NULLIF`, `FILTER`, `OVER`, and `ARRAY` remain uppercase
-  as keyword-like constructs; ordinary calls such as `count`, `now`, and
-  `jsonb_build_object` are lowercase.
 - The original ZIP is retained as immutable provenance. The unpacked
   `.agent-skills/postgresql-sql-format/` directory is the active canonical
   skill.
@@ -51,7 +73,7 @@ Formatting may change:
 - whitespace and indentation;
 - line breaks;
 - SQL keyword and special-value casing;
-- PostgreSQL lexical preference `<>` to `!=`;
+- PostgreSQL `<>` to `!=` only under the configured `prefer_bang` policy;
 - comment position only when attachment to the same syntax node is preserved.
 
 Formatting must not:

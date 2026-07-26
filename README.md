@@ -19,6 +19,7 @@ Semantic Block layout policy, not another SQL parser.
 
 ## Project documents
 
+- [Core `fmt` / `check` specification](docs/semantic-block-sql-fmt-check-core-spec.md)
 - [Formatter design](docs/formatter-design.md)
 - [Implementation checklist](docs/implementation-checklist.md)
 - [Upstream baseline](docs/upstream-baseline.md)

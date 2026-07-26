@@ -1,78 +1,113 @@
 ---
 name: postgresql-sql-format
-description: Use this skill to format or reformat PostgreSQL SQL and PL/pgSQL for readability and consistent structure without changing behavior. Apply to queries, CTEs, DML, DDL, MERGE, ON CONFLICT, window functions, set operations, migrations, and procedural blocks. Do not use it as a query optimizer or semantic rewriter unless the user separately requests review.
-compatibility: PostgreSQL syntax. Instruction-only; no external tools required. Compatible with Agent Skills clients including Codex and Claude Code.
+description: Format PostgreSQL SQL and PL/pgSQL using the Semantic Block SQL style. Preserve semantics, order, literals, comments, aliases, and surrounding host-language or template code. Use for queries, migrations, DML, DDL, CTEs, MERGE, ON CONFLICT, functions, procedures, and embedded SQL. Do not optimize, fix, or redesign SQL unless separately requested.
+compatibility: PostgreSQL; instruction-only Agent Skill for Claude Code and Codex.
 metadata:
-  version: "1.1.0"
+  version: "2.0.0"
   dialect: "postgresql"
+  style: "semantic-block"
 ---
 
-# PostgreSQL SQL formatting
+# Contract
 
-Format PostgreSQL according to its syntax tree and logical structure. Optimize for human readability while preserving behavior.
+Format only. Do not change SQL behavior.
 
-## Workflow
+For plain SQL, return formatted SQL only. For embedded or templated SQL, preserve all surrounding non-SQL code. Add explanation, review findings, or a diff only when requested.
 
-1. Confirm the input is PostgreSQL SQL or PL/pgSQL. If the dialect is materially ambiguous, preserve unfamiliar syntax rather than rewriting it.
-2. Identify the statement hierarchy, nested queries, clause arguments, boolean groups, and logical sections before changing whitespace.
-3. Apply the core rules below.
-4. For non-trivial statements, consult [references/STYLE.md](references/STYLE.md).
-5. For unfamiliar statement shapes or formatting ambiguity, consult [references/EXAMPLES.md](references/EXAMPLES.md).
-6. Perform the safety and consistency checks in [references/CHECKLIST.md](references/CHECKLIST.md).
-7. Return formatted SQL only unless the user asks for explanation, review findings, or a diff.
+If syntax is unfamiliar or the PostgreSQL dialect is uncertain, preserve it rather than guessing.
 
-## Core rules
+## Rule precedence
 
-### Casing
+When rules conflict:
 
-- Uppercase SQL keywords, keyword-like SQL constructs, and special values: `NULL`, `TRUE`, `FALSE`.
-- Use lowercase function names and type names.
-- Preserve quoted identifiers, string literals, comments, and dollar-quoted contents exactly.
-- Preserve unquoted identifier spelling unless the user explicitly asks to normalize it.
-- In PostgreSQL mode, prefer `!=` over `<>`; normalization from `<>` to `!=` is allowed.
+1. Preserve semantics, literals, identifiers, order, and comments.
+2. Keep comments attached to the same syntax.
+3. Expose nesting and mixed `AND` / `OR`.
+4. Preserve authored logical groups.
+5. Break safely before 160 characters.
+6. Treat 120 characters as permission, not an obligation, to wrap.
+7. Keep simple constructs compact.
+8. Apply optional alignment last.
 
-### Indentation and spacing
+## Mandatory casing
 
-- Use four spaces for every syntactic nesting level. Never use tabs.
-- Use one space after commas and around binary operators.
-- Do not add spaces around `::` casts or between a function name and `(`.
-- Use a space before parentheses introduced by SQL operators or clauses, such as `IN (...)`, `ANY (...)`, `FILTER (...)`, and `OVER (...)`.
+Uppercase:
+
+- SQL keywords and grammar constructs;
+- `NULL`, `TRUE`, `FALSE`;
+- `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`;
+- `COALESCE`, `NULLIF`, `GREATEST`, `LEAST`;
+- `NOW`, `EXTRACT`;
+- `CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`;
+- `CURRENT_USER`, `CURRENT_ROLE`, `CURRENT_SCHEMA`, `SESSION_USER`;
+- `LOCALTIME`, `LOCALTIMESTAMP`;
+- `INTERVAL` only as a literal introducer: `INTERVAL '5 minutes'`.
+
+Lowercase:
+
+- every other unquoted function name;
+- type names, including `interval` as a type.
+
+Do not extend the uppercase whitelist. Preserve quoted names and literal contents exactly.
+
+## Mandatory spacing
+
+- Indent with four spaces; never tabs.
+- Put one space around binary operators.
+- Keep unary operators attached: `-1`.
+- Put one space after an inline comma.
+- Write casts as `value::type`.
+- Write function calls as `name(...)`.
+- Put a space before parentheses opened by SQL grammar: `IN (...)`, `ANY (...)`, `ALL (...)`, `EXISTS (...)`, `FILTER (...)`, `OVER (...)`, `WITHIN GROUP (...)`.
+- Use trailing commas, never leading commas.
 - Remove trailing whitespace.
-- Put the semicolon at the end of the final clause, never on a separate line.
+- Preserve the context's terminal-semicolon policy; standalone SQL normally ends with `;`, embedded query strings may omit it.
 
-### Compact or expanded layout
+## Layout
 
-Use 120 columns as the preferred width. A cohesive expression may exceed it when splitting would reduce readability.
+Keep a construct inline only when it is short, simple, and immediately readable.
 
-Keep a construct inline when it is short, simple, and immediately understandable:
+Expand it when it:
 
-```sql
-SELECT id, kp_id, imdb_id
-FROM public.items
-WHERE deleted_at IS NULL AND status = 'active'
-ORDER BY created_at DESC, id;
-```
-
-Expand a construct when any of the following apply:
-
-- it has many arguments;
-- it exceeds the preferred width;
-- it contains nested SQL;
-- it mixes `AND` and `OR`;
-- it contains complex parentheses;
-- one argument is independently complex;
-- its arguments belong to different logical groups;
-- compact formatting obscures structure.
+- contains nested SQL;
+- mixes `AND` and `OR`;
+- has complex parentheses;
+- contains an independently complex argument;
+- exceeds 160 characters at a safe break point;
+- becomes clearer after 120 characters;
+- already contains authored groups or blank-line boundaries.
 
 When expanded:
 
-- keep the complete clause introducer on its owner line when possible, such as `JOIN ... ON` or `WHEN ... THEN UPDATE SET`;
-- indent the clause contents one level below that owner line;
-- do not create an extra indentation level for a line containing only `ON`, `THEN`, or another structural connector;
-- use one syntactic argument or one logical argument group per line;
-- put `AND` and `OR` at the beginning of continuation lines;
-- preserve parentheses that expose boolean precedence;
-- use trailing commas, never leading commas.
+- indent contents one level below their owner;
+- put `AND` and `OR` at the start of continuation lines;
+- do not create lines containing only connector keywords such as `ON` or `THEN`;
+- keep `JOIN ... ON` and `WHEN ... THEN UPDATE SET` on their owner lines;
+- preserve precedence-significant parentheses.
+
+## Lists and authored groups
+
+For `SELECT`, `RETURNING`, `SET`, `VALUES`, `ORDER BY`, `GROUP BY`, function arguments, CTEs, and DDL action lists:
+
+- preserve existing line groups while they fit within 160 characters;
+- treat blank lines and comments as hard group boundaries;
+- never merge across a blank line or comment;
+- do not split an authored group only because it crosses 120;
+- split safely if it crosses 160;
+- if a long one-line list must expand and has no authored groups, place one item per line;
+- never invent business-semantic groups.
+
+Several layouts may be valid. Do not replace one valid authored grouping with another solely by preference.
+
+## Comments
+
+- Preserve comment text and syntax.
+- A standalone comment belongs to the following syntax element.
+- An inline comment belongs to the current expression.
+- Do not move comments across expressions or groups.
+- A comment may exceed 160 characters when moving it would change attachment.
+
+## Boolean expressions and connectors
 
 ```sql
 WHERE
@@ -83,186 +118,75 @@ WHERE
     )
 ```
 
-### Logical groups and blank lines
-
-Use blank lines to separate logical units, including:
-
-- unrelated groups of selected expressions;
-- unrelated join groups;
-- set-operation branches;
-- `MERGE` branches;
-- recursive CTE anchor and recursive terms;
-- DDL columns and table constraints;
-- distinct `ALTER TABLE` action groups;
-- procedural sections whose separation improves scanning.
-
-Do not insert blank lines mechanically between every clause or expression.
-
-### Clause arguments
-
-Apply the same inline-or-expand decision to every argument-bearing construct:
-
-- `SELECT`, `RETURNING`: result expressions or logical column groups;
-- `WHERE`, `HAVING`, `ON`: predicates or parenthesized predicate groups;
-- `ORDER BY`, `GROUP BY`, `PARTITION BY`: expressions;
-- `SET`: assignments;
-- `VALUES`: rows, then values inside each row;
-- function calls: arguments or logical groups such as JSON key/value pairs;
-- `WITH`: CTE definitions;
-- `WINDOW`: named window definitions;
-- `ALTER TABLE`: alteration actions;
-- `MERGE`: `WHEN` branches and nested actions;
-- `CREATE TABLE`: columns and constraints.
-
-Related short arguments may share a line when the group remains easy to scan.
-
-### Boolean expressions
-
-Keep a short cohesive predicate group inline:
-
 ```sql
-WHERE source.batch_id = $1::uuid AND source.validation_error IS NULL
+LEFT JOIN source_links link ON
+    link.item_id = item.id
+    AND link.status = 'approved'
 ```
 
-Expand mixed or nested boolean logic:
+Do not emit an `ON`-only indentation tier.
 
-```sql
-AND (
-    (entity_lock.entity_source = 'kp' AND entity_lock.entity_id = link.kp_id)
-    OR (entity_lock.entity_source = 'imdb' AND entity_lock.entity_id = link.imdb_id)
-)
-```
+## `CASE` and PL/pgSQL branches
 
-Expand the inner groups further only when they become independently long or complex.
-
-### `CASE`
-
-Prefer compact branches inside a multiline `CASE`:
+`CASE` is an expression; short results stay after `THEN`:
 
 ```sql
 CASE
     WHEN item.id IS NULL THEN 0
-    WHEN item.deleted_at IS NOT NULL THEN -1
-    ELSE first_expression + second_expression
+    ELSE 1
 END
 ```
 
-A short complete `CASE` may remain inline:
+PL/pgSQL branches contain statements:
 
 ```sql
-status = CASE WHEN source.approved THEN 'approved' ELSE 'rejected' END
+IF item.deleted_at IS NOT NULL THEN
+    RETURN;
+END IF;
 ```
-
-Expand a branch only when its condition or result is independently complex.
-
-### Aliases
-
-- Use `AS` for result-column aliases.
-- Omit `AS` for table and subquery aliases.
 
 ```sql
-SELECT count(*) AS sessions
-FROM public.items item
-JOIN (...) source ON source.item_id = item.id;
+EXCEPTION
+    WHEN foreign_key_violation THEN
+        RAISE NOTICE 'Item does not exist';
+
+    WHEN unique_violation THEN
+        RAISE NOTICE 'Item already exists';
+END;
 ```
 
-### Alignment
+Align `EXCEPTION` with `BEGIN`. Indent each `WHEN` one level and its statements one additional level. Separate multiple handlers with a blank line.
 
-Visual alignment of `AS`, `=`, types, or constraints is optional human-oriented polish, not a correctness rule.
+## Statement summary
 
-Preserve sensible existing alignment or add it only within a short homogeneous block when it clearly improves readability. Do not align when it creates large whitespace gaps, exceeds the preferred width, crosses logical groups, or makes diffs noisy.
+- CTEs: start each CTE on a new line after the previous `),`.
+- Set operations: put blank lines around `UNION`, `INTERSECT`, and `EXCEPT`; preserve parentheses and precedence.
+- `VALUES`: expand only complex rows; rows may use different layouts.
+- `ON CONFLICT`: keep the target predicate attached to `ON CONFLICT`; separate `DO UPDATE` and its action `WHERE`.
+- `UPDATE`: when `SET` expands, use one assignment per line.
+- `DELETE`: apply the general compact-or-expanded rules.
+- `MERGE`: separate `WHEN` branches with blank lines; keep actions on the `WHEN ... THEN` line.
+- DDL: keep simple indexes compact; separate table columns from constraints; group `ALTER TABLE` actions with blank lines.
+- Functions and procedures: separate signature, `RETURNS`, attributes, and body introducer. Indent `BEGIN ATOMIC` contents one level.
+- Dollar-quoted PL/pgSQL: `DECLARE`, `BEGIN`, `EXCEPTION`, and `END` are at the body root, without an extra indent caused by `AS $$`.
+- Embedded SQL: keep SQL-relative indentation independent from the host-language block; leading and trailing newlines are allowed.
+- Templated SQL: format SQL regions without moving or rewriting template syntax.
 
-### `ON CONFLICT`
-
-Prefer:
-
-```sql
-ON CONFLICT (version) DO UPDATE
-SET
-    config = EXCLUDED.config,
-    is_active = EXCLUDED.is_active,
-    updated_at = now()
-```
-
-For a partial conflict target:
-
-```sql
-ON CONFLICT (kp_id) WHERE kp_id IS NOT NULL
-DO UPDATE
-SET
-    ...
-```
-
-If the target predicate is complex, expand and indent it beneath `ON CONFLICT`. A later top-level `WHERE` belongs to the update action.
-
-### `MERGE`
-
-Place each `WHEN` at statement scope and use blank lines between branches. Keep the action introducer on the `WHEN ... THEN` line to avoid a redundant indentation level:
-
-```sql
-WHEN MATCHED AND condition THEN UPDATE SET
-    value = source.value
-
-WHEN NOT MATCHED THEN INSERT (id, value)
-    VALUES (source.id, source.value)
-```
-
-A branch without nested arguments stays fully inline:
-
-```sql
-WHEN MATCHED AND source.deleted_at IS NOT NULL THEN DELETE
-```
-
-### Set operations
-
-Put blank lines around `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT`. Preserve branch order and precedence exactly.
-
-### DDL
-
-- Keep simple DDL on one line when it fits comfortably.
-- In `CREATE TABLE`, put one column or constraint per line and separate columns from table constraints with a blank line.
-- In `ALTER TABLE`, indent each action and use blank lines between logical action groups.
-- A simple index may stay on one line:
-
-```sql
-CREATE INDEX users_reg_date_idx ON users (reg_date);
-CREATE INDEX users_reg_date_idx ON users (reg_date) WHERE (deleted_at IS NULL);
-```
-
-Expand an index only when its expressions, `INCLUDE`, predicate, options, or width benefit from it.
-
-### PL/pgSQL
-
-Format known PL/pgSQL structurally:
-
-```sql
-DO $$
-    DECLARE
-        value bigint;
-    BEGIN
-        ...
-    END
-$$;
-```
-
-Apply the ordinary SQL rules to SQL statements inside procedural blocks. Do not reinterpret arbitrary dollar-quoted strings whose language is unknown.
+For exact statement layouts, read [references/STYLE.md](references/STYLE.md). For compact examples, read [references/EXAMPLES.md](references/EXAMPLES.md).
 
 ## Semantic safety
 
-Formatting must not perform semantic rewriting, except for the explicitly allowed PostgreSQL lexical normalization from `<>` to `!=`.
+Never:
 
-Do not:
-
-- add or remove casts;
-- reorder expressions, predicates, joins, CTEs, assignments, or set-operation branches;
+- add or remove casts, columns, predicates, joins, CTEs, assignments, or branches;
+- reorder any semantic element;
 - change join types or query structure;
 - rename or invent aliases;
-- add or remove selected columns;
-- optimize correlated subqueries or replace them with joins;
-- change operators other than `<>` to `!=`;
-- change literal contents;
+- change literals or quoted identifiers;
 - remove potentially meaningful parentheses;
-- change comments or attach them to a different syntax node;
-- apply query-performance recommendations unless the user asks for review.
+- optimize or repair SQL;
+- move a comment to another syntax element.
 
-If the SQL appears semantically suspicious, format it as written and report the concern separately only when review commentary is requested.
+Prefer `!=` in new or already edited code, but do not rewrite `<>` solely for formatting.
+
+Before returning, apply [references/CHECKLIST.md](references/CHECKLIST.md).
