@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::config::GoConfig;
 use crate::directives::{DirectiveError, format_sql_document};
 use crate::host::go::{GoError, format_go_source};
-use crate::{FormatOptions, FormatWarning};
+use crate::{Diagnostic, FormatOptions, FormatWarning};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Language {
@@ -21,6 +21,7 @@ pub struct FormattedSource {
     pub output: String,
     pub changed: bool,
     pub warnings: Vec<FormatWarning>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Debug, Error)]
@@ -63,6 +64,7 @@ pub fn format_source(
         changed: first.output != source,
         output: first.output,
         warnings: first.warnings,
+        diagnostics: first.diagnostics,
     })
 }
 
@@ -77,11 +79,14 @@ fn format_source_once(
         Language::Sql => {
             let (normalized, newline) = normalize_newlines(source);
             let formatted = format_sql_document(&normalized, options)?;
+            let diagnostics =
+                restore_diagnostic_ranges(formatted.diagnostics, &normalized, newline);
             let output = restore_newlines(formatted.output, newline);
             Ok(FormattedSource {
                 changed: output != source,
                 output,
                 warnings: formatted.warnings,
+                diagnostics,
             })
         }
         Language::Go if !go.enabled => Err(SourceError::GoDisabled),
@@ -91,6 +96,7 @@ fn format_source_once(
                 changed: formatted.output != source,
                 output: formatted.output,
                 warnings: formatted.warnings,
+                diagnostics: formatted.diagnostics,
             })
         }
     }
@@ -116,4 +122,30 @@ fn restore_newlines(source: String, newline: Newline) -> String {
         Newline::Lf => source,
         Newline::CrLf => source.replace('\n', "\r\n"),
     }
+}
+
+fn restore_diagnostic_ranges(
+    diagnostics: Vec<Diagnostic>,
+    normalized: &str,
+    newline: Newline,
+) -> Vec<Diagnostic> {
+    match newline {
+        Newline::Lf => diagnostics,
+        Newline::CrLf => diagnostics
+            .into_iter()
+            .map(|diagnostic| {
+                let start = original_crlf_offset(normalized, diagnostic.source_range.start);
+                let end = original_crlf_offset(normalized, diagnostic.source_range.end);
+                diagnostic.with_source_range(crate::SourceRange::new(start, end))
+            })
+            .collect(),
+    }
+}
+
+fn original_crlf_offset(normalized: &str, offset: usize) -> usize {
+    offset
+        + normalized[..offset]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
 }

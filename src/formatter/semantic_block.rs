@@ -362,12 +362,17 @@ fn parenthesized_lists(
             || (open + 1..close)
                 .any(|index| tokens[index].kind == Token::Select && depths[index] > depths[open]);
         let compact = compact_width(tokens, open.saturating_sub(1), close + 1, options);
+        let has_top_level_comma = (open + 1..close)
+            .any(|index| tokens[index].kind == Token::Ascii44 && depths[index] == inner_depth);
+        let unavoidable_single_argument = !has_top_level_comma
+            && range_is_unavoidably_over_hard(tokens, open + 1, close, depths[open] + 1, options);
         lists.push(ParenthesizedList {
             open,
             close,
             expanded: authored
                 || contains_complex
-                || depths[open] * options.indent_width + compact > options.soft_line_width,
+                || (!unavoidable_single_argument
+                    && depths[open] * options.indent_width + compact > options.soft_line_width),
         });
     }
 
@@ -439,7 +444,17 @@ fn plan_select_lists(
         let has_complex = items.iter().any(|item| item.complex);
         let compact_line_width =
             base_depth * options.indent_width + compact_width(tokens, select, end, options);
-        let expanded = authored || has_complex || compact_line_width > options.soft_line_width;
+        let unavoidable_single_item = items.len() == 1
+            && range_is_unavoidably_over_hard(
+                tokens,
+                items[0].start,
+                items[0].end,
+                indent,
+                options,
+            );
+        let expanded = authored
+            || has_complex
+            || (!unavoidable_single_item && compact_line_width > options.soft_line_width);
         if !expanded {
             continue;
         }
@@ -977,6 +992,28 @@ fn plan_ctes(
     }
 }
 
+fn range_is_unavoidably_over_hard(
+    tokens: &[SqlToken<'_>],
+    start: usize,
+    end: usize,
+    indent: usize,
+    options: &FormatOptions,
+) -> bool {
+    let mut width = indent * options.indent_width;
+    let mut previous = None;
+    for index in start..end {
+        if needs_space(tokens, previous, index) {
+            width += 1;
+        }
+        width += render_token(tokens, index, options).chars().count();
+        if width > options.hard_line_width && is_indivisible(&tokens[index]) {
+            return true;
+        }
+        previous = Some(index);
+    }
+    false
+}
+
 fn compact_width(
     tokens: &[SqlToken<'_>],
     start: usize,
@@ -1051,7 +1088,11 @@ fn is_join_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
         .any(|next| next.kind == Token::Join)
 }
 
-fn render_token(tokens: &[SqlToken<'_>], index: usize, options: &FormatOptions) -> String {
+pub(super) fn render_token(
+    tokens: &[SqlToken<'_>],
+    index: usize,
+    options: &FormatOptions,
+) -> String {
     let token = &tokens[index];
     let previous = index.checked_sub(1).map(|previous| &tokens[previous]);
     let next = tokens.get(index + 1);
@@ -1094,11 +1135,11 @@ fn render_token(tokens: &[SqlToken<'_>], index: usize, options: &FormatOptions) 
     token.text.to_owned()
 }
 
-fn is_function_call_name(tokens: &[SqlToken<'_>], index: usize) -> bool {
+pub(super) fn is_function_call_name(tokens: &[SqlToken<'_>], index: usize) -> bool {
     !tokens[index].text.starts_with('"') && is_function_call_syntax(tokens, index)
 }
 
-fn is_function_call_syntax(tokens: &[SqlToken<'_>], index: usize) -> bool {
+pub(super) fn is_function_call_syntax(tokens: &[SqlToken<'_>], index: usize) -> bool {
     tokens
         .get(index + 1)
         .is_some_and(|next| next.kind == Token::Ascii40)
@@ -1140,21 +1181,21 @@ fn is_function_call_syntax(tokens: &[SqlToken<'_>], index: usize) -> bool {
         )
 }
 
-fn is_compact_grammar_parenthesis(tokens: &[SqlToken<'_>], index: usize) -> bool {
+pub(super) fn is_compact_grammar_parenthesis(tokens: &[SqlToken<'_>], index: usize) -> bool {
     tokens
         .get(index + 1)
         .is_some_and(|next| next.kind == Token::Ascii40)
         && matches!(tokens[index].kind, Token::Cast | Token::Treat)
 }
 
-fn is_type_modifier_syntax(tokens: &[SqlToken<'_>], index: usize) -> bool {
+pub(super) fn is_type_modifier_syntax(tokens: &[SqlToken<'_>], index: usize) -> bool {
     tokens
         .get(index + 1)
         .is_some_and(|next| next.kind == Token::Ascii40)
         && (tokens[index].kind == Token::Interval || is_type_keyword(tokens[index].kind))
 }
 
-fn is_uppercase_builtin(name: &str) -> bool {
+pub(super) fn is_uppercase_builtin(name: &str) -> bool {
     matches!(
         name.to_ascii_uppercase().as_str(),
         "COUNT"
@@ -1237,7 +1278,7 @@ fn is_keyword_like(kind: Token) -> bool {
     )
 }
 
-fn is_type_keyword(kind: Token) -> bool {
+pub(super) fn is_type_keyword(kind: Token) -> bool {
     matches!(
         kind,
         Token::Bigint

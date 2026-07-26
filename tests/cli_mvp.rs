@@ -48,7 +48,10 @@ fn check_reports_changes_without_writing() {
     let output = run(project.path(), &["check", "query.sql"], None);
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Would reformat: query.sql"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("query.sql:"), "{stderr}");
+    assert!(stderr.contains("error[casing.keyword]"), "{stderr}");
+    assert!(stderr.contains("error[spacing.comma]"), "{stderr}");
     assert_eq!(
         fs::read_to_string(project.path().join("query.sql")).expect("read query"),
         source

@@ -318,8 +318,10 @@ Batch 5 MVP evidence:
   four-space and authored-boundary behavior.
 - [x] Add semicolon and not-equal policies with specification defaults.
 - [x] Implement the exact casing whitelist and contextual `INTERVAL`.
-- [ ] Introduce rule-level diagnostics and a shared `fmt` / `check` analysis.
-- [ ] Return unchanged source plus diagnostics for parse/unsupported failures.
+- [x] Introduce rule-level diagnostics and a shared `fmt` / `check` analysis.
+- [x] Return unchanged source plus diagnostics for parse, scan, and formatter
+  safety failures.
+- [ ] Detect unsupported syntax explicitly and return `syntax.unsupported`.
 - [x] Preserve final-newline presence.
 - [ ] Preserve every existing compliant alternative layout.
 - [ ] Add acceptance fixtures for every mandatory rule and statement family.
@@ -334,6 +336,21 @@ Lexical-policy checkpoint evidence:
 - `tests/cli_mvp.rs` proves strict `[format]` configuration and end-to-end policy
   application through the CLI.
 - The checkpoint passes formatting, Clippy with warnings denied, all 47 tests,
+  documentation, and `git diff --check` in the packaged offline environment.
+
+Diagnostic-model checkpoint evidence:
+
+- `tests/spec_v1_diagnostics.rs` covers rule IDs, severities, source ranges,
+  fail-safe parse results, policy-specific diagnostics, clean formatted output,
+  tokenless whitespace, and allowed hard-width warnings.
+- `tests/source_diagnostics.rs` covers SQL directive range shifting, CRLF byte
+  offset restoration, and conservative Go raw-literal attribution.
+- `semblock check` renders shared core diagnostics instead of filename-only
+  `Would reformat` output, while `fmt` and `diff` surface warnings without
+  reporting errors they successfully fix.
+- A planner regression found during this batch now preserves a one-line construct
+  when an indivisible token would remain over-hard after expansion.
+- The checkpoint passes formatting, Clippy with warnings denied, all 56 tests,
   documentation, and `git diff --check` in the packaged offline environment.
 
 ## Batch 6 — Performance and release polish

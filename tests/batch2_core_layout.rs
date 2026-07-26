@@ -197,9 +197,10 @@ fn reports_indivisible_tokens_that_make_a_line_exceed_the_hard_width() {
     };
 
     let formatted = format_sql(source, &options).expect("indivisible token is allowed");
+    assert_eq!(formatted.output, source);
     assert_eq!(
         formatted.warnings,
-        vec![FormatWarning::IndivisibleTokenExceedsHardWidth { line: 2, width: 79 }]
+        vec![FormatWarning::IndivisibleTokenExceedsHardWidth { line: 1, width: 82 }]
     );
 }
 

@@ -1,11 +1,12 @@
 use thiserror::Error;
 
-use crate::{FormatDiagnostic, FormatOptions, FormatWarning, format_sql};
+use crate::{Diagnostic, FormatDiagnostic, FormatOptions, FormatWarning, format_sql};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentFormat {
     pub output: String,
     pub warnings: Vec<FormatWarning>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -46,6 +47,7 @@ pub fn format_sql_document(
         return Ok(DocumentFormat {
             output: source.into(),
             warnings: Vec::new(),
+            diagnostics: Vec::new(),
         });
     }
 
@@ -58,6 +60,7 @@ pub fn format_sql_document(
 
     let mut output = String::with_capacity(source.len());
     let mut warnings = Vec::new();
+    let mut diagnostics = Vec::new();
     let mut active_start = 0;
     let mut ignored_start = None;
     let mut off_line = None;
@@ -71,8 +74,10 @@ pub fn format_sql_document(
                 append_formatted(
                     &source[active_start..line.start],
                     options,
+                    active_start,
                     &mut output,
                     &mut warnings,
+                    &mut diagnostics,
                 )?;
                 output.push_str(&source[line.start..line.end]);
                 ignored_start = Some(line.end);
@@ -97,15 +102,28 @@ pub fn format_sql_document(
         });
     }
 
-    append_formatted(&source[active_start..], options, &mut output, &mut warnings)?;
-    Ok(DocumentFormat { output, warnings })
+    append_formatted(
+        &source[active_start..],
+        options,
+        active_start,
+        &mut output,
+        &mut warnings,
+        &mut diagnostics,
+    )?;
+    Ok(DocumentFormat {
+        output,
+        warnings,
+        diagnostics,
+    })
 }
 
 fn append_formatted(
     source: &str,
     options: &FormatOptions,
+    source_offset: usize,
     output: &mut String,
     warnings: &mut Vec<FormatWarning>,
+    diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), FormatDiagnostic> {
     if source.trim().is_empty() {
         output.push_str(source);
@@ -114,6 +132,12 @@ fn append_formatted(
     let formatted = format_sql(source, options)?;
     output.push_str(&formatted.output);
     warnings.extend(formatted.warnings);
+    diagnostics.extend(
+        formatted
+            .diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.shifted(source_offset)),
+    );
     Ok(())
 }
 

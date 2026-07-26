@@ -41,8 +41,9 @@ places:
 The runnable CLI and raw-Go MVP predate this contract and are being reconciled
 batch by batch. Exact built-in casing, contextual `INTERVAL`, terminal-semicolon
 policy, default `<>` preservation, and final-newline preservation are now
-implemented. Optional layout switches and diagnostic granularity remain to be
-reconciled.
+implemented. Rule-level diagnostics and fail-safe formatting results are also
+available. Optional layout switches, complete alternative-layout preservation,
+and explicit unsupported-syntax detection remain to be reconciled.
 
 Earlier project requests also clarified these application-level points:
 
@@ -195,9 +196,9 @@ FormatOptions {
 
 The core-policy defaults are `semicolon_policy = preserve`,
 `not_equal_policy = preserve`, and `syntax_diagnostics = parser_available`.
-The first two are applied by the token-preserving renderer; syntax diagnostics
-still use the existing parser error channel until the shared diagnostic result
-model is introduced.
+Formatting policies are applied by the token-preserving renderer, while parser,
+scanner, safety-gate, and hard-width failures are exposed through the shared
+diagnostic result model without returning partial output.
 
 ### Connectors do not own empty levels
 
@@ -256,10 +257,10 @@ src/
 ├── config.rs
 ├── discover.rs
 ├── directives.rs
-├── diagnostics.rs
 ├── diff.rs
 ├── rewrite.rs
 ├── formatter/
+│   ├── diagnostics.rs
 │   ├── mod.rs
 │   ├── semantic_block.rs
 │   └── validation.rs
@@ -280,18 +281,44 @@ directions may not:
 
 ## Formatter facade
 
-The canonical API should evolve around:
+The specification-facing APIs are fail-safe value results:
 
 ```rust
-format_sql(
+format_sql_result(
     source: &str,
     options: &FormatOptions,
-) -> Result<FormattedSql, FormatDiagnostic>
+) -> FormatResult
+
+check_sql(
+    source: &str,
+    options: &FormatOptions,
+) -> CheckResult
 ```
 
-`FormattedSql` should retain enough information for diagnostics and callers,
-for example changed/not-changed state and normalized output. It must not write
-files.
+`FormatResult` contains `output`, `changed`, and rule-level diagnostics. Parse,
+scan, equivalence, idempotence, and hard-width failures retain the original
+source and return a non-fixable diagnostic. `CheckResult` uses the same analysis
+and is compliant only when no formatting change or error diagnostic exists.
+
+The older strict `format_sql(...) -> Result<FormattedSql, FormatDiagnostic>`
+entry point remains for internal application layers that must abort a complete
+file or Go host rewrite. Its successful result now carries the same diagnostics
+plus the legacy width-warning field. It must not write files.
+
+Each diagnostic carries:
+
+```text
+rule_id
+severity
+message
+source_range   # UTF-8 byte range in the original source
+fix_available
+```
+
+SQL directive ranges are shifted to document offsets, CRLF normalization is
+mapped back to original byte offsets, and Go-host diagnostics are conservatively
+attributed to the complete owning raw literal until exact envelope mapping is
+implemented.
 
 The API must serve:
 
@@ -301,8 +328,9 @@ The API must serve:
 - tests;
 - future VS Code and IDEA adapters.
 
-Batch 2 keeps this facade pure and adds non-fatal width warnings to
-`FormattedSql`; it still performs no filesystem writes.
+The facade remains pure and performs no filesystem writes. The CLI renders
+successful style diagnostics as `path:start-end: severity[rule_id]: message`;
+`fmt` and `diff` suppress fixed style errors but still surface warnings.
 
 ## PostgreSQL backend strategy
 

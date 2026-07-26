@@ -1,3 +1,4 @@
+mod diagnostics;
 mod semantic_block;
 mod tokens;
 mod validation;
@@ -6,6 +7,70 @@ use serde::Deserialize;
 use thiserror::Error;
 
 pub use validation::validate_equivalent;
+
+/// Byte range in the original source. Offsets are UTF-8 byte offsets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl SourceRange {
+    pub const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    pub const fn shifted(self, offset: usize) -> Self {
+        Self {
+            start: self.start + offset,
+            end: self.end + offset,
+        }
+    }
+}
+
+/// Diagnostic severity independent from CLI exit-code policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Severity {
+    Error,
+    Warning,
+}
+
+/// One syntax, style, configuration, or safety diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Diagnostic {
+    pub rule_id: String,
+    pub severity: Severity,
+    pub message: String,
+    pub source_range: SourceRange,
+    pub fix_available: bool,
+}
+
+impl Diagnostic {
+    pub fn shifted(mut self, offset: usize) -> Self {
+        self.source_range = self.source_range.shifted(offset);
+        self
+    }
+
+    pub fn with_source_range(mut self, source_range: SourceRange) -> Self {
+        self.source_range = source_range;
+        self
+    }
+}
+
+/// Fail-safe formatting result. Failed formatting retains the original source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormatResult {
+    pub output: String,
+    pub diagnostics: Vec<Diagnostic>,
+    pub changed: bool,
+}
+
+/// Style-checking result for one complete SQL unit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckResult {
+    pub diagnostics: Vec<Diagnostic>,
+    pub compliant: bool,
+}
 
 /// Formatter style selected by callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -105,6 +170,7 @@ pub struct FormattedSql {
     pub output: String,
     pub changed: bool,
     pub warnings: Vec<FormatWarning>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 /// Non-fatal layout condition that callers may surface to users.
@@ -160,10 +226,45 @@ pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql,
     }
 
     let warnings = semantic_block::validate_hard_width(&output, options)?;
+    let mut result_diagnostics = diagnostics::style_diagnostics(source, &output, options)?;
+    result_diagnostics.extend(diagnostics::warning_diagnostics(source, &warnings));
 
     Ok(FormattedSql {
         changed: output != source,
         output,
         warnings,
+        diagnostics: result_diagnostics,
     })
+}
+
+/// Formats SQL without exposing an error-only partial-result path.
+///
+/// Any parse, scan, semantic-safety, idempotence, or hard-width failure returns
+/// the original source unchanged together with a diagnostic.
+pub fn format_sql_result(source: &str, options: &FormatOptions) -> FormatResult {
+    match format_sql(source, options) {
+        Ok(formatted) => FormatResult {
+            output: formatted.output,
+            diagnostics: formatted.diagnostics,
+            changed: formatted.changed,
+        },
+        Err(error) => FormatResult {
+            output: source.to_owned(),
+            diagnostics: vec![diagnostics::failure_diagnostic(source, &error)],
+            changed: false,
+        },
+    }
+}
+
+/// Checks mandatory formatting rules without modifying the source.
+pub fn check_sql(source: &str, options: &FormatOptions) -> CheckResult {
+    let formatted = format_sql_result(source, options);
+    let has_error = formatted
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == Severity::Error);
+    CheckResult {
+        compliant: !formatted.changed && !has_error,
+        diagnostics: formatted.diagnostics,
+    }
 }

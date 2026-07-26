@@ -57,6 +57,13 @@ semblock fmt --stdin --filename query.sql
 semblock fmt --language go ./internal/...
 ```
 
+`check` emits stable rule IDs with UTF-8 byte ranges:
+
+```text
+query.sql:0-6: error[casing.keyword]: SQL keyword or grammar construct must be `SELECT` instead of `select`
+query.sql:10-10: error[spacing.comma]: token spacing does not match the mandatory spacing rule
+```
+
 Directory discovery includes `.sql` and `.go` by default. It respects
 `.gitignore` and nested `.semblockignore` files. `.semblockignore` uses
 gitignore syntax, has higher precedence than ordinary ignore files, and more

@@ -4,12 +4,13 @@ use thiserror::Error;
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::config::GoConfig;
-use crate::{FormatDiagnostic, FormatOptions, FormatWarning, format_sql};
+use crate::{Diagnostic, FormatDiagnostic, FormatOptions, FormatWarning, SourceRange, format_sql};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormattedGo {
     pub output: String,
     pub warnings: Vec<FormatWarning>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Debug, Error)]
@@ -96,6 +97,7 @@ pub fn format_go_source(
         return Ok(FormattedGo {
             output: source.into(),
             warnings: Vec::new(),
+            diagnostics: Vec::new(),
         });
     }
     if let Some(directive) = directives
@@ -143,6 +145,7 @@ pub fn format_go_source(
     let mut consumed = HashSet::new();
     let mut replacements = Vec::new();
     let mut warnings = Vec::new();
+    let mut diagnostics = Vec::new();
 
     for owner in owners.values() {
         let attached = attached_directives(owner.node, &comments, source)
@@ -204,6 +207,10 @@ pub fn format_go_source(
                     source,
                 })?;
             warnings.extend(formatted.warnings);
+            diagnostics.extend(formatted.diagnostics.into_iter().map(|mut diagnostic| {
+                diagnostic.message = format!("embedded SQL: {}", diagnostic.message);
+                diagnostic.with_source_range(SourceRange::new(content_start, content_end))
+            }));
             replacements.push(Replacement {
                 start: content_start,
                 end: content_end,
@@ -232,7 +239,11 @@ pub fn format_go_source(
     if reparsed.root_node().has_error() {
         return Err(GoError::Reparse);
     }
-    Ok(FormattedGo { output, warnings })
+    Ok(FormattedGo {
+        output,
+        warnings,
+        diagnostics,
+    })
 }
 
 fn parse_go(source: &str) -> Result<Tree, GoError> {

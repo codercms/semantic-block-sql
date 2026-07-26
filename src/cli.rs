@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use semblock::Severity;
 use semblock::config::{Config, ConfigError};
 use semblock::diff;
 use semblock::discover::{DiscoverError, discover};
@@ -114,28 +115,34 @@ impl Cli {
             .map_err(|error| RunError::filesystem(format!("failed to read stdin: {error}")))?;
         let formatted = format_source(&source, language, &config.format, &config.go)
             .map_err(RunError::source)?;
-        emit_warnings(filename, &formatted, self.quiet);
 
         match mode {
             Mode::Fmt => {
+                emit_diagnostics(filename, &formatted, self.quiet, false);
                 print!("{}", formatted.output);
                 Ok(ExitCode::SUCCESS)
             }
-            Mode::Check if formatted.changed => {
-                if !self.quiet {
-                    eprintln!("Would reformat: {}", filename.display());
+            Mode::Check => {
+                emit_diagnostics(filename, &formatted, self.quiet, true);
+                emit_fallback_change(filename, &formatted, self.quiet);
+                Ok(if formatted.changed {
+                    ExitCode::from(1)
+                } else {
+                    ExitCode::SUCCESS
+                })
+            }
+            Mode::Diff => {
+                emit_diagnostics(filename, &formatted, self.quiet, false);
+                if formatted.changed {
+                    print!(
+                        "{}",
+                        diff::unified(&filename.display().to_string(), &source, &formatted.output)
+                    );
+                    Ok(ExitCode::from(1))
+                } else {
+                    Ok(ExitCode::SUCCESS)
                 }
-                Ok(ExitCode::from(1))
             }
-            Mode::Check => Ok(ExitCode::SUCCESS),
-            Mode::Diff if formatted.changed => {
-                print!(
-                    "{}",
-                    diff::unified(&filename.display().to_string(), &source, &formatted.output)
-                );
-                Ok(ExitCode::from(1))
-            }
-            Mode::Diff => Ok(ExitCode::SUCCESS),
         }
     }
 
@@ -169,7 +176,6 @@ impl Cli {
                 .map_err(|error| RunError::filesystem(format!("{}: {error}", path.display())))?;
             let formatted = format_source(&source, language, &config.format, &config.go)
                 .map_err(|error| RunError::source_with_path(&path, error))?;
-            emit_warnings(&path, &formatted, self.quiet);
             plans.push(Plan {
                 path,
                 source,
@@ -180,6 +186,9 @@ impl Cli {
         let changed = plans.iter().filter(|plan| plan.formatted.changed).count();
         match mode {
             Mode::Fmt => {
+                for plan in &plans {
+                    emit_diagnostics(&plan.path, &plan.formatted, self.quiet, false);
+                }
                 for plan in plans.iter().filter(|plan| plan.formatted.changed) {
                     atomic_replace(&plan.path, &plan.formatted.output)
                         .map_err(RunError::rewrite)?;
@@ -190,10 +199,9 @@ impl Cli {
                 Ok(ExitCode::SUCCESS)
             }
             Mode::Check => {
-                if !self.quiet {
-                    for plan in plans.iter().filter(|plan| plan.formatted.changed) {
-                        eprintln!("Would reformat: {}", plan.path.display());
-                    }
+                for plan in &plans {
+                    emit_diagnostics(&plan.path, &plan.formatted, self.quiet, true);
+                    emit_fallback_change(&plan.path, &plan.formatted, self.quiet);
                 }
                 Ok(if changed == 0 {
                     ExitCode::SUCCESS
@@ -202,6 +210,9 @@ impl Cli {
                 })
             }
             Mode::Diff => {
+                for plan in &plans {
+                    emit_diagnostics(&plan.path, &plan.formatted, self.quiet, false);
+                }
                 for plan in plans.iter().filter(|plan| plan.formatted.changed) {
                     print!(
                         "{}",
@@ -228,12 +239,37 @@ struct Plan {
     formatted: FormattedSource,
 }
 
-fn emit_warnings(path: &Path, formatted: &FormattedSource, quiet: bool) {
+fn emit_diagnostics(
+    path: &Path,
+    formatted: &FormattedSource,
+    quiet: bool,
+    include_style_errors: bool,
+) {
     if quiet {
         return;
     }
-    for warning in &formatted.warnings {
-        eprintln!("{}: warning: {warning:?}", path.display());
+    for diagnostic in &formatted.diagnostics {
+        if !include_style_errors && diagnostic.severity == Severity::Error {
+            continue;
+        }
+        let severity = match diagnostic.severity {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+        };
+        eprintln!(
+            "{}:{}-{}: {severity}[{}]: {}",
+            path.display(),
+            diagnostic.source_range.start,
+            diagnostic.source_range.end,
+            diagnostic.rule_id,
+            diagnostic.message
+        );
+    }
+}
+
+fn emit_fallback_change(path: &Path, formatted: &FormattedSource, quiet: bool) {
+    if !quiet && formatted.changed && formatted.diagnostics.is_empty() {
+        eprintln!("Would reformat: {}", path.display());
     }
 }
 
