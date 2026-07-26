@@ -5,7 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::FormatOptions;
+use crate::{FormatOptions, NotEqualPolicy, SemicolonPolicy, SyntaxDiagnostics};
 
 const DEFAULT_IGNORE_FILE: &str = ".semblockignore";
 
@@ -70,11 +70,21 @@ pub enum ConfigError {
 struct FileConfig {
     dialect: Option<String>,
     #[serde(default)]
+    format: FileFormatConfig,
+    #[serde(default)]
     layout: LayoutConfig,
     #[serde(default)]
     discovery: FileDiscoveryConfig,
     #[serde(default)]
     go: FileGoConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileFormatConfig {
+    semicolon_policy: Option<SemicolonPolicy>,
+    not_equal_policy: Option<NotEqualPolicy>,
+    syntax_diagnostics: Option<SyntaxDiagnostics>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -132,6 +142,15 @@ impl Config {
         }
 
         let mut config = Self::default();
+        if let Some(value) = file.format.semicolon_policy {
+            config.format.semicolon_policy = value;
+        }
+        if let Some(value) = file.format.not_equal_policy {
+            config.format.not_equal_policy = value;
+        }
+        if let Some(value) = file.format.syntax_diagnostics {
+            config.format.syntax_diagnostics = value;
+        }
         if let Some(value) = file.layout.indent_width {
             config.format.indent_width = value;
         }

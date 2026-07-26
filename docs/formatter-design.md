@@ -39,9 +39,10 @@ places:
   with diagnostics instead of partial output.
 
 The runnable CLI and raw-Go MVP predate this contract and are being reconciled
-batch by batch. In particular, the current formatter still has known
-non-conformities for casing, `<>`, semicolon policy, optional layout switches,
-and diagnostic granularity.
+batch by batch. Exact built-in casing, contextual `INTERVAL`, terminal-semicolon
+policy, default `<>` preservation, and final-newline preservation are now
+implemented. Optional layout switches and diagnostic granularity remain to be
+reconciled.
 
 Earlier project requests also clarified these application-level points:
 
@@ -186,8 +187,17 @@ FormatOptions {
     hard_line_width,
     preserve_list_groups,
     preserve_blank_lines,
+    semicolon_policy,
+    not_equal_policy,
+    syntax_diagnostics,
 }
 ```
+
+The core-policy defaults are `semicolon_policy = preserve`,
+`not_equal_policy = preserve`, and `syntax_diagnostics = parser_available`.
+The first two are applied by the token-preserving renderer; syntax diagnostics
+still use the existing parser error channel until the shared diagnostic result
+model is introduced.
 
 ### Connectors do not own empty levels
 
@@ -448,6 +458,11 @@ explicit integration tests.
 
 ```toml
 dialect = "postgresql"
+
+[format]
+semicolon_policy = "preserve"
+not_equal_policy = "preserve"
+syntax_diagnostics = "parser_available"
 
 [layout]
 indent_width = 4

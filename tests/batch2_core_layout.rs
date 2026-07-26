@@ -165,8 +165,7 @@ fn expands_a_join_predicate_when_width_hides_its_structure() {
 SELECT item.id
 FROM public.items item
 LEFT JOIN match_new.source_links link ON
-    link.very_long_external_identifier = item.very_long_external_identifier;
-";
+    link.very_long_external_identifier = item.very_long_external_identifier;";
 
     assert_eq!(
         format_sql(source, &options)
@@ -241,7 +240,7 @@ fn inline_block_comment_keeps_a_lexical_separator() {
 
     assert_eq!(
         output,
-        "/* injected */ SELECT item.id FROM public.items item;\n"
+        "/* injected */ SELECT item.id FROM public.items item;"
     );
     validate_equivalent(source, &output).expect("comment attachment remains equivalent");
 }

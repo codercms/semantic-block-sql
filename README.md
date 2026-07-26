@@ -109,6 +109,11 @@ errors.
 ```toml
 dialect = "postgresql"
 
+[format]
+semicolon_policy = "preserve"
+not_equal_policy = "preserve"
+syntax_diagnostics = "parser_available"
+
 [layout]
 indent_width = 4
 soft_line_width = 120

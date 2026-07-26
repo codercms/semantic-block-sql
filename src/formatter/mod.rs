@@ -2,6 +2,7 @@ mod semantic_block;
 mod tokens;
 mod validation;
 
+use serde::Deserialize;
 use thiserror::Error;
 
 pub use validation::validate_equivalent;
@@ -14,6 +15,39 @@ pub enum Style {
     SemanticBlock,
 }
 
+/// Policy for the terminal semicolon of the formatted unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemicolonPolicy {
+    /// Preserve whether the source has a terminal semicolon.
+    #[default]
+    Preserve,
+    /// Add a terminal semicolon when the parsed statement boundary is clear.
+    Require,
+    /// Remove only the terminal semicolon of the formatted unit.
+    Omit,
+}
+
+/// Policy for PostgreSQL's two not-equal spellings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotEqualPolicy {
+    /// Preserve both `<>` and `!=` exactly as authored.
+    #[default]
+    Preserve,
+    /// Normalize `<>` to `!=`.
+    PreferBang,
+}
+
+/// Syntax-diagnostic capability selected by callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyntaxDiagnostics {
+    /// Surface diagnostics from the already-required PostgreSQL parser.
+    #[default]
+    ParserAvailable,
+}
+
 /// Stable options shared by CLI, stdin, embedded SQL, and future IDE adapters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatOptions {
@@ -23,6 +57,9 @@ pub struct FormatOptions {
     pub hard_line_width: usize,
     pub preserve_list_groups: bool,
     pub preserve_blank_lines: bool,
+    pub semicolon_policy: SemicolonPolicy,
+    pub not_equal_policy: NotEqualPolicy,
+    pub syntax_diagnostics: SyntaxDiagnostics,
 }
 
 impl Default for FormatOptions {
@@ -34,6 +71,9 @@ impl Default for FormatOptions {
             hard_line_width: 160,
             preserve_list_groups: true,
             preserve_blank_lines: true,
+            semicolon_policy: SemicolonPolicy::Preserve,
+            not_equal_policy: NotEqualPolicy::Preserve,
+            syntax_diagnostics: SyntaxDiagnostics::ParserAvailable,
         }
     }
 }

@@ -309,6 +309,49 @@ hard_line_width = 60
     assert_eq!(output.status.code(), Some(2), "{output:?}");
 }
 
+#[test]
+fn config_controls_core_lexical_policies() {
+    let project = TempDir::new().expect("temp project");
+    write(
+        project.path(),
+        "semblock.toml",
+        r#"dialect = "postgresql"
+
+[format]
+semicolon_policy = "omit"
+not_equal_policy = "prefer_bang"
+syntax_diagnostics = "parser_available"
+"#,
+    );
+    write(
+        project.path(),
+        "query.sql",
+        "select count(*) from public.items where status <> 'deleted';\n",
+    );
+
+    let output = run(project.path(), &["fmt", "query.sql"], None);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        fs::read_to_string(project.path().join("query.sql")).expect("read query"),
+        "SELECT COUNT(*) FROM public.items WHERE status != 'deleted'\n"
+    );
+
+    write(
+        project.path(),
+        "bad-policy.toml",
+        r#"[format]
+not_equal_policy = "always_rewrite"
+"#,
+    );
+    let output = run(
+        project.path(),
+        &["check", "--config", "bad-policy.toml", "query.sql"],
+        None,
+    );
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+}
+
 #[cfg(unix)]
 #[test]
 fn atomic_fmt_preserves_file_permissions() {

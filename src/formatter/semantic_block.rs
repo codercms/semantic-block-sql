@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use pg_query::protobuf::{KeywordKind, Token};
 
 use super::tokens::{SqlToken, tokenize};
-use super::{FormatDiagnostic, FormatOptions, FormatWarning};
+use super::{FormatDiagnostic, FormatOptions, FormatWarning, NotEqualPolicy, SemicolonPolicy};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Break {
@@ -90,6 +90,12 @@ struct ParenthesizedList {
     expanded: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct TerminalSemicolonPlan {
+    omit: Option<usize>,
+    insert_after: Option<usize>,
+}
+
 pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, FormatDiagnostic> {
     let tokens = tokenize(source)?;
     if tokens.is_empty() {
@@ -132,10 +138,15 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
     plan_cases(&tokens, &depths, &cases, &mut plan);
     plan_ctes(&tokens, &depths, &ctes, &mut plan);
 
+    let terminal_semicolon = terminal_semicolon_plan(&tokens, options.semicolon_policy);
     let mut writer = Writer::new(options.indent_width);
     let mut previous_index = None;
 
     for (index, token) in tokens.iter().enumerate() {
+        if terminal_semicolon.omit == Some(index) {
+            continue;
+        }
+
         let planned_break = plan.before.get(&index).copied();
         if let Some(line_break) = planned_break {
             writer.newline(line_break.lines, line_break.indent);
@@ -151,7 +162,10 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
         if needs_space(&tokens, previous_index, index) {
             writer.space();
         }
-        writer.write(&render_token(&tokens, index));
+        writer.write(&render_token(&tokens, index, options));
+        if terminal_semicolon.insert_after == Some(index) {
+            writer.write(";");
+        }
 
         if token.is_comment() {
             let next_starts_authored_line = tokens
@@ -166,7 +180,30 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
         previous_index = Some(index);
     }
 
-    Ok(writer.finish())
+    Ok(writer.finish(source.ends_with('\n')))
+}
+
+fn terminal_semicolon_plan(
+    tokens: &[SqlToken<'_>],
+    policy: SemicolonPolicy,
+) -> TerminalSemicolonPlan {
+    let Some(last_syntax) = tokens.iter().rposition(|token| !token.is_comment()) else {
+        return TerminalSemicolonPlan::default();
+    };
+    let has_terminal_semicolon = tokens[last_syntax].kind == Token::Ascii59;
+
+    match (policy, has_terminal_semicolon) {
+        (SemicolonPolicy::Preserve, _) => TerminalSemicolonPlan::default(),
+        (SemicolonPolicy::Require, false) => TerminalSemicolonPlan {
+            insert_after: Some(last_syntax),
+            ..TerminalSemicolonPlan::default()
+        },
+        (SemicolonPolicy::Omit, true) => TerminalSemicolonPlan {
+            omit: Some(last_syntax),
+            ..TerminalSemicolonPlan::default()
+        },
+        (SemicolonPolicy::Require | SemicolonPolicy::Omit, _) => TerminalSemicolonPlan::default(),
+    }
 }
 
 pub(super) fn validate_hard_width(
@@ -276,7 +313,7 @@ fn case_ranges(tokens: &[SqlToken<'_>], options: &FormatOptions) -> Vec<CaseRang
                 let authored_multiline = tokens[start + 1..=index]
                     .iter()
                     .any(|token| token.line_breaks_before > 0);
-                let compact_width = compact_width(tokens, start, index + 1);
+                let compact_width = compact_width(tokens, start, index + 1, options);
                 ranges.push(CaseRange {
                     start,
                     end: index,
@@ -324,7 +361,7 @@ fn parenthesized_lists(
             .any(|case| case.expanded && case.start > open && case.end < close)
             || (open + 1..close)
                 .any(|index| tokens[index].kind == Token::Select && depths[index] > depths[open]);
-        let compact = compact_width(tokens, open.saturating_sub(1), close + 1);
+        let compact = compact_width(tokens, open.saturating_sub(1), close + 1, options);
         lists.push(ParenthesizedList {
             open,
             close,
@@ -401,7 +438,7 @@ fn plan_select_lists(
                 .any(|item| tokens[item.start].line_breaks_before > 0);
         let has_complex = items.iter().any(|item| item.complex);
         let compact_line_width =
-            base_depth * options.indent_width + compact_width(tokens, select, end);
+            base_depth * options.indent_width + compact_width(tokens, select, end, options);
         let expanded = authored || has_complex || compact_line_width > options.soft_line_width;
         if !expanded {
             continue;
@@ -650,7 +687,7 @@ fn split_groups_at_width(
         lines.push((line_start, blank_before));
 
         for index in group_start..group_end {
-            let item_width = compact_width(tokens, items[index].start, items[index].end)
+            let item_width = compact_width(tokens, items[index].start, items[index].end, options)
                 + usize::from(items[index].comma.is_some());
             let separator = usize::from(index > line_start);
             if index > line_start
@@ -754,7 +791,8 @@ fn boolean_ranges(
             depths[candidate] >= base_depth
                 && matches!(tokens[candidate].kind, Token::And | Token::Or)
         });
-        let hides_structure = base_depth * options.indent_width + compact_width(tokens, index, end)
+        let hides_structure = base_depth * options.indent_width
+            + compact_width(tokens, index, end, options)
             > options.soft_line_width;
 
         if has_connector || hides_structure {
@@ -939,14 +977,19 @@ fn plan_ctes(
     }
 }
 
-fn compact_width(tokens: &[SqlToken<'_>], start: usize, end: usize) -> usize {
+fn compact_width(
+    tokens: &[SqlToken<'_>],
+    start: usize,
+    end: usize,
+    options: &FormatOptions,
+) -> usize {
     let mut width = 0usize;
     let mut previous = None;
     for index in start..end {
         if needs_space(tokens, previous, index) {
             width += 1;
         }
-        width += render_token(tokens, index).chars().count();
+        width += render_token(tokens, index, options).chars().count();
         previous = Some(index);
     }
     width
@@ -1008,26 +1051,38 @@ fn is_join_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
         .any(|next| next.kind == Token::Join)
 }
 
-fn render_token(tokens: &[SqlToken<'_>], index: usize) -> String {
+fn render_token(tokens: &[SqlToken<'_>], index: usize, options: &FormatOptions) -> String {
     let token = &tokens[index];
     let previous = index.checked_sub(1).map(|previous| &tokens[previous]);
     let next = tokens.get(index + 1);
 
     if token.kind == Token::NotEquals {
-        return "!=".into();
+        return match options.not_equal_policy {
+            NotEqualPolicy::Preserve => token.text.to_owned(),
+            NotEqualPolicy::PreferBang => "!=".into(),
+        };
+    }
+    if token.kind == Token::Interval {
+        return if next.is_some_and(|next| is_string_literal(next.kind)) {
+            token.text.to_uppercase()
+        } else {
+            token.text.to_lowercase()
+        };
+    }
+    if is_function_call_name(tokens, index) {
+        return if is_uppercase_builtin(token.text) {
+            token.text.to_uppercase()
+        } else {
+            token.text.to_lowercase()
+        };
     }
     if token.kind == Token::Ident
         && !token.text.starts_with('"')
-        && (next.is_some_and(|next| next.kind == Token::Ascii40)
-            || previous.is_some_and(|previous| previous.kind == Token::Typecast))
+        && previous.is_some_and(|previous| previous.kind == Token::Typecast)
     {
         return token.text.to_lowercase();
     }
-    if is_type_keyword(token.kind)
-        || (is_ordinary_function(token.kind)
-            && !token.text.starts_with('"')
-            && next.is_some_and(|next| next.kind == Token::Ascii40))
-    {
+    if is_type_keyword(token.kind) {
         return token.text.to_lowercase();
     }
     if (token.keyword_kind == KeywordKind::ReservedKeyword || is_keyword_like(token.kind))
@@ -1039,8 +1094,85 @@ fn render_token(tokens: &[SqlToken<'_>], index: usize) -> String {
     token.text.to_owned()
 }
 
-fn is_ordinary_function(kind: Token) -> bool {
-    kind == Token::Ident
+fn is_function_call_name(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    !tokens[index].text.starts_with('"') && is_function_call_syntax(tokens, index)
+}
+
+fn is_function_call_syntax(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    tokens
+        .get(index + 1)
+        .is_some_and(|next| next.kind == Token::Ascii40)
+        && matches!(
+            tokens[index].kind,
+            Token::Ident
+                | Token::Coalesce
+                | Token::Extract
+                | Token::Greatest
+                | Token::JsonArray
+                | Token::JsonArrayagg
+                | Token::JsonExists
+                | Token::JsonObject
+                | Token::JsonObjectagg
+                | Token::JsonQuery
+                | Token::JsonScalar
+                | Token::JsonSerialize
+                | Token::JsonTable
+                | Token::JsonValue
+                | Token::Least
+                | Token::MergeAction
+                | Token::Normalize
+                | Token::Nullif
+                | Token::Overlay
+                | Token::Position
+                | Token::Substring
+                | Token::Trim
+                | Token::Xmlattributes
+                | Token::Xmlconcat
+                | Token::Xmlelement
+                | Token::Xmlexists
+                | Token::Xmlforest
+                | Token::Xmlnamespaces
+                | Token::Xmlparse
+                | Token::Xmlpi
+                | Token::Xmlroot
+                | Token::Xmlserialize
+                | Token::Xmltable
+        )
+}
+
+fn is_compact_grammar_parenthesis(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    tokens
+        .get(index + 1)
+        .is_some_and(|next| next.kind == Token::Ascii40)
+        && matches!(tokens[index].kind, Token::Cast | Token::Treat)
+}
+
+fn is_type_modifier_syntax(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    tokens
+        .get(index + 1)
+        .is_some_and(|next| next.kind == Token::Ascii40)
+        && (tokens[index].kind == Token::Interval || is_type_keyword(tokens[index].kind))
+}
+
+fn is_uppercase_builtin(name: &str) -> bool {
+    matches!(
+        name.to_ascii_uppercase().as_str(),
+        "COUNT"
+            | "SUM"
+            | "AVG"
+            | "MIN"
+            | "MAX"
+            | "COALESCE"
+            | "NULLIF"
+            | "GREATEST"
+            | "LEAST"
+            | "NOW"
+            | "EXTRACT"
+    )
+}
+
+fn is_string_literal(kind: Token) -> bool {
+    matches!(kind, Token::Sconst | Token::Usconst)
 }
 
 fn is_keyword_like(kind: Token) -> bool {
@@ -1053,6 +1185,13 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Case
             | Token::Coalesce
             | Token::Cross
+            | Token::CurrentDate
+            | Token::CurrentRole
+            | Token::CurrentSchema
+            | Token::CurrentTime
+            | Token::CurrentTimestamp
+            | Token::CurrentUser
+            | Token::DayP
             | Token::Distinct
             | Token::Else
             | Token::EndP
@@ -1062,12 +1201,17 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Full
             | Token::GroupP
             | Token::Having
+            | Token::HourP
             | Token::InnerP
             | Token::Intersect
             | Token::Is
             | Token::Join
             | Token::Left
             | Token::Limit
+            | Token::Localtime
+            | Token::Localtimestamp
+            | Token::MinuteP
+            | Token::MonthP
             | Token::Natural
             | Token::Not
             | Token::NullP
@@ -1080,13 +1224,16 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Recursive
             | Token::Returning
             | Token::Right
+            | Token::SecondP
             | Token::Select
+            | Token::SessionUser
             | Token::Then
             | Token::TrueP
             | Token::Union
             | Token::When
             | Token::Where
             | Token::With
+            | Token::YearP
     )
 }
 
@@ -1102,7 +1249,6 @@ fn is_type_keyword(kind: Token) -> bool {
             | Token::FloatP
             | Token::IntP
             | Token::Integer
-            | Token::Interval
             | Token::Json
             | Token::Numeric
             | Token::Real
@@ -1140,12 +1286,9 @@ fn needs_space(tokens: &[SqlToken<'_>], previous: Option<usize>, current: usize)
         return false;
     }
     if current.kind == Token::Ascii40
-        && (previous.kind == Token::Ident
-            || is_ordinary_function(previous.kind)
-            || matches!(
-                previous.kind,
-                Token::Coalesce | Token::Nullif | Token::Greatest | Token::Least
-            ))
+        && (is_function_call_syntax(tokens, previous_index)
+            || is_type_modifier_syntax(tokens, previous_index)
+            || is_compact_grammar_parenthesis(tokens, previous_index))
     {
         return false;
     }
@@ -1230,11 +1373,11 @@ impl Writer {
             .extend(std::iter::repeat_n(' ', indent * self.indent_width));
     }
 
-    fn finish(mut self) -> String {
+    fn finish(mut self, trailing_newline: bool) -> String {
         while self.output.ends_with([' ', '\n']) {
             self.output.pop();
         }
-        if !self.output.is_empty() {
+        if trailing_newline && !self.output.is_empty() {
             self.output.push('\n');
         }
         self.output

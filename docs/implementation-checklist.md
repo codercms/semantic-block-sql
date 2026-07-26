@@ -316,13 +316,25 @@ Batch 5 MVP evidence:
 
 - [ ] Replace optional indentation/group-preservation switches with mandatory
   four-space and authored-boundary behavior.
-- [ ] Add semicolon and not-equal policies with specification defaults.
-- [ ] Implement the exact casing whitelist and contextual `INTERVAL`.
+- [x] Add semicolon and not-equal policies with specification defaults.
+- [x] Implement the exact casing whitelist and contextual `INTERVAL`.
 - [ ] Introduce rule-level diagnostics and a shared `fmt` / `check` analysis.
 - [ ] Return unchanged source plus diagnostics for parse/unsupported failures.
-- [ ] Preserve existing compliant layouts and final-newline presence.
+- [x] Preserve final-newline presence.
+- [ ] Preserve every existing compliant alternative layout.
 - [ ] Add acceptance fixtures for every mandatory rule and statement family.
 - [ ] Complete the reconciliation self-review and checkpoint.
+
+Lexical-policy checkpoint evidence:
+
+- `tests/spec_v1_lexical_policies.rs` covers the exact built-in whitelist,
+  grammar-backed lowercase function names, contextual `INTERVAL`, type-modifier
+  spacing, all semicolon policies, default/opt-in not-equal behavior, and final
+  newline preservation.
+- `tests/cli_mvp.rs` proves strict `[format]` configuration and end-to-end policy
+  application through the CLI.
+- The checkpoint passes formatting, Clippy with warnings denied, all 47 tests,
+  documentation, and `git diff --check` in the packaged offline environment.
 
 ## Batch 6 — Performance and release polish
 
