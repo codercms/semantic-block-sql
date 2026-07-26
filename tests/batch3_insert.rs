@@ -54,10 +54,9 @@ fn long_ungrouped_insert_lists_expand_one_item_per_line() {
 #[test]
 fn unsupported_insert_variants_remain_unchanged() {
     for source in [
-        "INSERT INTO public.items (id) SELECT id FROM staging.items;",
-        "WITH source AS (SELECT 1 AS id) INSERT INTO public.items (id) VALUES (1);",
-        "INSERT INTO public.items (id) OVERRIDING SYSTEM VALUE VALUES (1);",
-        "INSERT INTO public.items DEFAULT VALUES;",
+        "WITH changed AS (DELETE FROM staging.items RETURNING id) INSERT INTO public.items (id) SELECT id FROM changed;",
+        "INSERT INTO public.items (id) SELECT id FROM staging.items FOR UPDATE;",
+        "INSERT INTO public.items (id) SELECT row_number() OVER () FROM staging.items;",
     ] {
         let formatted = format_sql_result(source, &FormatOptions::default());
         assert_eq!(formatted.output, source, "{source}");

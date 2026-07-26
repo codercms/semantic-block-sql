@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use pg_query::protobuf::{KeywordKind, Token};
 
 use super::layout_ir::{
-    DeleteBlock, InsertBlock, InsertSource, LayoutDocument, PredicateBlock, QueryBlock,
-    UpdateBlock, WithBlock,
+    DeleteBlock, InsertBlock, InsertSource, LayoutDocument, MergeAction, MergeBlock,
+    PredicateBlock, QueryBlock, SetOperationBlock, UpdateBlock, WithBlock,
 };
 use super::ownership::SupportedDocument;
 use super::structure::TokenStructure;
@@ -115,12 +115,13 @@ pub(super) fn format(
     let inserts = layout.inserts().cloned().collect::<Vec<_>>();
     let updates = layout.updates().copied().collect::<Vec<_>>();
     let deletes = layout.deletes().copied().collect::<Vec<_>>();
+    let merges = layout.merges().cloned().collect::<Vec<_>>();
     let parenthesized_lists =
-        parenthesized_lists(&tokens, depths, parens, &cases, &inserts, options);
+        parenthesized_lists(&tokens, depths, parens, &cases, &inserts, &merges, options);
     let boolean_ranges = boolean_ranges(&tokens, depths, layout.predicates(), options);
     let mut plan = LayoutPlan::new(tokens.len());
 
-    let expanded_selects = plan_select_lists(
+    let mut expanded_selects = plan_select_lists(
         &tokens,
         depths,
         &cases,
@@ -129,7 +130,7 @@ pub(super) fn format(
         options,
         &mut plan,
     );
-    plan_insert_statements(
+    let insert_query_starts = plan_insert_statements(
         &tokens,
         depths,
         &cases,
@@ -138,6 +139,7 @@ pub(super) fn format(
         options,
         &mut plan,
     );
+    expanded_selects.extend(insert_query_starts);
     plan_update_statements(
         &tokens,
         depths,
@@ -158,6 +160,15 @@ pub(super) fn format(
         options,
         &mut plan,
     );
+    plan_merge_statements(
+        &tokens,
+        depths,
+        &cases,
+        &parenthesized_lists,
+        &merges,
+        options,
+        &mut plan,
+    );
     plan_parenthesized_lists(
         &tokens,
         depths,
@@ -173,8 +184,10 @@ pub(super) fn format(
         &boolean_ranges,
         layout.with_blocks(),
         &expanded_selects,
+        options,
         &mut plan,
     );
+    plan_set_operations(layout.set_operations(), &mut plan);
     plan_booleans(&tokens, depths, &boolean_ranges, parens, &mut plan);
     plan_cases(&tokens, depths, &cases, &mut plan);
     plan_ctes(&tokens, depths, layout.with_blocks(), &mut plan);
@@ -344,13 +357,16 @@ fn parenthesized_lists(
     parens: &HashMap<usize, usize>,
     cases: &[CaseRange],
     inserts: &[InsertBlock],
+    merges: &[MergeBlock],
     options: &FormatOptions,
 ) -> Vec<ParenthesizedList> {
     let mut lists = Vec::new();
 
     for (open, token) in tokens.iter().enumerate() {
         if token.kind != Token::Ascii40
-            || !(is_function_call_open(tokens, open) || is_insert_list_open(inserts, open))
+            || !(is_function_call_open(tokens, open)
+                || is_insert_list_open(inserts, open)
+                || is_merge_list_open(merges, open))
         {
             continue;
         }
@@ -376,7 +392,25 @@ fn parenthesized_lists(
         let compact_start = inserts
             .iter()
             .find(|insert| insert.target_open == Some(open))
-            .map_or_else(|| open.saturating_sub(1), |insert| insert.span.start);
+            .map(|insert| insert.span.start)
+            .or_else(|| {
+                merges.iter().find_map(|merge| {
+                    merge
+                        .branches
+                        .iter()
+                        .find_map(|branch| match branch.action {
+                            MergeAction::Insert {
+                                target_open,
+                                values_open,
+                                ..
+                            } if target_open == Some(open) || values_open == open => {
+                                Some(branch.start)
+                            }
+                            _ => None,
+                        })
+                })
+            })
+            .unwrap_or_else(|| open.saturating_sub(1));
         let compact = compact_width(tokens, compact_start, close + 1, options);
         let has_top_level_comma = (open + 1..close)
             .any(|index| tokens[index].kind == Token::Ascii44 && depths[index] == inner_depth);
@@ -538,6 +572,92 @@ fn is_insert_list_open(inserts: &[InsertBlock], open: usize) -> bool {
     })
 }
 
+fn is_merge_list_open(merges: &[MergeBlock], open: usize) -> bool {
+    merges.iter().any(|merge| {
+        merge.branches.iter().any(|branch| match branch.action {
+            MergeAction::Insert {
+                target_open,
+                values_open,
+                ..
+            } => target_open == Some(open) || values_open == open,
+            _ => false,
+        })
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_merge_statements(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    cases: &[CaseRange],
+    lists: &[ParenthesizedList],
+    merges: &[MergeBlock],
+    options: &FormatOptions,
+    plan: &mut LayoutPlan,
+) {
+    for merge in merges {
+        plan.break_before(merge.using, 1, merge.span.base_depth);
+        for branch in &merge.branches {
+            let branch_lines = if branch
+                .start
+                .checked_sub(1)
+                .is_some_and(|previous| tokens[previous].is_comment())
+            {
+                1
+            } else {
+                2
+            };
+            plan.break_before(branch.start, branch_lines, merge.span.base_depth);
+            match branch.action {
+                MergeAction::Update { set } => {
+                    plan_keyword_list(
+                        tokens,
+                        depths,
+                        cases,
+                        lists,
+                        set,
+                        branch.end,
+                        merge.span.base_depth,
+                        true,
+                        options,
+                        plan,
+                    );
+                }
+                MergeAction::Insert {
+                    values,
+                    values_open,
+                    ..
+                } => {
+                    plan.break_before(values, 1, merge.span.base_depth + 1);
+                    if let Some(close) = lists
+                        .iter()
+                        .find(|list| list.open == values_open)
+                        .map(|list| list.close)
+                    {
+                        plan.set_indent(values_open..close + 1, merge.span.base_depth + 1);
+                    }
+                }
+                MergeAction::Delete | MergeAction::Nothing => {}
+            }
+        }
+        if let Some(returning) = merge.returning {
+            plan.break_before(returning, 1, merge.span.base_depth);
+            plan_keyword_list(
+                tokens,
+                depths,
+                cases,
+                lists,
+                returning,
+                merge.span.end,
+                merge.span.base_depth,
+                false,
+                options,
+                plan,
+            );
+        }
+    }
+}
+
 fn plan_insert_statements(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
@@ -546,7 +666,8 @@ fn plan_insert_statements(
     inserts: &[InsertBlock],
     options: &FormatOptions,
     plan: &mut LayoutPlan,
-) {
+) -> HashSet<usize> {
+    let mut query_starts = HashSet::new();
     for insert in inserts {
         let authored = tokens[insert.span.start + 1..insert.span.end]
             .iter()
@@ -563,11 +684,19 @@ fn plan_insert_statements(
             + compact_width(tokens, insert.span.start, insert.span.end, options);
         let width_driven = compact_statement_width > options.soft_line_width;
         let has_update = insert.on_conflict.is_some_and(|conflict| conflict.update);
-        let expanded = authored || has_expanded_list || width_driven || has_update;
+        let query_source = match insert.source {
+            InsertSource::Query { start } => Some(start),
+            _ => None,
+        };
+        let expanded =
+            authored || has_expanded_list || width_driven || has_update || query_source.is_some();
         if !expanded {
             continue;
         }
 
+        if let Some(start) = query_source {
+            query_starts.insert(start);
+        }
         if let Some(values) = insert.values_keyword() {
             plan.break_before(values, 1, insert.span.base_depth);
         } else if let InsertSource::Query { start } = insert.source {
@@ -631,6 +760,7 @@ fn plan_insert_statements(
             );
         }
     }
+    query_starts
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -736,7 +866,7 @@ fn plan_select_lists(
             .into_iter()
             .next()
             .unwrap_or(query.end);
-        if select + 1 >= end {
+        if query.list_start >= end {
             continue;
         }
 
@@ -745,7 +875,7 @@ fn plan_select_lists(
             depths,
             cases,
             parenthesized_lists,
-            select + 1,
+            query.list_start,
             end,
             base_depth,
         );
@@ -1041,6 +1171,7 @@ fn split_groups_at_width(
     lines
 }
 
+#[allow(clippy::too_many_arguments)]
 fn plan_query_clauses(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
@@ -1048,6 +1179,7 @@ fn plan_query_clauses(
     boolean_ranges: &[BooleanRange],
     with_blocks: &[WithBlock],
     expanded_selects: &HashSet<usize>,
+    options: &FormatOptions,
     plan: &mut LayoutPlan,
 ) {
     let with_body_starts: HashSet<_> = with_blocks.iter().map(|with| with.body_start).collect();
@@ -1072,11 +1204,14 @@ fn plan_query_clauses(
         let has_expanded_boolean = boolean_ranges
             .iter()
             .any(|range| range.start > select && range.start < end);
+        let width_driven = base_depth * INDENT_WIDTH + compact_width(tokens, select, end, options)
+            > options.soft_line_width;
         let expanded = expanded_selects.contains(&select)
             || has_join
             || has_expanded_boolean
             || with_body_starts.contains(&select)
-            || cte_body_selects.contains(&select);
+            || cte_body_selects.contains(&select)
+            || width_driven;
         if !expanded {
             continue;
         }
@@ -1091,6 +1226,32 @@ fn plan_query_clauses(
                 plan.break_before(index, 1, base_depth);
             }
         }
+        for clause in [query.clauses.group_by, query.clauses.order_by]
+            .into_iter()
+            .flatten()
+        {
+            let by = clause + 1;
+            let list_end = query.clauses.next_after(clause, end);
+            plan_keyword_list(
+                tokens,
+                depths,
+                &[],
+                &[],
+                by,
+                list_end,
+                base_depth,
+                false,
+                options,
+                plan,
+            );
+        }
+    }
+}
+
+fn plan_set_operations(operations: &[SetOperationBlock], plan: &mut LayoutPlan) {
+    for operation in operations {
+        plan.break_before(operation.operator, 2, operation.base_depth);
+        plan.break_before(operation.next_branch, 2, operation.base_depth);
     }
 }
 
@@ -1320,7 +1481,10 @@ pub(super) fn render_token(
             NotEqualPolicy::PreferBang => "!=".into(),
         };
     }
-    if is_on_conflict_excluded(tokens, index) {
+    if is_on_conflict_excluded(tokens, index)
+        || is_overriding_value_keyword(tokens, index)
+        || is_merge_match_side_keyword(tokens, index)
+    {
         return token.text.to_uppercase();
     }
     if token.kind == Token::Interval {
@@ -1480,6 +1644,40 @@ fn is_on_conflict_excluded(tokens: &[SqlToken<'_>], index: usize) -> bool {
         .any(|token| token.kind == Token::Returning)
 }
 
+fn is_overriding_value_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    match tokens[index].kind {
+        Token::SystemP => tokens[..index]
+            .iter()
+            .rev()
+            .take(2)
+            .any(|token| token.kind == Token::Overriding),
+        Token::ValueP => tokens.get(index.wrapping_sub(1)).is_some_and(|previous| {
+            matches!(previous.kind, Token::SystemP | Token::User)
+                && tokens[..index.saturating_sub(1)]
+                    .iter()
+                    .rev()
+                    .take(2)
+                    .any(|token| token.kind == Token::Overriding)
+        }),
+        _ => false,
+    }
+}
+
+fn is_merge_match_side_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if !matches!(tokens[index].kind, Token::Source | Token::Target)
+        || tokens
+            .get(index.wrapping_sub(1))
+            .is_none_or(|previous| previous.kind != Token::By)
+    {
+        return false;
+    }
+    tokens[..index.saturating_sub(1)]
+        .iter()
+        .rev()
+        .take(4)
+        .any(|token| token.kind == Token::Matched)
+}
+
 fn is_string_literal(kind: Token) -> bool {
     matches!(kind, Token::Sconst | Token::Usconst)
 }
@@ -1509,6 +1707,8 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::EndP
             | Token::Except
             | Token::FalseP
+            | Token::Fetch
+            | Token::FirstP
             | Token::From
             | Token::Full
             | Token::GroupP
@@ -1524,10 +1724,13 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Localtime
             | Token::Localtimestamp
             | Token::MinuteP
+            | Token::Matched
+            | Token::Merge
             | Token::MonthP
             | Token::Natural
             | Token::Nothing
             | Token::Not
+            | Token::Only
             | Token::NullP
             | Token::Nullif
             | Token::Offset
@@ -1535,9 +1738,11 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Or
             | Token::Order
             | Token::OuterP
+            | Token::Overriding
             | Token::Recursive
             | Token::Returning
             | Token::Right
+            | Token::Rows
             | Token::SecondP
             | Token::Select
             | Token::Set
@@ -1546,6 +1751,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::TrueP
             | Token::Union
             | Token::Update
+            | Token::User
             | Token::Values
             | Token::When
             | Token::Where

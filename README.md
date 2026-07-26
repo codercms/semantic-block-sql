@@ -10,12 +10,15 @@ recursively walks projects, respects ignore files, and supports local/CI
 
 The current formatter-core coverage is fixture-backed `SELECT`, authored
 result/function argument groups, booleans, compact/expanded `CASE`, joins, CTEs,
-recursive CTEs, `INSERT ... VALUES ... RETURNING`, fixture-backed
-`ON CONFLICT DO NOTHING` / `DO UPDATE`, bounded `UPDATE ... FROM`, and
-`DELETE ... USING` subsets.
+recursive and general set operations, grouping/sorting/pagination clauses,
+`INSERT` with VALUES, SELECT, DEFAULT VALUES, OVERRIDING, RETURNING, and
+`ON CONFLICT`, bounded `UPDATE ... FROM` and `DELETE ... USING`, shared DML
+`WITH`, and a bounded PostgreSQL 17 `MERGE` planner covering DELETE, UPDATE,
+INSERT, and DO NOTHING branches.
 Unimplemented statement families and unowned statement variants return the
-original source with `syntax.unsupported`; broader DML, DDL, `MERGE`, and
-PL/pgSQL layout remain later batches.
+original source with `syntax.unsupported`; DDL, routines, PL/pgSQL, windows,
+FILTER, lateral sources, and richer relation/subquery ownership remain later
+batches.
 
 The formatter uses the existing `pg_query` crate for the real PostgreSQL
 parser, scanner, token ranges, comments, and AST. Project code implements the
@@ -30,6 +33,7 @@ Semantic Block layout policy, not another SQL parser.
 - [Upstream baseline](docs/upstream-baseline.md)
 - [Batch 1 backend spike](docs/batch-1-backend-spike.md)
 - [Batch 2 formatter-core MVP](docs/batch-2-core-mvp.md)
+- [Batch 3 query and MERGE coverage](docs/batch-3-query-merge.md)
 - [Runnable CLI and Go MVP](docs/batch-4-5-cli-mvp.md)
 - [Technical handoff](docs/semantic-block-sql-work-handoff.md)
 - [Russian style guide](docs/semantic-block-sql-style-guide-ru.md)

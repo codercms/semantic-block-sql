@@ -163,17 +163,17 @@ Batch 2 evidence:
 
 ## Batch 3 — PostgreSQL statement coverage
 
-- [x] `INSERT` (`VALUES` subset; source queries remain unsupported).
+- [x] `INSERT` with VALUES, source SELECT, DEFAULT VALUES, OVERRIDING, and RETURNING.
 - [x] Simple and independently complex `VALUES` rows.
 - [x] `ON CONFLICT` target predicate.
 - [x] `ON CONFLICT DO UPDATE` action predicate.
 - [x] `UPDATE ... FROM` (single source relation subset).
 - [x] `DELETE ... USING` (single source relation subset).
 - [x] `RETURNING` for fixture-backed `INSERT`.
-- [ ] Compact and expanded `MERGE`.
-- [ ] `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT`.
+- [x] Compact and expanded bounded `MERGE` branches.
+- [x] `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT`.
 - [ ] Lateral joins.
-- [ ] Grouping and `HAVING`.
+- [x] Grouping, `HAVING`, ordering, and pagination clauses.
 - [ ] Window expressions and named windows.
 - [ ] `FILTER`.
 - [ ] PostgreSQL casts, arrays, and JSON expressions.
@@ -471,6 +471,33 @@ Ownership-IR checkpoint evidence:
   safety pipeline, extension protocol, and forward-compatibility policy.
 - Existing supported output remains unchanged and the complete suite contains
   82 passing tests, including an ownership binding unit test.
+
+Query, INSERT-variant, and MERGE tranche evidence:
+
+- `layout_ir::LayoutDocument` remains the single token-ownership binder. New
+  syntax extends the closed statement/query IR rather than adding document-wide
+  keyword discovery.
+- INSERT now owns VALUES, source SELECT, DEFAULT VALUES, both OVERRIDING forms,
+  ON CONFLICT, RETURNING, and shared WITH definitions.
+- Query ownership covers DISTINCT, GROUP BY, HAVING, ORDER BY,
+  LIMIT/OFFSET/FETCH, and general UNION / INTERSECT / EXCEPT branch boundaries.
+- UPDATE and DELETE reuse the same `WithBlock` implementation for SELECT-backed
+  CTEs; data-modifying CTEs remain fail-safe unsupported.
+- MERGE adds one exhaustive `StatementKind::Merge` and
+  `StatementLayout::Merge`, with `MergeBlock`, `MergeBranch`, and `MergeAction`
+  ownership. Branch actions reuse the existing assignment, delimited-list,
+  predicate, comment, casing, and writer machinery.
+- The MERGE support boundary currently owns a plain target and source relation,
+  a join predicate, MATCHED / NOT MATCHED BY SOURCE / NOT MATCHED BY TARGET
+  branches, optional conditions, DELETE, UPDATE SET, INSERT VALUES with
+  OVERRIDING, DO NOTHING, WITH, and RETURNING. Derived or joined sources remain
+  unchanged with `syntax.unsupported`.
+- `tests/batch4_query_and_insert.rs` and `tests/batch4_merge.rs` cover golden
+  output, semantic equivalence, idempotence, clean check results, exact comments,
+  and adjacent unsupported variants.
+- The checkpoint passes formatting, Clippy with warnings denied, all 96 tests,
+  documentation, and `git diff --check` in the packaged offline environment.
+
 
 ## Batch 6 — Performance and release polish
 

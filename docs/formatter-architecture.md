@@ -81,6 +81,7 @@ pub(super) enum StatementKind {
     Insert,
     Update,
     Delete,
+    Merge,
 }
 ```
 
@@ -143,6 +144,12 @@ failure, not a silent fallback.
 
 `validation.rs` performs two related checks.
 
+Before classifying nodes, it requires the PostgreSQL grammar version embedded
+by the pinned `pg_query` backend to equal `REVIEWED_POSTGRESQL_VERSION`. A parser
+dependency upgrade therefore fails closed until the new PostgreSQL AST schema,
+validators, and fixtures are reviewed together; newly added fields cannot enter
+the formatter merely because a crate version changed.
+
 ### Top-level statement classification
 
 `validate_statement` matches PostgreSQL protobuf sum types and returns a
@@ -154,6 +161,7 @@ match node {
     NodeEnum::InsertStmt(insert) => ...,
     NodeEnum::UpdateStmt(update) => ...,
     NodeEnum::DeleteStmt(delete) => ...,
+    NodeEnum::MergeStmt(merge) => ...,
     _ => Err("unimplemented PostgreSQL statement family"),
 }
 ```
@@ -216,12 +224,14 @@ Current shared analyses include:
 
 All statement planners now consume one `LayoutDocument` produced by
 `layout_ir::LayoutDocument::bind`. Its closed `StatementLayout` sum type owns
-SELECT, INSERT, UPDATE, and DELETE spans. Shared child records include:
+SELECT, INSERT, UPDATE, DELETE, and MERGE spans. Shared child records include:
 
 - `QueryBlock` and `QueryClauses` for every SELECT branch;
 - `WithBlock` for CTE definitions and the owning statement body;
 - `PredicateBlock` for WHERE, HAVING, JOIN ON, and ON CONFLICT predicates;
 - `InsertBlock`, `UpdateBlock`, and `DeleteBlock` for family-specific clauses;
+- `MergeBlock`, `MergeBranch`, and `MergeAction` for branch ownership;
+- `SetOperationBlock` for UNION / INTERSECT / EXCEPT boundaries;
 - `TokenSpan` for reusable owned token ranges.
 
 The formatter no longer runs independent document-wide statement, SELECT, CTE,
@@ -340,6 +350,10 @@ A PostgreSQL upgrade can produce four outcomes:
 This policy lets the parser be upgraded independently without allowing new
 syntax to fall accidentally into generic whitespace normalization.
 
+The reviewed-parser-version gate additionally makes a `pg_query` upgrade an
+explicit source change. The formatter cannot silently begin accepting a newer
+PostgreSQL grammar after a dependency update.
+
 ## Current architecture boundary
 
 The ownership migration is complete for the currently supported SQL families:
@@ -357,12 +371,16 @@ binder, then reuses existing clause, list, predicate, CASE, CTE, and writer
 logic. A new statement family adds one exhaustive `StatementKind` and
 `StatementLayout` variant. Existing families do not need to be rewritten.
 
+The architecture is now exercised by SELECT, INSERT, UPDATE, DELETE, and
+MERGE. The latest syntax tranche adds INSERT SELECT/OVERRIDING/DEFAULT VALUES,
+shared DML WITH, grouping/sorting/pagination clauses, general set operations,
+and fixture-backed MERGE branches without altering older family planners.
+
 The next syntax extensions are:
 
-1. `INSERT ... SELECT`, `OVERRIDING`, and `DEFAULT VALUES`;
-2. DML `WITH` using the shared `WithBlock`;
-3. GROUP BY, HAVING, ORDER BY, LIMIT/OFFSET/FETCH, and general set operations;
-4. richer source relations and subqueries;
-5. MERGE branch ownership;
-6. DDL and routine ownership;
-7. PL/pgSQL body ownership.
+1. windows, FILTER, and named WINDOW clauses;
+2. lateral, derived, function, and multi-relation sources;
+3. top-level VALUES and richer data-modifying expressions/subqueries;
+4. CREATE TABLE, CREATE INDEX, and ALTER TABLE ownership;
+5. routine and PL/pgSQL body ownership;
+6. protected template ranges, property tests, and fuzzing.

@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    DeleteStmt, InsertStmt, Node, OnConflictAction, OverridingKind, RawStmt, SelectStmt,
-    SetOperation, Token, UpdateStmt,
+    CmdType, DeleteStmt, InsertStmt, MergeMatchKind, MergeStmt, Node, OnConflictAction,
+    OverridingKind, RawStmt, SelectStmt, SetOperation, Token, UpdateStmt,
 };
 use pg_query::{Context, NodeRef};
 use serde_json::Value;
@@ -12,9 +12,14 @@ use super::FormatDiagnostic;
 use super::ownership::{StatementKind, SupportedDocument, source_statement};
 use super::tokens;
 
+/// PostgreSQL server grammar version embedded by the reviewed `pg_query`
+/// backend. A dependency upgrade must update this constant deliberately after
+/// the support classifier and fixtures have been reviewed against the new AST.
+const REVIEWED_POSTGRESQL_VERSION: i32 = 170004;
+
 #[derive(Debug, Default)]
 struct SupportedNodes {
-    recursive_unions: HashSet<usize>,
+    set_operations: HashSet<usize>,
     insert_values: HashSet<usize>,
 }
 
@@ -23,6 +28,16 @@ pub(super) fn parse_supported_postgresql(
 ) -> Result<SupportedDocument, FormatDiagnostic> {
     let parsed = pg_query::parse(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
+    if parsed.protobuf.version != REVIEWED_POSTGRESQL_VERSION {
+        return Err(FormatDiagnostic::UnsupportedSyntax {
+            feature: format!(
+                "unreviewed PostgreSQL parser version {}",
+                parsed.protobuf.version
+            ),
+            start: 0,
+            end: source.len(),
+        });
+    }
 
     let mut supported = SupportedNodes::default();
     let mut statements = Vec::with_capacity(parsed.protobuf.stmts.len());
@@ -72,7 +87,10 @@ fn validate_statement(
             validate_delete(delete, supported)?;
             Ok(StatementKind::Delete)
         }
-        NodeEnum::MergeStmt(_) => Err("MERGE statement"),
+        NodeEnum::MergeStmt(merge) => {
+            validate_merge(merge, supported)?;
+            Ok(StatementKind::Merge)
+        }
         NodeEnum::CreateStmt(_) => Err("CREATE TABLE statement"),
         NodeEnum::IndexStmt(_) => Err("CREATE INDEX statement"),
         NodeEnum::AlterTableStmt(_) => Err("ALTER TABLE statement"),
@@ -82,6 +100,132 @@ fn validate_statement(
     }
 }
 
+fn validate_merge(merge: &MergeStmt, supported: &mut SupportedNodes) -> Result<(), &'static str> {
+    let relation = merge
+        .relation
+        .as_ref()
+        .ok_or("MERGE without a target relation")?;
+    if !relation.inh {
+        return Err("MERGE INTO ONLY target");
+    }
+    match merge
+        .source_relation
+        .as_deref()
+        .and_then(|source| source.node.as_ref())
+    {
+        Some(NodeEnum::RangeVar(range)) if range.inh => {}
+        Some(NodeEnum::RangeVar(_)) => return Err("MERGE USING ONLY relation"),
+        _ => return Err("complex MERGE source"),
+    }
+    if let Some(with_clause) = &merge.with_clause {
+        validate_with_clause(with_clause, supported)?;
+    }
+    let join_condition = merge
+        .join_condition
+        .as_deref()
+        .ok_or("MERGE without a join condition")?;
+    validate_dml_expression(join_condition, supported)?;
+    if merge.merge_when_clauses.is_empty() {
+        return Err("MERGE without WHEN branches");
+    }
+
+    for branch in &merge.merge_when_clauses {
+        let branch = match branch.node.as_ref() {
+            Some(NodeEnum::MergeWhenClause(branch)) => branch,
+            _ => return Err("unrecognized MERGE branch"),
+        };
+        match MergeMatchKind::try_from(branch.match_kind).unwrap_or(MergeMatchKind::Undefined) {
+            MergeMatchKind::Undefined => return Err("unknown MERGE match kind"),
+            MergeMatchKind::MergeWhenMatched
+            | MergeMatchKind::MergeWhenNotMatchedBySource
+            | MergeMatchKind::MergeWhenNotMatchedByTarget => {}
+        }
+        if let Some(condition) = branch.condition.as_deref() {
+            validate_dml_expression(condition, supported)?;
+        }
+
+        match CmdType::try_from(branch.command_type).unwrap_or(CmdType::Undefined) {
+            CmdType::CmdDelete | CmdType::CmdNothing => {
+                if !branch.target_list.is_empty() || !branch.values.is_empty() {
+                    return Err("invalid MERGE branch action");
+                }
+            }
+            CmdType::CmdUpdate => {
+                if branch.target_list.is_empty() || !branch.values.is_empty() {
+                    return Err("invalid MERGE UPDATE action");
+                }
+                for target in &branch.target_list {
+                    let target = match target.node.as_ref() {
+                        Some(NodeEnum::ResTarget(target)) => target,
+                        _ => return Err("unrecognized MERGE UPDATE assignment"),
+                    };
+                    if target.name.is_empty() || !target.indirection.is_empty() {
+                        return Err("complex MERGE UPDATE assignment target");
+                    }
+                    let value = target
+                        .val
+                        .as_deref()
+                        .ok_or("MERGE UPDATE assignment without a value")?;
+                    validate_dml_expression(value, supported)?;
+                }
+            }
+            CmdType::CmdInsert => {
+                match OverridingKind::try_from(branch.r#override)
+                    .unwrap_or(OverridingKind::Undefined)
+                {
+                    OverridingKind::Undefined => {
+                        return Err("unknown MERGE INSERT OVERRIDING clause");
+                    }
+                    OverridingKind::OverridingNotSet
+                    | OverridingKind::OverridingUserValue
+                    | OverridingKind::OverridingSystemValue => {}
+                }
+                for target in &branch.target_list {
+                    let target = match target.node.as_ref() {
+                        Some(NodeEnum::ResTarget(target)) => target,
+                        _ => return Err("unrecognized MERGE INSERT target"),
+                    };
+                    if target.name.is_empty()
+                        || !target.indirection.is_empty()
+                        || target.val.is_some()
+                    {
+                        return Err("complex MERGE INSERT target");
+                    }
+                }
+                if branch.values.is_empty() {
+                    return Err("MERGE INSERT without VALUES");
+                }
+                if !branch.target_list.is_empty() && branch.target_list.len() != branch.values.len()
+                {
+                    return Err("MERGE INSERT target/value arity mismatch");
+                }
+                for value in &branch.values {
+                    validate_dml_expression(value, supported)?;
+                }
+            }
+            CmdType::Undefined
+            | CmdType::CmdUnknown
+            | CmdType::CmdSelect
+            | CmdType::CmdMerge
+            | CmdType::CmdUtility => return Err("unknown MERGE action"),
+        }
+    }
+
+    for result in &merge.returning_list {
+        let result = match result.node.as_ref() {
+            Some(NodeEnum::ResTarget(result)) => result,
+            _ => return Err("unrecognized MERGE RETURNING expression"),
+        };
+        let value = result
+            .val
+            .as_deref()
+            .ok_or("MERGE RETURNING expression without a value")?;
+        validate_dml_expression(value, supported)?;
+    }
+
+    Ok(())
+}
+
 fn validate_insert(
     insert: &InsertStmt,
     supported: &mut SupportedNodes,
@@ -89,52 +233,58 @@ fn validate_insert(
     if insert.relation.is_none() {
         return Err("INSERT without a target relation");
     }
-    if insert.with_clause.is_some() {
-        return Err("INSERT WITH clause");
+    if let Some(with_clause) = &insert.with_clause {
+        validate_with_clause(with_clause, supported)?;
     }
     if let Some(conflict) = &insert.on_conflict_clause {
         validate_on_conflict(conflict)?;
     }
-    if matches!(
-        OverridingKind::try_from(insert.r#override).unwrap_or(OverridingKind::Undefined),
-        OverridingKind::OverridingUserValue | OverridingKind::OverridingSystemValue
-    ) {
-        return Err("INSERT OVERRIDING clause");
+    match OverridingKind::try_from(insert.r#override).unwrap_or(OverridingKind::Undefined) {
+        OverridingKind::Undefined => return Err("unknown INSERT OVERRIDING clause"),
+        OverridingKind::OverridingNotSet
+        | OverridingKind::OverridingUserValue
+        | OverridingKind::OverridingSystemValue => {}
     }
 
-    let select = insert
-        .select_stmt
-        .as_deref()
-        .and_then(|node| node.node.as_ref())
+    let Some(select_node) = insert.select_stmt.as_deref() else {
+        // PostgreSQL represents DEFAULT VALUES as an INSERT with no source node.
+        return Ok(());
+    };
+    let select = select_node
+        .node
+        .as_ref()
         .and_then(|node| match node {
             NodeEnum::SelectStmt(select) => Some(select),
             _ => None,
         })
-        .ok_or("INSERT without VALUES")?;
+        .ok_or("unrecognized INSERT source")?;
 
-    validate_select_fields(select, true)?;
-    if select.values_lists.is_empty() {
-        return Err("INSERT source query");
-    }
-    if SetOperation::try_from(select.op).unwrap_or(SetOperation::Undefined)
-        != SetOperation::SetopNone
-        || select.larg.is_some()
-        || select.rarg.is_some()
-        || select.with_clause.is_some()
-        || !select.target_list.is_empty()
-        || !select.from_clause.is_empty()
-        || select.where_clause.is_some()
-    {
-        return Err("INSERT source query");
+    if !select.values_lists.is_empty() {
+        validate_select_fields(select, true)?;
+        if SetOperation::try_from(select.op).unwrap_or(SetOperation::Undefined)
+            != SetOperation::SetopNone
+            || select.larg.is_some()
+            || select.rarg.is_some()
+            || select.with_clause.is_some()
+            || !select.target_list.is_empty()
+            || !select.from_clause.is_empty()
+            || select.where_clause.is_some()
+        {
+            return Err("invalid INSERT VALUES source");
+        }
+        supported
+            .insert_values
+            .insert(select.as_ref() as *const SelectStmt as usize);
+        return Ok(());
     }
 
-    supported
-        .insert_values
-        .insert(select.as_ref() as *const SelectStmt as usize);
-    Ok(())
+    validate_select(select, false, supported)
 }
 
-fn validate_update(update: &UpdateStmt, supported: &SupportedNodes) -> Result<(), &'static str> {
+fn validate_update(
+    update: &UpdateStmt,
+    supported: &mut SupportedNodes,
+) -> Result<(), &'static str> {
     let relation = update
         .relation
         .as_ref()
@@ -142,8 +292,8 @@ fn validate_update(update: &UpdateStmt, supported: &SupportedNodes) -> Result<()
     if !relation.inh {
         return Err("UPDATE ONLY target");
     }
-    if update.with_clause.is_some() {
-        return Err("UPDATE WITH clause");
+    if let Some(with_clause) = &update.with_clause {
+        validate_with_clause(with_clause, supported)?;
     }
     if update.target_list.is_empty() {
         return Err("UPDATE without assignments");
@@ -196,7 +346,10 @@ fn validate_update(update: &UpdateStmt, supported: &SupportedNodes) -> Result<()
     Ok(())
 }
 
-fn validate_delete(delete: &DeleteStmt, supported: &SupportedNodes) -> Result<(), &'static str> {
+fn validate_delete(
+    delete: &DeleteStmt,
+    supported: &mut SupportedNodes,
+) -> Result<(), &'static str> {
     let relation = delete
         .relation
         .as_ref()
@@ -204,8 +357,8 @@ fn validate_delete(delete: &DeleteStmt, supported: &SupportedNodes) -> Result<()
     if !relation.inh {
         return Err("DELETE FROM ONLY target");
     }
-    if delete.with_clause.is_some() {
-        return Err("DELETE WITH clause");
+    if let Some(with_clause) = &delete.with_clause {
+        validate_with_clause(with_clause, supported)?;
     }
     if delete.using_clause.len() > 1 {
         return Err("multiple DELETE USING relations");
@@ -278,6 +431,33 @@ fn validate_on_conflict(
     Ok(())
 }
 
+fn validate_with_clause(
+    with_clause: &pg_query::protobuf::WithClause,
+    supported: &mut SupportedNodes,
+) -> Result<(), &'static str> {
+    for cte_node in &with_clause.ctes {
+        let cte = match cte_node.node.as_ref() {
+            Some(NodeEnum::CommonTableExpr(cte)) => cte,
+            _ => return Err("unrecognized common table expression"),
+        };
+        if cte.search_clause.is_some() || cte.cycle_clause.is_some() {
+            return Err("CTE SEARCH or CYCLE clause");
+        }
+        let query = cte
+            .ctequery
+            .as_deref()
+            .and_then(|query| query.node.as_ref())
+            .ok_or("empty common table expression")?;
+        match query {
+            NodeEnum::SelectStmt(select) => {
+                validate_select(select, with_clause.recursive, supported)?
+            }
+            _ => return Err("data-modifying common table expression"),
+        }
+    }
+    Ok(())
+}
+
 fn validate_select(
     select: &SelectStmt,
     allow_recursive_union: bool,
@@ -286,71 +466,37 @@ fn validate_select(
     validate_select_fields(select, false)?;
 
     if let Some(with_clause) = &select.with_clause {
-        for cte_node in &with_clause.ctes {
-            let cte = match cte_node.node.as_ref() {
-                Some(NodeEnum::CommonTableExpr(cte)) => cte,
-                _ => return Err("unrecognized common table expression"),
-            };
-            if cte.search_clause.is_some() || cte.cycle_clause.is_some() {
-                return Err("CTE SEARCH or CYCLE clause");
-            }
-            let query = cte
-                .ctequery
-                .as_deref()
-                .and_then(|query| query.node.as_ref())
-                .ok_or("empty common table expression")?;
-            match query {
-                NodeEnum::SelectStmt(select) => {
-                    validate_select(select, with_clause.recursive, supported)?
-                }
-                _ => return Err("data-modifying common table expression"),
-            }
-        }
+        validate_with_clause(with_clause, supported)?;
     }
 
     let operation = SetOperation::try_from(select.op).unwrap_or(SetOperation::Undefined);
     match operation {
         SetOperation::SetopNone => Ok(()),
-        SetOperation::SetopUnion if allow_recursive_union && select.all => {
+        SetOperation::SetopUnion | SetOperation::SetopIntersect | SetOperation::SetopExcept => {
+            if allow_recursive_union && operation != SetOperation::SetopUnion {
+                return Err("recursive CTE with non-UNION set operation");
+            }
             supported
-                .recursive_unions
+                .set_operations
                 .insert(select as *const SelectStmt as usize);
-            let left = select.larg.as_deref().ok_or("incomplete UNION ALL")?;
-            let right = select.rarg.as_deref().ok_or("incomplete UNION ALL")?;
+            let left = select.larg.as_deref().ok_or("incomplete set operation")?;
+            let right = select.rarg.as_deref().ok_or("incomplete set operation")?;
             validate_select(left, false, supported)?;
             validate_select(right, false, supported)
         }
-        SetOperation::SetopUnion => Err("general UNION or UNION ALL expression"),
-        SetOperation::SetopIntersect => Err("INTERSECT expression"),
-        SetOperation::SetopExcept => Err("EXCEPT expression"),
         SetOperation::Undefined => Err("unknown set operation"),
     }
 }
 
 fn validate_select_fields(select: &SelectStmt, allow_values: bool) -> Result<(), &'static str> {
-    if !select.distinct_clause.is_empty() {
-        return Err("SELECT DISTINCT clause");
-    }
     if select.into_clause.is_some() {
         return Err("SELECT INTO clause");
-    }
-    if !select.group_clause.is_empty() || select.group_distinct {
-        return Err("GROUP BY clause");
-    }
-    if select.having_clause.is_some() {
-        return Err("HAVING clause");
     }
     if !select.window_clause.is_empty() {
         return Err("WINDOW clause");
     }
     if !allow_values && !select.values_lists.is_empty() {
         return Err("VALUES statement");
-    }
-    if !select.sort_clause.is_empty() {
-        return Err("ORDER BY clause");
-    }
-    if select.limit_offset.is_some() || select.limit_count.is_some() {
-        return Err("LIMIT, OFFSET, or FETCH clause");
     }
     if !select.locking_clause.is_empty() {
         return Err("row-locking clause");
@@ -368,8 +514,7 @@ fn validate_nested_node(
             let pointer = select as *const SelectStmt as usize;
             validate_select_fields(select, supported.insert_values.contains(&pointer))?;
             let operation = SetOperation::try_from(select.op).unwrap_or(SetOperation::Undefined);
-            if operation != SetOperation::SetopNone
-                && !supported.recursive_unions.contains(&pointer)
+            if operation != SetOperation::SetopNone && !supported.set_operations.contains(&pointer)
             {
                 return Err("general set-operation expression");
             }
@@ -479,4 +624,15 @@ fn protected_tokens(source: &str) -> Result<Vec<(Token, String)>, FormatDiagnost
         })
         .map(|token| (token.kind, token.text.to_owned()))
         .collect())
+}
+
+#[cfg(test)]
+mod parser_version_tests {
+    use super::REVIEWED_POSTGRESQL_VERSION;
+
+    #[test]
+    fn pinned_pg_query_uses_the_reviewed_postgresql_grammar() {
+        let parsed = pg_query::parse("SELECT 1;").expect("PostgreSQL parse succeeds");
+        assert_eq!(parsed.protobuf.version, REVIEWED_POSTGRESQL_VERSION);
+    }
 }

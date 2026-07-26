@@ -14,6 +14,7 @@ pub(super) enum StatementKind {
     Insert,
     Update,
     Delete,
+    Merge,
 }
 
 /// UTF-8 byte span owned by one top-level PostgreSQL statement.

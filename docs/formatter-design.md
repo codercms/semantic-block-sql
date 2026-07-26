@@ -357,25 +357,24 @@ only source-location fields. It separately compares protected token text and
 order, then requires a byte-identical second formatting pass.
 
 Before layout, the same PostgreSQL AST is classified against the fixture-backed
-support boundary. Unsupported statement families, unowned SELECT clauses,
-general set operations, advanced aggregate/window forms, and lateral sources
-return `syntax.unsupported` over the original statement range. The recursive CTE
-`UNION ALL` shape remains supported because it has dedicated fixtures. This
-classifier is extended in the same batch that introduces each new statement
-planner; generic token normalization is never the fallback for unsupported
-syntax.
+support boundary. Unsupported statement families, unowned clauses, advanced
+aggregate/window forms, lateral or derived sources, and unknown future protobuf
+shapes return `syntax.unsupported` over the original statement range. General
+set operations and the recursive CTE `UNION ALL` shape are now supported through
+owned branch records. The classifier is extended in the same batch that
+introduces each new statement planner; generic token normalization is never the
+fallback for unsupported syntax.
 
-The first Batch 3 extensions admit `INSERT ... VALUES ... RETURNING` and
-fixture-backed `ON CONFLICT`. Column lists, individual VALUES rows, RETURNING
-expressions, conflict targets, and `DO UPDATE SET` assignments share the
-source-aware list planner: short forms stay compact, authored groups remain
+The INSERT planner owns VALUES, source SELECT, DEFAULT VALUES, OVERRIDING,
+RETURNING, and fixture-backed ON CONFLICT. Column lists, individual VALUES rows,
+RETURNING expressions, conflict targets, and `DO UPDATE SET` assignments share
+the source-aware list planner: short forms stay compact, authored groups remain
 stable, width-driven ungrouped lists expand one item per line, and complex rows
 may expand independently. `ON CONFLICT DO NOTHING` may remain compact; `DO
 UPDATE` separates the conflict target, action, `SET`, and action `WHERE`. A
-conflict-target predicate remains owned by `ON CONFLICT`, while the later
-predicate remains owned by the update action. `INSERT ... SELECT`, `WITH`,
-`OVERRIDING`, and `DEFAULT VALUES` remain explicitly unsupported until their
-own fixture-backed planners are implemented.
+conflict-target predicate remains owned by ON CONFLICT, while the later
+predicate remains owned by the update action. SELECT-backed WITH clauses reuse
+the same `WithBlock` for SELECT, INSERT, UPDATE, DELETE, and MERGE.
 
 The UPDATE planner supports a target relation, simple named assignments,
 optional one-relation `FROM`, `WHERE`, and `RETURNING`. A short single-assignment
@@ -384,6 +383,15 @@ predicate expands the statement, `SET` owns one assignment per line and the
 remaining clauses start at statement scope. `WITH`, `ONLY`, multi-column or
 subscripted assignment targets, multiple or joined FROM sources, and subqueries
 remain fail-safe unsupported shapes.
+
+The MERGE planner is a separate exhaustive statement variant because its branch
+ownership is grammar-specific. `MergeBlock` owns USING/ON, ordered WHEN
+branches, and RETURNING; each `MergeBranch` owns its optional condition and a
+closed `MergeAction` variant for DELETE, UPDATE SET, INSERT VALUES, or DO
+NOTHING. Blank lines separate branches, action introducers stay on the owner
+line, and existing list/predicate planners format nested assignments and values.
+The current safe subset accepts plain target/source relations and preserves
+derived or joined sources unchanged with `syntax.unsupported`.
 
 The DELETE planner supports a target relation, an optional single plain `USING`
 relation, `WHERE`, and `RETURNING`. Compact DELETE statements remain inline;

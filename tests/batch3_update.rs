@@ -58,7 +58,6 @@ fn update_set_comments_remain_attached() {
 #[test]
 fn unsupported_update_variants_remain_unchanged() {
     for source in [
-        "WITH source AS (SELECT 1 AS id) UPDATE items SET title = 'x';",
         "UPDATE ONLY items SET title = 'x';",
         "UPDATE items SET (title, updated_at) = ('x', NOW());",
         "UPDATE items SET payload['title'] = 'x';",

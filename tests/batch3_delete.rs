@@ -48,7 +48,6 @@ fn delete_comments_remain_attached() {
 #[test]
 fn unsupported_delete_variants_remain_unchanged() {
     for source in [
-        "WITH source AS (SELECT 1 AS id) DELETE FROM items;",
         "DELETE FROM ONLY items WHERE id = 1;",
         "DELETE FROM items USING ONLY staging.items source WHERE items.id = source.id;",
         "DELETE FROM items USING staging.items source, staging.other other WHERE items.id = source.id;",

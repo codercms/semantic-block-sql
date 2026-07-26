@@ -65,9 +65,18 @@ impl QueryClauses {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct QueryBlock {
     pub select: usize,
+    pub list_start: usize,
     pub end: usize,
     pub base_depth: usize,
     pub clauses: QueryClauses,
+}
+
+/// UNION / INTERSECT / EXCEPT ownership between two query branches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SetOperationBlock {
+    pub operator: usize,
+    pub next_branch: usize,
+    pub base_depth: usize,
 }
 
 /// WITH ownership shared by SELECT and data-modifying statements.
@@ -86,6 +95,8 @@ pub(super) enum PredicateKind {
     JoinOn,
     ConflictTarget,
     ConflictAction,
+    MergeOn,
+    MergeWhen,
 }
 
 /// Predicate content owned by a clause introducer.
@@ -157,6 +168,40 @@ pub(super) struct DeleteBlock {
     pub returning: Option<usize>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MergeAction {
+    Delete,
+    Nothing,
+    Update {
+        set: usize,
+    },
+    Insert {
+        target_open: Option<usize>,
+        overriding: Option<usize>,
+        values: usize,
+        values_open: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct MergeBranch {
+    pub start: usize,
+    pub condition: Option<usize>,
+    pub then: usize,
+    pub action: MergeAction,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MergeBlock {
+    pub span: TokenSpan,
+    pub body_start: usize,
+    pub using: usize,
+    pub on: usize,
+    pub branches: Vec<MergeBranch>,
+    pub returning: Option<usize>,
+}
+
 /// Exhaustive top-level layout dispatcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum StatementLayout {
@@ -164,6 +209,7 @@ pub(super) enum StatementLayout {
     Insert(InsertBlock),
     Update(UpdateBlock),
     Delete(DeleteBlock),
+    Merge(MergeBlock),
 }
 
 /// Token-bound ownership IR consumed by all layout planners.
@@ -173,6 +219,7 @@ pub(super) struct LayoutDocument {
     queries: Vec<QueryBlock>,
     with_blocks: Vec<WithBlock>,
     predicates: Vec<PredicateBlock>,
+    set_operations: Vec<SetOperationBlock>,
 }
 
 impl LayoutDocument {
@@ -212,17 +259,22 @@ impl LayoutDocument {
                     *statement,
                     body_start,
                 )?),
+                StatementKind::Merge => {
+                    StatementLayout::Merge(bind_merge(tokens, structure, *statement, body_start)?)
+                }
             });
         }
 
-        let queries = bind_queries(tokens, structure.depths(), &token_statements);
+        let queries = bind_queries(tokens, structure, &token_statements);
         let predicates = bind_predicates(tokens, structure.depths(), &queries, &statements);
+        let set_operations = bind_set_operations(tokens, structure.depths(), &token_statements);
 
         Ok(Self {
             statements,
             queries,
             with_blocks,
             predicates,
+            set_operations,
         })
     }
 
@@ -236,6 +288,10 @@ impl LayoutDocument {
 
     pub fn predicates(&self) -> &[PredicateBlock] {
         &self.predicates
+    }
+
+    pub fn set_operations(&self) -> &[SetOperationBlock] {
+        &self.set_operations
     }
 
     pub fn inserts(&self) -> impl Iterator<Item = &InsertBlock> {
@@ -264,6 +320,15 @@ impl LayoutDocument {
                 _ => None,
             })
     }
+
+    pub fn merges(&self) -> impl Iterator<Item = &MergeBlock> {
+        self.statements
+            .iter()
+            .filter_map(|statement| match statement {
+                StatementLayout::Merge(block) => Some(block),
+                _ => None,
+            })
+    }
 }
 
 fn bind_body_start(
@@ -288,6 +353,7 @@ fn statement_token(kind: StatementKind) -> Token {
         StatementKind::Insert => Token::Insert,
         StatementKind::Update => Token::Update,
         StatementKind::Delete => Token::DeleteP,
+        StatementKind::Merge => Token::Merge,
     }
 }
 
@@ -567,11 +633,155 @@ fn bind_delete(
     })
 }
 
+fn bind_merge(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: TokenStatement,
+    body_start: usize,
+) -> Result<MergeBlock, FormatDiagnostic> {
+    let depths = structure.depths();
+    let base_depth = statement.base_depth;
+    let end = statement.end;
+    let returning = find_kind(
+        tokens,
+        depths,
+        body_start + 1,
+        end,
+        base_depth,
+        Token::Returning,
+    );
+    let boundary = returning.unwrap_or(end);
+    let using = find_kind(
+        tokens,
+        depths,
+        body_start + 1,
+        boundary,
+        base_depth,
+        Token::Using,
+    )
+    .ok_or_else(|| FormatDiagnostic::Ownership("supported MERGE has no USING clause".into()))?;
+    let first_when = find_kind(tokens, depths, using + 1, boundary, base_depth, Token::When)
+        .ok_or_else(|| FormatDiagnostic::Ownership("supported MERGE has no WHEN branch".into()))?;
+    let on = find_kind(tokens, depths, using + 1, first_when, base_depth, Token::On)
+        .ok_or_else(|| FormatDiagnostic::Ownership("supported MERGE has no ON clause".into()))?;
+
+    let branch_starts = (first_when..boundary)
+        .filter(|index| depths[*index] == base_depth && tokens[*index].kind == Token::When)
+        .collect::<Vec<_>>();
+    let mut branches = Vec::with_capacity(branch_starts.len());
+    for (position, start) in branch_starts.iter().copied().enumerate() {
+        let branch_end = branch_starts.get(position + 1).copied().unwrap_or(boundary);
+        let then = find_kind(
+            tokens,
+            depths,
+            start + 1,
+            branch_end,
+            base_depth,
+            Token::Then,
+        )
+        .ok_or_else(|| FormatDiagnostic::Ownership("MERGE branch has no THEN".into()))?;
+        let condition = find_kind(tokens, depths, start + 1, then, base_depth, Token::And);
+        let action_start = then + 1;
+        let action = match tokens.get(action_start).map(|token| token.kind) {
+            Some(Token::DeleteP) => MergeAction::Delete,
+            Some(Token::Update) => MergeAction::Update {
+                set: find_kind(
+                    tokens,
+                    depths,
+                    action_start + 1,
+                    branch_end,
+                    base_depth,
+                    Token::Set,
+                )
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("MERGE UPDATE action has no SET clause".into())
+                })?,
+            },
+            Some(Token::Insert) => {
+                let values = find_kind(
+                    tokens,
+                    depths,
+                    action_start + 1,
+                    branch_end,
+                    base_depth,
+                    Token::Values,
+                )
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("MERGE INSERT action has no VALUES clause".into())
+                })?;
+                let target_open = (action_start + 1..values).find(|index| {
+                    depths[*index] == base_depth
+                        && tokens[*index].kind == Token::Ascii40
+                        && structure
+                            .matching_parenthesis(*index)
+                            .is_some_and(|close| close < values)
+                });
+                let overriding = find_kind(
+                    tokens,
+                    depths,
+                    action_start + 1,
+                    values,
+                    base_depth,
+                    Token::Overriding,
+                );
+                let values_open = (values + 1..branch_end)
+                    .find(|index| {
+                        depths[*index] == base_depth && tokens[*index].kind == Token::Ascii40
+                    })
+                    .ok_or_else(|| {
+                        FormatDiagnostic::Ownership(
+                            "MERGE INSERT VALUES has no parenthesized row".into(),
+                        )
+                    })?;
+                MergeAction::Insert {
+                    target_open,
+                    overriding,
+                    values,
+                    values_open,
+                }
+            }
+            Some(Token::Do)
+                if tokens
+                    .get(action_start + 1)
+                    .is_some_and(|token| token.kind == Token::Nothing) =>
+            {
+                MergeAction::Nothing
+            }
+            _ => {
+                return Err(FormatDiagnostic::Ownership(
+                    "unsupported MERGE action token ownership".into(),
+                ));
+            }
+        };
+        branches.push(MergeBranch {
+            start,
+            condition,
+            then,
+            action,
+            end: branch_end,
+        });
+    }
+
+    Ok(MergeBlock {
+        span: TokenSpan {
+            start: statement.start,
+            end,
+            base_depth,
+        },
+        body_start,
+        using,
+        on,
+        branches,
+        returning,
+    })
+}
+
 fn bind_queries(
     tokens: &[SqlToken<'_>],
-    depths: &[usize],
+    structure: &TokenStructure,
     statements: &[TokenStatement],
 ) -> Vec<QueryBlock> {
+    let depths = structure.depths();
     let mut queries = Vec::new();
     for statement in statements {
         for select in statement.start..statement.end {
@@ -583,14 +793,23 @@ fn bind_queries(
                 .find(|index| {
                     depths[*index] < base_depth
                         || (depths[*index] == base_depth
-                            && matches!(
+                            && (matches!(
                                 tokens[*index].kind,
-                                Token::Ascii59 | Token::Union | Token::Intersect | Token::Except
-                            ))
+                                Token::Ascii59
+                                    | Token::Union
+                                    | Token::Intersect
+                                    | Token::Except
+                                    | Token::Returning
+                            ) || (tokens[*index].kind == Token::On
+                                && tokens
+                                    .get(*index + 1)
+                                    .is_some_and(|next| next.kind == Token::Conflict))))
                 })
                 .unwrap_or(statement.end);
+            let list_start = select_list_start(tokens, structure, select, end);
             queries.push(QueryBlock {
                 select,
+                list_start,
                 end,
                 base_depth,
                 clauses: bind_query_clauses(tokens, depths, select, end, base_depth),
@@ -600,6 +819,63 @@ fn bind_queries(
     queries.sort_by_key(|query| query.select);
     queries.dedup_by_key(|query| query.select);
     queries
+}
+
+fn select_list_start(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    select: usize,
+    end: usize,
+) -> usize {
+    let mut start = select + 1;
+    if start >= end {
+        return start;
+    }
+    if matches!(tokens[start].kind, Token::Distinct | Token::All) {
+        start += 1;
+        if tokens[start - 1].kind == Token::Distinct
+            && tokens
+                .get(start)
+                .is_some_and(|token| token.kind == Token::On)
+            && tokens
+                .get(start + 1)
+                .is_some_and(|token| token.kind == Token::Ascii40)
+        {
+            if let Some(close) = structure.matching_parenthesis(start + 1) {
+                start = close + 1;
+            }
+        }
+    }
+    start.min(end)
+}
+
+fn bind_set_operations(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    statements: &[TokenStatement],
+) -> Vec<SetOperationBlock> {
+    let mut result = Vec::new();
+    for statement in statements {
+        for operator in statement.start..statement.end {
+            if !matches!(
+                tokens[operator].kind,
+                Token::Union | Token::Intersect | Token::Except
+            ) {
+                continue;
+            }
+            let base_depth = depths[operator];
+            let next_branch = (operator + 1..statement.end)
+                .find(|index| depths[*index] == base_depth && tokens[*index].kind == Token::Select);
+            if let Some(next_branch) = next_branch {
+                result.push(SetOperationBlock {
+                    operator,
+                    next_branch,
+                    base_depth,
+                });
+            }
+        }
+    }
+    result
 }
 
 fn bind_query_clauses(
@@ -765,6 +1041,28 @@ fn bind_predicates(
                         delete.returning.unwrap_or(delete.span.end),
                         delete.span.base_depth,
                     );
+                }
+            }
+            StatementLayout::Merge(merge) => {
+                push_predicate(
+                    &mut result,
+                    &mut seen,
+                    PredicateKind::MergeOn,
+                    merge.on,
+                    merge.branches[0].start,
+                    merge.span.base_depth,
+                );
+                for branch in &merge.branches {
+                    if let Some(condition) = branch.condition {
+                        push_predicate(
+                            &mut result,
+                            &mut seen,
+                            PredicateKind::MergeWhen,
+                            condition,
+                            branch.then,
+                            merge.span.base_depth,
+                        );
+                    }
                 }
             }
             StatementLayout::Select(_) => {}

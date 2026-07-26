@@ -23,13 +23,11 @@ fn unsupported_statement_family_returns_original_source() {
 #[test]
 fn unowned_select_layouts_are_explicitly_unsupported() {
     for source in [
-        "SELECT DISTINCT id FROM items;",
-        "SELECT id FROM items ORDER BY id;",
-        "SELECT id FROM items LIMIT 1;",
+        "SELECT id INTO archived_items FROM items;",
         "SELECT COUNT(*) FILTER (WHERE active) FROM items;",
+        "SELECT row_number() OVER () FROM items;",
         "SELECT * FROM LATERAL (SELECT 1) source;",
-        "SELECT 1 UNION ALL SELECT 2;",
-        "SELECT * FROM (SELECT 1 UNION ALL SELECT 2) source;",
+        "SELECT id FROM items FOR UPDATE;",
         "VALUES (1), (2);",
     ] {
         let formatted = format_sql_result(source, &FormatOptions::default());
