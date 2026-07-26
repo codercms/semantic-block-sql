@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    InsertStmt, Node, OnConflictAction, OverridingKind, RawStmt, SelectStmt, SetOperation, Token,
-    UpdateStmt,
+    DeleteStmt, InsertStmt, Node, OnConflictAction, OverridingKind, RawStmt, SelectStmt,
+    SetOperation, Token, UpdateStmt,
 };
 use pg_query::{Context, NodeRef};
 use serde_json::Value;
@@ -51,7 +51,7 @@ fn validate_statement(raw: &RawStmt, supported: &mut SupportedNodes) -> Result<(
         NodeEnum::SelectStmt(select) => validate_select(select, false, supported),
         NodeEnum::InsertStmt(insert) => validate_insert(insert, supported),
         NodeEnum::UpdateStmt(update) => validate_update(update, supported),
-        NodeEnum::DeleteStmt(_) => Err("DELETE statement"),
+        NodeEnum::DeleteStmt(delete) => validate_delete(delete, supported),
         NodeEnum::MergeStmt(_) => Err("MERGE statement"),
         NodeEnum::CreateStmt(_) => Err("CREATE TABLE statement"),
         NodeEnum::IndexStmt(_) => Err("CREATE INDEX statement"),
@@ -144,7 +144,7 @@ fn validate_update(update: &UpdateStmt, supported: &SupportedNodes) -> Result<()
         if matches!(value.node.as_ref(), Some(NodeEnum::MultiAssignRef(_))) {
             return Err("multi-column UPDATE assignment");
         }
-        validate_update_expression(value, supported)?;
+        validate_dml_expression(value, supported)?;
     }
 
     if update.from_clause.len() > 1 {
@@ -159,7 +159,7 @@ fn validate_update(update: &UpdateStmt, supported: &SupportedNodes) -> Result<()
     }
 
     if let Some(predicate) = update.where_clause.as_deref() {
-        validate_update_expression(predicate, supported)?;
+        validate_dml_expression(predicate, supported)?;
     }
     for result in &update.returning_list {
         let result = match result.node.as_ref() {
@@ -170,20 +170,61 @@ fn validate_update(update: &UpdateStmt, supported: &SupportedNodes) -> Result<()
             .val
             .as_deref()
             .ok_or("UPDATE RETURNING expression without a value")?;
-        validate_update_expression(value, supported)?;
+        validate_dml_expression(value, supported)?;
     }
 
     Ok(())
 }
 
-fn validate_update_expression(
+fn validate_delete(delete: &DeleteStmt, supported: &SupportedNodes) -> Result<(), &'static str> {
+    let relation = delete
+        .relation
+        .as_ref()
+        .ok_or("DELETE without a target relation")?;
+    if !relation.inh {
+        return Err("DELETE FROM ONLY target");
+    }
+    if delete.with_clause.is_some() {
+        return Err("DELETE WITH clause");
+    }
+    if delete.using_clause.len() > 1 {
+        return Err("multiple DELETE USING relations");
+    }
+    if let Some(source) = delete.using_clause.first() {
+        match source.node.as_ref() {
+            Some(NodeEnum::RangeVar(range)) if range.inh => {}
+            Some(NodeEnum::RangeVar(_)) => return Err("DELETE USING ONLY relation"),
+            _ => return Err("complex DELETE USING source"),
+        }
+    }
+    if let Some(predicate) = delete.where_clause.as_deref() {
+        validate_dml_expression(predicate, supported)?;
+    }
+    for result in &delete.returning_list {
+        let result = match result.node.as_ref() {
+            Some(NodeEnum::ResTarget(result)) => result,
+            _ => return Err("unrecognized DELETE RETURNING expression"),
+        };
+        let value = result
+            .val
+            .as_deref()
+            .ok_or("DELETE RETURNING expression without a value")?;
+        validate_dml_expression(value, supported)?;
+    }
+    Ok(())
+}
+
+fn validate_dml_expression(
     expression: &Node,
     supported: &SupportedNodes,
 ) -> Result<(), &'static str> {
-    let root = expression.node.as_ref().ok_or("empty UPDATE expression")?;
+    let root = expression
+        .node
+        .as_ref()
+        .ok_or("empty data-modifying expression")?;
     for (node, _, context, _) in root.nodes() {
         if matches!(node, NodeRef::SubLink(_)) {
-            return Err("subquery in UPDATE expression");
+            return Err("subquery in data-modifying expression");
         }
         validate_nested_node(node, context, supported)?;
     }

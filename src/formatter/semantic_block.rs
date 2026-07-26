@@ -125,6 +125,16 @@ struct UpdateBlock {
     returning: Option<usize>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct DeleteBlock {
+    start: usize,
+    end: usize,
+    base_depth: usize,
+    using: Option<usize>,
+    where_clause: Option<usize>,
+    returning: Option<usize>,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct TerminalSemicolonPlan {
     omit: Option<usize>,
@@ -142,6 +152,7 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
     let cases = case_ranges(&tokens, options);
     let inserts = insert_blocks(&tokens, &depths, &parens);
     let updates = update_blocks(&tokens, &depths);
+    let deletes = delete_blocks(&tokens, &depths);
     let parenthesized_lists =
         parenthesized_lists(&tokens, &depths, &parens, &cases, &inserts, options);
     let ctes = cte_blocks(&tokens, &depths, &parens);
@@ -172,6 +183,16 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
         &parenthesized_lists,
         &boolean_ranges,
         &updates,
+        options,
+        &mut plan,
+    );
+    plan_delete_statements(
+        &tokens,
+        &depths,
+        &cases,
+        &parenthesized_lists,
+        &boolean_ranges,
+        &deletes,
         options,
         &mut plan,
     );
@@ -656,6 +677,91 @@ fn plan_update_statements(
                 returning,
                 update.end,
                 update.base_depth,
+                width_driven,
+                options,
+                plan,
+            );
+        }
+    }
+}
+
+fn delete_blocks(tokens: &[SqlToken<'_>], depths: &[usize]) -> Vec<DeleteBlock> {
+    let mut blocks = Vec::new();
+
+    for (start, token) in tokens.iter().enumerate() {
+        if token.kind != Token::DeleteP {
+            continue;
+        }
+        let base_depth = depths[start];
+        let end = (start + 1..tokens.len())
+            .find(|&index| {
+                depths[index] < base_depth
+                    || (depths[index] == base_depth && tokens[index].kind == Token::Ascii59)
+            })
+            .unwrap_or(tokens.len());
+        let using = (start + 1..end)
+            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Using);
+        let where_clause = (start + 1..end)
+            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Where);
+        let returning = (start + 1..end)
+            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Returning);
+        blocks.push(DeleteBlock {
+            start,
+            end,
+            base_depth,
+            using,
+            where_clause,
+            returning,
+        });
+    }
+
+    blocks
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_delete_statements(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    cases: &[CaseRange],
+    lists: &[ParenthesizedList],
+    boolean_ranges: &[BooleanRange],
+    deletes: &[DeleteBlock],
+    options: &FormatOptions,
+    plan: &mut LayoutPlan,
+) {
+    for delete in deletes {
+        let authored = tokens[delete.start + 1..delete.end]
+            .iter()
+            .any(|token| token.line_breaks_before > 0);
+        let compact_statement_width = delete.base_depth * INDENT_WIDTH
+            + compact_width(tokens, delete.start, delete.end, options);
+        let width_driven = compact_statement_width > options.soft_line_width;
+        let has_expanded_predicate = delete.where_clause.is_some_and(|where_clause| {
+            boolean_ranges
+                .iter()
+                .any(|range| range.start == where_clause + 1 && range.end <= delete.end)
+        });
+        let expanded = authored || delete.using.is_some() || width_driven || has_expanded_predicate;
+        if !expanded {
+            continue;
+        }
+
+        if let Some(using) = delete.using {
+            plan.break_before(using, 1, delete.base_depth);
+        }
+        if let Some(where_clause) = delete.where_clause {
+            plan.break_before(where_clause, 1, delete.base_depth);
+        }
+        if let Some(returning) = delete.returning {
+            plan.break_before(returning, 1, delete.base_depth);
+            plan_keyword_list(
+                tokens,
+                depths,
+                cases,
+                lists,
+                returning,
+                delete.end,
+                delete.base_depth,
                 width_driven,
                 options,
                 plan,
@@ -1257,6 +1363,7 @@ fn boolean_ranges(
                                 Token::Ascii59
                                     | Token::Do
                                     | Token::Union
+                                    | Token::Using
                                     | Token::Intersect
                                     | Token::Except
                             )))
@@ -1746,6 +1853,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::CurrentUser
             | Token::DayP
             | Token::Distinct
+            | Token::DeleteP
             | Token::Do
             | Token::Else
             | Token::EndP

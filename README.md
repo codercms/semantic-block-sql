@@ -11,7 +11,8 @@ recursively walks projects, respects ignore files, and supports local/CI
 The current formatter-core coverage is fixture-backed `SELECT`, authored
 result/function argument groups, booleans, compact/expanded `CASE`, joins, CTEs,
 recursive CTEs, `INSERT ... VALUES ... RETURNING`, fixture-backed
-`ON CONFLICT DO NOTHING` / `DO UPDATE`, and a bounded `UPDATE ... FROM` subset.
+`ON CONFLICT DO NOTHING` / `DO UPDATE`, bounded `UPDATE ... FROM`, and
+`DELETE ... USING` subsets.
 Unimplemented statement families and unowned statement variants return the
 original source with `syntax.unsupported`; broader DML, DDL, `MERGE`, and
 PL/pgSQL layout remain later batches.

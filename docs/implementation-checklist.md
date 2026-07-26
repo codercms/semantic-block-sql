@@ -168,7 +168,7 @@ Batch 2 evidence:
 - [x] `ON CONFLICT` target predicate.
 - [x] `ON CONFLICT DO UPDATE` action predicate.
 - [x] `UPDATE ... FROM` (single source relation subset).
-- [ ] `DELETE ... USING`.
+- [x] `DELETE ... USING` (single source relation subset).
 - [x] `RETURNING` for fixture-backed `INSERT`.
 - [ ] Compact and expanded `MERGE`.
 - [ ] `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT`.
@@ -414,6 +414,20 @@ UPDATE checkpoint evidence:
   fail-safe unsupported variants, and `layout.update_set` diagnostics.
 - The checkpoint passes formatting, Clippy with warnings denied, all 77 tests,
   documentation, and `git diff --check` in the packaged offline environment.
+
+DELETE checkpoint evidence:
+
+- PostgreSQL AST classification admits a target relation, zero or one plain
+  `USING` relation, optional `WHERE`, and `RETURNING` expressions.
+- Compact DELETE statements remain inline. Authored, USING-backed,
+  width-driven, or boolean-complex statements place `USING`, `WHERE`, and
+  `RETURNING` at statement scope without adding a connector-only indentation
+  tier.
+- `WITH`, `ONLY`, multiple or joined USING sources, derived sources, and DELETE
+  subqueries remain unchanged with `syntax.unsupported`.
+- `tests/batch3_delete.rs` covers compact and expanded forms, exact inline
+  comments, structural equivalence, idempotence, clean formatted `check`, and
+  fail-safe unsupported variants.
 
 Unsupported-syntax checkpoint evidence:
 

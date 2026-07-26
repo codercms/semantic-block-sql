@@ -377,6 +377,12 @@ remaining clauses start at statement scope. `WITH`, `ONLY`, multi-column or
 subscripted assignment targets, multiple or joined FROM sources, and subqueries
 remain fail-safe unsupported shapes.
 
+The DELETE planner supports a target relation, an optional single plain `USING`
+relation, `WHERE`, and `RETURNING`. Compact DELETE statements remain inline;
+`USING`, authored layout, width, or a complex predicate expands subsequent
+clauses at statement scope. `WITH`, `ONLY`, multiple or joined USING sources,
+derived sources, and subqueries remain fail-safe unsupported shapes.
+
 See `docs/batch-1-backend-spike.md` for evidence and the dependency update policy.
 
 See `docs/upstream-baseline.md`.
