@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
-use pg_query::NodeRef;
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    InsertStmt, OnConflictAction, OverridingKind, RawStmt, SelectStmt, SetOperation, Token,
+    InsertStmt, Node, OnConflictAction, OverridingKind, RawStmt, SelectStmt, SetOperation, Token,
+    UpdateStmt,
 };
+use pg_query::{Context, NodeRef};
 use serde_json::Value;
 
 use super::FormatDiagnostic;
@@ -26,8 +27,8 @@ pub(super) fn parse_supported_postgresql(source: &str) -> Result<(), FormatDiagn
             .map_err(|feature| unsupported(source, raw, feature))?;
     }
 
-    for (node, _, _, _) in parsed.protobuf.nodes() {
-        validate_nested_node(node, &supported).map_err(|feature| {
+    for (node, _, context, _) in parsed.protobuf.nodes() {
+        validate_nested_node(node, context, &supported).map_err(|feature| {
             FormatDiagnostic::UnsupportedSyntax {
                 feature: feature.into(),
                 start: 0,
@@ -49,7 +50,7 @@ fn validate_statement(raw: &RawStmt, supported: &mut SupportedNodes) -> Result<(
     match node {
         NodeEnum::SelectStmt(select) => validate_select(select, false, supported),
         NodeEnum::InsertStmt(insert) => validate_insert(insert, supported),
-        NodeEnum::UpdateStmt(_) => Err("UPDATE statement"),
+        NodeEnum::UpdateStmt(update) => validate_update(update, supported),
         NodeEnum::DeleteStmt(_) => Err("DELETE statement"),
         NodeEnum::MergeStmt(_) => Err("MERGE statement"),
         NodeEnum::CreateStmt(_) => Err("CREATE TABLE statement"),
@@ -110,6 +111,82 @@ fn validate_insert(
     supported
         .insert_values
         .insert(select.as_ref() as *const SelectStmt as usize);
+    Ok(())
+}
+
+fn validate_update(update: &UpdateStmt, supported: &SupportedNodes) -> Result<(), &'static str> {
+    let relation = update
+        .relation
+        .as_ref()
+        .ok_or("UPDATE without a target relation")?;
+    if !relation.inh {
+        return Err("UPDATE ONLY target");
+    }
+    if update.with_clause.is_some() {
+        return Err("UPDATE WITH clause");
+    }
+    if update.target_list.is_empty() {
+        return Err("UPDATE without assignments");
+    }
+
+    for target in &update.target_list {
+        let target = match target.node.as_ref() {
+            Some(NodeEnum::ResTarget(target)) => target,
+            _ => return Err("unrecognized UPDATE assignment"),
+        };
+        if target.name.is_empty() || !target.indirection.is_empty() {
+            return Err("complex UPDATE assignment target");
+        }
+        let value = target
+            .val
+            .as_deref()
+            .ok_or("UPDATE assignment without a value")?;
+        if matches!(value.node.as_ref(), Some(NodeEnum::MultiAssignRef(_))) {
+            return Err("multi-column UPDATE assignment");
+        }
+        validate_update_expression(value, supported)?;
+    }
+
+    if update.from_clause.len() > 1 {
+        return Err("multiple UPDATE FROM relations");
+    }
+    if let Some(source) = update.from_clause.first() {
+        match source.node.as_ref() {
+            Some(NodeEnum::RangeVar(range)) if range.inh => {}
+            Some(NodeEnum::RangeVar(_)) => return Err("UPDATE FROM ONLY relation"),
+            _ => return Err("complex UPDATE FROM source"),
+        }
+    }
+
+    if let Some(predicate) = update.where_clause.as_deref() {
+        validate_update_expression(predicate, supported)?;
+    }
+    for result in &update.returning_list {
+        let result = match result.node.as_ref() {
+            Some(NodeEnum::ResTarget(result)) => result,
+            _ => return Err("unrecognized UPDATE RETURNING expression"),
+        };
+        let value = result
+            .val
+            .as_deref()
+            .ok_or("UPDATE RETURNING expression without a value")?;
+        validate_update_expression(value, supported)?;
+    }
+
+    Ok(())
+}
+
+fn validate_update_expression(
+    expression: &Node,
+    supported: &SupportedNodes,
+) -> Result<(), &'static str> {
+    let root = expression.node.as_ref().ok_or("empty UPDATE expression")?;
+    for (node, _, context, _) in root.nodes() {
+        if matches!(node, NodeRef::SubLink(_)) {
+            return Err("subquery in UPDATE expression");
+        }
+        validate_nested_node(node, context, supported)?;
+    }
     Ok(())
 }
 
@@ -220,7 +297,11 @@ fn validate_select_fields(select: &SelectStmt, allow_values: bool) -> Result<(),
     Ok(())
 }
 
-fn validate_nested_node(node: NodeRef<'_>, supported: &SupportedNodes) -> Result<(), &'static str> {
+fn validate_nested_node(
+    node: NodeRef<'_>,
+    context: Context,
+    supported: &SupportedNodes,
+) -> Result<(), &'static str> {
     match node {
         NodeRef::SelectStmt(select) => {
             let pointer = select as *const SelectStmt as usize;
@@ -232,6 +313,9 @@ fn validate_nested_node(node: NodeRef<'_>, supported: &SupportedNodes) -> Result
                 return Err("general set-operation expression");
             }
             Ok(())
+        }
+        NodeRef::SubLink(_) if context == Context::DML => {
+            Err("subquery in data-modifying statement")
         }
         NodeRef::FuncCall(call)
             if !call.agg_order.is_empty()

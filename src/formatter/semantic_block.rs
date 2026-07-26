@@ -114,6 +114,17 @@ struct InsertBlock {
     returning: Option<usize>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct UpdateBlock {
+    start: usize,
+    end: usize,
+    base_depth: usize,
+    set: usize,
+    from: Option<usize>,
+    where_clause: Option<usize>,
+    returning: Option<usize>,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct TerminalSemicolonPlan {
     omit: Option<usize>,
@@ -130,6 +141,7 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
     let parens = parenthesis_pairs(&tokens);
     let cases = case_ranges(&tokens, options);
     let inserts = insert_blocks(&tokens, &depths, &parens);
+    let updates = update_blocks(&tokens, &depths);
     let parenthesized_lists =
         parenthesized_lists(&tokens, &depths, &parens, &cases, &inserts, options);
     let ctes = cte_blocks(&tokens, &depths, &parens);
@@ -150,6 +162,16 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
         &cases,
         &parenthesized_lists,
         &inserts,
+        options,
+        &mut plan,
+    );
+    plan_update_statements(
+        &tokens,
+        &depths,
+        &cases,
+        &parenthesized_lists,
+        &boolean_ranges,
+        &updates,
         options,
         &mut plan,
     );
@@ -526,6 +548,120 @@ fn insert_blocks(
     }
 
     blocks
+}
+
+fn update_blocks(tokens: &[SqlToken<'_>], depths: &[usize]) -> Vec<UpdateBlock> {
+    let mut blocks = Vec::new();
+
+    for (start, token) in tokens.iter().enumerate() {
+        if token.kind != Token::Update
+            || start
+                .checked_sub(1)
+                .is_some_and(|previous| tokens[previous].kind == Token::Do)
+        {
+            continue;
+        }
+        let base_depth = depths[start];
+        let end = (start + 1..tokens.len())
+            .find(|&index| {
+                depths[index] < base_depth
+                    || (depths[index] == base_depth && tokens[index].kind == Token::Ascii59)
+            })
+            .unwrap_or(tokens.len());
+        let Some(set) = (start + 1..end)
+            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Set)
+        else {
+            continue;
+        };
+        let from = (set + 1..end)
+            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::From);
+        let where_clause = (set + 1..end)
+            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Where);
+        let returning = (set + 1..end)
+            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Returning);
+        blocks.push(UpdateBlock {
+            start,
+            end,
+            base_depth,
+            set,
+            from,
+            where_clause,
+            returning,
+        });
+    }
+
+    blocks
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_update_statements(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    cases: &[CaseRange],
+    lists: &[ParenthesizedList],
+    boolean_ranges: &[BooleanRange],
+    updates: &[UpdateBlock],
+    options: &FormatOptions,
+    plan: &mut LayoutPlan,
+) {
+    for update in updates {
+        let authored = tokens[update.start + 1..update.end]
+            .iter()
+            .any(|token| token.line_breaks_before > 0);
+        let compact_statement_width = update.base_depth * INDENT_WIDTH
+            + compact_width(tokens, update.start, update.end, options);
+        let width_driven = compact_statement_width > options.soft_line_width;
+        let has_expanded_predicate = update.where_clause.is_some_and(|where_clause| {
+            boolean_ranges
+                .iter()
+                .any(|range| range.start == where_clause + 1 && range.end <= update.end)
+        });
+        let expanded = authored || update.from.is_some() || width_driven || has_expanded_predicate;
+        if !expanded {
+            continue;
+        }
+
+        plan.break_before(update.set, 1, update.base_depth);
+        let set_end = update
+            .from
+            .or(update.where_clause)
+            .or(update.returning)
+            .unwrap_or(update.end);
+        plan_keyword_list(
+            tokens,
+            depths,
+            cases,
+            lists,
+            update.set,
+            set_end,
+            update.base_depth,
+            true,
+            options,
+            plan,
+        );
+
+        if let Some(from) = update.from {
+            plan.break_before(from, 1, update.base_depth);
+        }
+        if let Some(where_clause) = update.where_clause {
+            plan.break_before(where_clause, 1, update.base_depth);
+        }
+        if let Some(returning) = update.returning {
+            plan.break_before(returning, 1, update.base_depth);
+            plan_keyword_list(
+                tokens,
+                depths,
+                cases,
+                lists,
+                returning,
+                update.end,
+                update.base_depth,
+                width_driven,
+                options,
+                plan,
+            );
+        }
+    }
 }
 
 fn is_insert_list_open(inserts: &[InsertBlock], open: usize) -> bool {

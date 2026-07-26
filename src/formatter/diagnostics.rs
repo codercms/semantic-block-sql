@@ -392,6 +392,13 @@ fn layout_rule(
     {
         return "layout.on_conflict";
     }
+    if kinds
+        .iter()
+        .flatten()
+        .any(|kind| matches!(kind, Token::Set))
+    {
+        return "layout.update_set";
+    }
     if kinds.iter().flatten().any(|kind| {
         matches!(
             kind,

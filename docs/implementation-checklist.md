@@ -167,7 +167,7 @@ Batch 2 evidence:
 - [x] Simple and independently complex `VALUES` rows.
 - [x] `ON CONFLICT` target predicate.
 - [x] `ON CONFLICT DO UPDATE` action predicate.
-- [ ] `UPDATE ... FROM`.
+- [x] `UPDATE ... FROM` (single source relation subset).
 - [ ] `DELETE ... USING`.
 - [x] `RETURNING` for fixture-backed `INSERT`.
 - [ ] Compact and expanded `MERGE`.
@@ -380,7 +380,7 @@ INSERT / VALUES / RETURNING checkpoint evidence:
   one-item-per-line column and RETURNING lists, exact comment preservation,
   structural equivalence, idempotence, clean `check`, and unsupported variants.
 - `tests/cli_mvp.rs` continues to prove whole-project write atomicity using an
-  unsupported UPDATE statement now that basic INSERT is supported.
+  unsupported DELETE statement as statement coverage expands.
 - The checkpoint passes formatting, Clippy with warnings denied, all 67 tests,
   documentation, and `git diff --check` in the packaged offline environment.
 
@@ -398,6 +398,22 @@ ON CONFLICT checkpoint evidence:
 - `tests/batch3_on_conflict.rs` covers compact and expanded forms, named
   constraints, both predicate owners, exact comments, structural equivalence,
   idempotence, clean formatted `check`, and `layout.on_conflict` diagnostics.
+
+UPDATE checkpoint evidence:
+
+- PostgreSQL AST classification admits a target relation, simple named
+  assignments, zero or one plain FROM relation, optional `WHERE`, and
+  `RETURNING` expressions.
+- Compact single-assignment updates remain inline. Authored, width-driven,
+  FROM-backed, or boolean-complex updates expand `SET` to one assignment per
+  line and keep subsequent clauses at statement scope.
+- `WITH`, `ONLY`, multi-column and subscripted targets, multiple or joined FROM
+  sources, and UPDATE subqueries remain unchanged with `syntax.unsupported`.
+- `tests/batch3_update.rs` covers compact and expanded forms, exact inline
+  comments, structural equivalence, idempotence, clean formatted `check`,
+  fail-safe unsupported variants, and `layout.update_set` diagnostics.
+- The checkpoint passes formatting, Clippy with warnings denied, all 77 tests,
+  documentation, and `git diff --check` in the packaged offline environment.
 
 Unsupported-syntax checkpoint evidence:
 

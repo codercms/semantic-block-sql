@@ -2,7 +2,7 @@ use semblock::{FormatDiagnostic, FormatOptions, Severity, format_sql, format_sql
 
 #[test]
 fn unsupported_statement_family_returns_original_source() {
-    let source = "UPDATE items SET id = 1;";
+    let source = "DELETE FROM items WHERE id = 1;";
     let formatted = format_sql_result(source, &FormatOptions::default());
 
     assert_eq!(formatted.output, source);

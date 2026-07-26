@@ -586,7 +586,7 @@ fn malformed_go_and_unmatched_sql_directives_never_rewrite() {
 fn unsupported_statement_prevents_every_planned_project_write() {
     let project = TempDir::new().expect("temp project");
     let valid = "select id from public.items;\n";
-    let unsupported = "update public.items set id = 1;\n";
+    let unsupported = "delete from public.items where id = 1;\n";
     write(project.path(), "a-valid.sql", valid);
     write(project.path(), "z-unsupported.sql", unsupported);
 

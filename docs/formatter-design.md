@@ -369,6 +369,14 @@ predicate remains owned by the update action. `INSERT ... SELECT`, `WITH`,
 `OVERRIDING`, and `DEFAULT VALUES` remain explicitly unsupported until their
 own fixture-backed planners are implemented.
 
+The UPDATE planner supports a target relation, simple named assignments,
+optional one-relation `FROM`, `WHERE`, and `RETURNING`. A short single-assignment
+statement remains compact. Once authored layout, width, `FROM`, or a complex
+predicate expands the statement, `SET` owns one assignment per line and the
+remaining clauses start at statement scope. `WITH`, `ONLY`, multi-column or
+subscripted assignment targets, multiple or joined FROM sources, and subqueries
+remain fail-safe unsupported shapes.
+
 See `docs/batch-1-backend-spike.md` for evidence and the dependency update policy.
 
 See `docs/upstream-baseline.md`.
