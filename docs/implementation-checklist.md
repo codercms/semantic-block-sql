@@ -314,7 +314,7 @@ Batch 5 MVP evidence:
 
 ### Required implementation work
 
-- [ ] Replace optional indentation/group-preservation switches with mandatory
+- [x] Replace optional indentation/group-preservation switches with mandatory
   four-space and authored-boundary behavior.
 - [x] Add semicolon and not-equal policies with specification defaults.
 - [x] Implement the exact casing whitelist and contextual `INTERVAL`.
@@ -352,6 +352,14 @@ Diagnostic-model checkpoint evidence:
   when an indivisible token would remain over-hard after expansion.
 - The checkpoint passes formatting, Clippy with warnings denied, all 56 tests,
   documentation, and `git diff --check` in the packaged offline environment.
+
+Mandatory-layout checkpoint evidence:
+
+- `FormatOptions` and `[layout]` expose only the configurable soft and hard line
+  widths; obsolete indentation and preservation keys are rejected.
+- `tests/batch2_core_layout.rs` requires four-space nesting and mandatory authored
+  list, blank-line, and comment boundaries.
+- `tests/cli_mvp.rs` proves the strict configuration rejection end to end.
 
 ## Batch 6 — Performance and release polish
 

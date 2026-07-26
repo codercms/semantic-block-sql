@@ -122,11 +122,8 @@ not_equal_policy = "preserve"
 syntax_diagnostics = "parser_available"
 
 [layout]
-indent_width = 4
 soft_line_width = 120
 hard_line_width = 160
-preserve_list_groups = true
-preserve_blank_lines = true
 
 [discovery]
 respect_gitignore = true
@@ -138,6 +135,9 @@ auto_detect = true
 raw_strings = true
 interpreted_strings = false
 ```
+
+Indentation is always four spaces. Authored list groups, blank lines, and comment
+boundaries are mandatory and are therefore not configurable.
 
 Exit codes are stable:
 

@@ -285,7 +285,6 @@ fn config_is_strict_and_controls_layout() {
         r#"dialect = "postgresql"
 
 [layout]
-indent_width = 2
 soft_line_width = 40
 hard_line_width = 60
 "#,
@@ -300,8 +299,31 @@ hard_line_width = 60
 
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let sql = fs::read_to_string(project.path().join("query.sql")).expect("read query");
-    assert!(sql.contains("\n  item.deleted_at IS NULL"));
-    assert!(sql.contains("\n    item.title_rus IS NOT NULL"));
+    assert!(sql.contains("\n    item.deleted_at IS NULL"));
+    assert!(sql.contains("\n        item.title_rus IS NOT NULL"));
+
+    for (key, value) in [
+        ("indent_width", "2"),
+        ("preserve_list_groups", "false"),
+        ("preserve_blank_lines", "false"),
+    ] {
+        let filename = format!("obsolete-{key}.toml");
+        write(
+            project.path(),
+            &filename,
+            &format!("[layout]\n{key} = {value}\n"),
+        );
+        let output = run(
+            project.path(),
+            &["check", "--config", &filename, "query.sql"],
+            None,
+        );
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(&format!("unknown field `{key}`")),
+            "{output:?}"
+        );
+    }
 
     write(project.path(), "bad.toml", "unknown = true\n");
     let output = run(

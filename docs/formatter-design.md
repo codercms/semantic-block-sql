@@ -41,9 +41,11 @@ places:
 The runnable CLI and raw-Go MVP predate this contract and are being reconciled
 batch by batch. Exact built-in casing, contextual `INTERVAL`, terminal-semicolon
 policy, default `<>` preservation, and final-newline preservation are now
-implemented. Rule-level diagnostics and fail-safe formatting results are also
-available. Optional layout switches, complete alternative-layout preservation,
-and explicit unsupported-syntax detection remain to be reconciled.
+implemented. Rule-level diagnostics, fail-safe formatting results, mandatory
+four-space
+indentation, and mandatory authored boundaries are also available. Complete
+alternative-layout preservation and explicit unsupported-syntax detection remain
+to be reconciled.
 
 Earlier project requests also clarified these application-level points:
 
@@ -125,12 +127,12 @@ Default widths:
 
 ```toml
 [layout]
-indent_width = 4
 soft_line_width = 120
 hard_line_width = 160
-preserve_list_groups = true
-preserve_blank_lines = true
 ```
+
+Indentation is fixed at four spaces. Authored list groups, blank lines, and
+comment boundaries are mandatory formatter invariants rather than options.
 
 ### Width semantics
 
@@ -183,11 +185,8 @@ necessarily exceeds hard width, formatting succeeds and returns
 ```rust
 FormatOptions {
     style,
-    indent_width,
     soft_line_width,
     hard_line_width,
-    preserve_list_groups,
-    preserve_blank_lines,
     semicolon_policy,
     not_equal_policy,
     syntax_diagnostics,
@@ -493,11 +492,8 @@ not_equal_policy = "preserve"
 syntax_diagnostics = "parser_available"
 
 [layout]
-indent_width = 4
 soft_line_width = 120
 hard_line_width = 160
-preserve_list_groups = true
-preserve_blank_lines = true
 
 [discovery]
 respect_gitignore = true
@@ -509,6 +505,10 @@ auto_detect = true
 raw_strings = true
 interpreted_strings = false
 ```
+
+Four-space indentation and authored group, blank-line, and comment-boundary
+preservation are fixed core behavior. Obsolete configuration keys for those
+rules are rejected by strict TOML parsing.
 
 Configuration starts with built-in defaults, then applies the first
 `semblock.toml` found from the current directory upward. `--config` replaces

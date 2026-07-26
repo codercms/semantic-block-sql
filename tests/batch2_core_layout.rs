@@ -123,7 +123,7 @@ fn separates_recursive_cte_anchor_and_recursive_terms() {
 }
 
 #[test]
-fn list_hint_preservation_can_be_disabled_without_disabling_safety() {
+fn authored_list_groups_are_mandatory() {
     let source = "\
 SELECT
     item.id,
@@ -131,27 +131,19 @@ SELECT
     item.imdb_id
 FROM public.items item;
 ";
-    let options = FormatOptions {
-        preserve_list_groups: false,
-        ..FormatOptions::default()
-    };
-    let output = format_sql(source, &options)
+    let output = format_sql(source, &FormatOptions::default())
         .expect("format succeeds")
         .output;
 
-    assert!(output.contains("    item.id, item.kp_id, item.imdb_id"));
+    assert_eq!(output, source);
 }
 
 #[test]
-fn blank_line_preservation_can_be_disabled() {
-    let options = FormatOptions {
-        preserve_blank_lines: false,
-        ..FormatOptions::default()
-    };
-    let output = format_fixture("authored-groups", &options);
+fn blank_lines_and_comment_boundaries_are_mandatory() {
+    let output = format_fixture("authored-groups", &FormatOptions::default());
 
-    assert!(!output.contains("item.title_orig,\n\n"));
-    assert!(output.contains("item.title_orig,\n    -- audit fields"));
+    assert!(output.contains("item.title_orig,\n\n"));
+    assert!(output.contains("item.title_orig,\n\n    -- audit fields"));
 }
 
 #[test]
@@ -205,20 +197,16 @@ fn reports_indivisible_tokens_that_make_a_line_exceed_the_hard_width() {
 }
 
 #[test]
-fn custom_indentation_is_used_for_real_syntax_nesting() {
-    let options = FormatOptions {
-        indent_width: 2,
-        ..FormatOptions::default()
-    };
+fn four_space_indentation_is_mandatory_for_real_syntax_nesting() {
     let output = format_sql(
         "select item.id from public.items item where item.deleted_at is null and (item.title_rus is not null or item.title_orig is not null);",
-        &options,
+        &FormatOptions::default(),
     )
     .expect("format succeeds")
     .output;
 
-    assert!(output.contains("\n  item.deleted_at IS NULL"));
-    assert!(output.contains("\n    item.title_rus IS NOT NULL"));
+    assert!(output.contains("\n    item.deleted_at IS NULL"));
+    assert!(output.contains("\n        item.title_rus IS NOT NULL"));
 }
 
 #[test]

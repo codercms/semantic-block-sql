@@ -8,6 +8,8 @@ use thiserror::Error;
 
 pub use validation::validate_equivalent;
 
+pub(crate) const INDENT_WIDTH: usize = 4;
+
 /// Byte range in the original source. Offsets are UTF-8 byte offsets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceRange {
@@ -117,11 +119,8 @@ pub enum SyntaxDiagnostics {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatOptions {
     pub style: Style,
-    pub indent_width: usize,
     pub soft_line_width: usize,
     pub hard_line_width: usize,
-    pub preserve_list_groups: bool,
-    pub preserve_blank_lines: bool,
     pub semicolon_policy: SemicolonPolicy,
     pub not_equal_policy: NotEqualPolicy,
     pub syntax_diagnostics: SyntaxDiagnostics,
@@ -131,11 +130,8 @@ impl Default for FormatOptions {
     fn default() -> Self {
         Self {
             style: Style::SemanticBlock,
-            indent_width: 4,
             soft_line_width: 120,
             hard_line_width: 160,
-            preserve_list_groups: true,
-            preserve_blank_lines: true,
             semicolon_policy: SemicolonPolicy::Preserve,
             not_equal_policy: NotEqualPolicy::Preserve,
             syntax_diagnostics: SyntaxDiagnostics::ParserAvailable,
@@ -145,11 +141,6 @@ impl Default for FormatOptions {
 
 impl FormatOptions {
     fn validate(&self) -> Result<(), FormatDiagnostic> {
-        if self.indent_width == 0 {
-            return Err(FormatDiagnostic::InvalidOptions(
-                "indent_width must be greater than zero".into(),
-            ));
-        }
         if self.soft_line_width == 0 {
             return Err(FormatDiagnostic::InvalidOptions(
                 "soft_line_width must be greater than zero".into(),

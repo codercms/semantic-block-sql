@@ -3,7 +3,9 @@ use std::collections::{HashMap, HashSet};
 use pg_query::protobuf::{KeywordKind, Token};
 
 use super::tokens::{SqlToken, tokenize};
-use super::{FormatDiagnostic, FormatOptions, FormatWarning, NotEqualPolicy, SemicolonPolicy};
+use super::{
+    FormatDiagnostic, FormatOptions, FormatWarning, INDENT_WIDTH, NotEqualPolicy, SemicolonPolicy,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Break {
@@ -139,7 +141,7 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
     plan_ctes(&tokens, &depths, &ctes, &mut plan);
 
     let terminal_semicolon = terminal_semicolon_plan(&tokens, options.semicolon_policy);
-    let mut writer = Writer::new(options.indent_width);
+    let mut writer = Writer::new();
     let mut previous_index = None;
 
     for (index, token) in tokens.iter().enumerate() {
@@ -151,11 +153,7 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
         if let Some(line_break) = planned_break {
             writer.newline(line_break.lines, line_break.indent);
         } else if token.is_comment() && token.line_breaks_before > 0 {
-            let lines = if options.preserve_blank_lines {
-                token.line_breaks_before.min(2)
-            } else {
-                1
-            };
+            let lines = token.line_breaks_before.min(2);
             writer.newline(lines, plan.indent_for(index, depths[index]));
         }
 
@@ -372,7 +370,7 @@ fn parenthesized_lists(
             expanded: authored
                 || contains_complex
                 || (!unavoidable_single_argument
-                    && depths[open] * options.indent_width + compact > options.soft_line_width),
+                    && depths[open] * INDENT_WIDTH + compact > options.soft_line_width),
         });
     }
 
@@ -443,7 +441,7 @@ fn plan_select_lists(
                 .any(|item| tokens[item.start].line_breaks_before > 0);
         let has_complex = items.iter().any(|item| item.complex);
         let compact_line_width =
-            base_depth * options.indent_width + compact_width(tokens, select, end, options);
+            base_depth * INDENT_WIDTH + compact_width(tokens, select, end, options);
         let unavoidable_single_item = items.len() == 1
             && range_is_unavoidably_over_hard(
                 tokens,
@@ -461,7 +459,7 @@ fn plan_select_lists(
 
         expanded_selects.insert(select);
         plan.break_before(items[0].start, 1, indent);
-        let lines = if authored && options.preserve_list_groups {
+        let lines = if authored {
             authored_list_lines(tokens, &items, indent, options)
         } else {
             packed_list_lines(tokens, &items, indent, options.soft_line_width, options)
@@ -471,11 +469,7 @@ fn plan_select_lists(
             if line_number == 0 {
                 continue;
             }
-            let lines = if blank_before && options.preserve_blank_lines {
-                2
-            } else {
-                1
-            };
+            let lines = if blank_before { 2 } else { 1 };
             plan.break_before(items[item_index].start, lines, indent);
         }
 
@@ -616,7 +610,7 @@ fn plan_parenthesized_lists(
                 .iter()
                 .skip(1)
                 .any(|item| tokens[item.start].line_breaks_before > 0);
-        let lines = if authored && options.preserve_list_groups {
+        let lines = if authored {
             authored_list_lines(tokens, &items, indent, options)
         } else {
             packed_list_lines(tokens, &items, indent, options.soft_line_width, options)
@@ -629,11 +623,7 @@ fn plan_parenthesized_lists(
             }
             plan.break_before(
                 items[item_index].start,
-                if blank_before && options.preserve_blank_lines {
-                    2
-                } else {
-                    1
-                },
+                if blank_before { 2 } else { 1 },
                 indent,
             );
         }
@@ -698,7 +688,7 @@ fn split_groups_at_width(
             .get(group_position + 1)
             .map_or(items.len(), |group| group.0);
         let mut line_start = group_start;
-        let mut line_width = indent * options.indent_width;
+        let mut line_width = indent * INDENT_WIDTH;
         lines.push((line_start, blank_before));
 
         for index in group_start..group_end {
@@ -711,7 +701,7 @@ fn split_groups_at_width(
                     || line_width + separator + item_width > limit)
             {
                 line_start = index;
-                line_width = indent * options.indent_width;
+                line_width = indent * INDENT_WIDTH;
                 lines.push((index, false));
             }
             line_width += usize::from(index > line_start) + item_width;
@@ -806,7 +796,7 @@ fn boolean_ranges(
             depths[candidate] >= base_depth
                 && matches!(tokens[candidate].kind, Token::And | Token::Or)
         });
-        let hides_structure = base_depth * options.indent_width
+        let hides_structure = base_depth * INDENT_WIDTH
             + compact_width(tokens, index, end, options)
             > options.soft_line_width;
 
@@ -999,7 +989,7 @@ fn range_is_unavoidably_over_hard(
     indent: usize,
     options: &FormatOptions,
 ) -> bool {
-    let mut width = indent * options.indent_width;
+    let mut width = indent * INDENT_WIDTH;
     let mut previous = None;
     for index in start..end {
         if needs_space(tokens, previous, index) {
@@ -1368,14 +1358,12 @@ fn is_unary_sign(tokens: &[SqlToken<'_>], index: usize) -> bool {
 
 struct Writer {
     output: String,
-    indent_width: usize,
 }
 
 impl Writer {
-    fn new(indent_width: usize) -> Self {
+    fn new() -> Self {
         Self {
             output: String::new(),
-            indent_width,
         }
     }
 
@@ -1411,7 +1399,7 @@ impl Writer {
         self.output
             .extend(std::iter::repeat_n('\n', lines.saturating_sub(existing)));
         self.output
-            .extend(std::iter::repeat_n(' ', indent * self.indent_width));
+            .extend(std::iter::repeat_n(' ', indent * INDENT_WIDTH));
     }
 
     fn finish(mut self, trailing_newline: bool) -> String {

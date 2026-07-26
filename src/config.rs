@@ -90,11 +90,8 @@ struct FileFormatConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LayoutConfig {
-    indent_width: Option<usize>,
     soft_line_width: Option<usize>,
     hard_line_width: Option<usize>,
-    preserve_list_groups: Option<bool>,
-    preserve_blank_lines: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -151,20 +148,11 @@ impl Config {
         if let Some(value) = file.format.syntax_diagnostics {
             config.format.syntax_diagnostics = value;
         }
-        if let Some(value) = file.layout.indent_width {
-            config.format.indent_width = value;
-        }
         if let Some(value) = file.layout.soft_line_width {
             config.format.soft_line_width = value;
         }
         if let Some(value) = file.layout.hard_line_width {
             config.format.hard_line_width = value;
-        }
-        if let Some(value) = file.layout.preserve_list_groups {
-            config.format.preserve_list_groups = value;
-        }
-        if let Some(value) = file.layout.preserve_blank_lines {
-            config.format.preserve_blank_lines = value;
         }
         if let Some(value) = file.discovery.respect_gitignore {
             config.discovery.respect_gitignore = value;
@@ -198,11 +186,6 @@ impl Config {
             config.go.interpreted_strings = value;
         }
 
-        if config.format.indent_width == 0 {
-            return Err(ConfigError::Invalid(
-                "layout.indent_width must be greater than zero".into(),
-            ));
-        }
         if config.format.soft_line_width == 0 {
             return Err(ConfigError::Invalid(
                 "layout.soft_line_width must be greater than zero".into(),

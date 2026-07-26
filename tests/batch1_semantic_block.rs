@@ -88,7 +88,6 @@ fn semantic_validation_rejects_literal_or_order_changes() {
 fn options_are_validated() {
     let invalid = FormatOptions {
         style: Style::SemanticBlock,
-        indent_width: 4,
         soft_line_width: 160,
         hard_line_width: 120,
         ..FormatOptions::default()

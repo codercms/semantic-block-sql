@@ -4,6 +4,7 @@ use thiserror::Error;
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::config::GoConfig;
+use crate::formatter::INDENT_WIDTH;
 use crate::{Diagnostic, FormatDiagnostic, FormatOptions, FormatWarning, SourceRange, format_sql};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,11 +193,7 @@ pub fn format_go_source(
             let content_start = literal.start_byte() + 1;
             let content_end = literal.end_byte().saturating_sub(1);
             let content = &source[content_start..content_end];
-            let envelope = RawEnvelope::new(
-                content,
-                literal.start_position().column,
-                options.indent_width,
-            );
+            let envelope = RawEnvelope::new(content, literal.start_position().column);
             if !explicit && !looks_like_complete_sql_prefix(&envelope.sql) {
                 continue;
             }
@@ -384,7 +381,7 @@ struct RawEnvelope {
 }
 
 impl RawEnvelope {
-    fn new(content: &str, start_column: usize, indent_width: usize) -> Self {
+    fn new(content: &str, start_column: usize) -> Self {
         let newline = if content.contains("\r\n") {
             "\r\n"
         } else {
@@ -399,7 +396,7 @@ impl RawEnvelope {
                 multiline: false,
                 content_indent: String::new(),
                 closing_indent: String::new(),
-                continuation_indent: " ".repeat(start_column + indent_width),
+                continuation_indent: " ".repeat(start_column + INDENT_WIDTH),
             };
         }
 
@@ -413,7 +410,7 @@ impl RawEnvelope {
             .find(|line| !line.trim().is_empty())
             .map(leading_whitespace)
             .filter(|indent| !indent.is_empty())
-            .unwrap_or_else(|| " ".repeat(closing_indent.chars().count() + indent_width));
+            .unwrap_or_else(|| " ".repeat(closing_indent.chars().count() + INDENT_WIDTH));
         let sql = body
             .lines()
             .map(|line| line.strip_prefix(&content_indent).unwrap_or(line))
