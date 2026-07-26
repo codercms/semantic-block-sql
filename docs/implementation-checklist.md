@@ -361,6 +361,15 @@ Mandatory-layout checkpoint evidence:
   list, blank-line, and comment boundaries.
 - `tests/cli_mvp.rs` proves the strict configuration rejection end to end.
 
+One-line list expansion checkpoint evidence:
+
+- A one-line list remains compact while it is short and simple.
+- Once expansion is required, every ungrouped item receives its own line instead
+  of being greedily repacked to the soft width.
+- Authored multiline groups retain their existing grouping and are split only at
+  safe item boundaries when the hard width requires it.
+- Updated SELECT and function-argument fixtures cover the policy.
+
 Unsupported-syntax checkpoint evidence:
 
 - PostgreSQL AST classification admits only fixture-backed statement and SELECT

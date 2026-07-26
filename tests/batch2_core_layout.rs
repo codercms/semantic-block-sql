@@ -34,7 +34,7 @@ fn preserves_authored_list_groups_blank_lines_and_comment_boundaries() {
 }
 
 #[test]
-fn packs_one_line_lists_to_soft_width_and_never_exceeds_hard_width() {
+fn expands_one_line_lists_to_one_item_per_line_and_obeys_hard_width() {
     let options = FormatOptions {
         soft_line_width: 52,
         hard_line_width: 68,
@@ -49,6 +49,7 @@ fn packs_one_line_lists_to_soft_width_and_never_exceeds_hard_width() {
         output.lines().all(|line| line.chars().count() <= 68),
         "all breakable lines stay within the hard limit"
     );
+    assert!(output.contains("    item.id,\n    item.kp_identifier,"));
 }
 
 #[test]

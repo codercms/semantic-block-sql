@@ -164,9 +164,9 @@ a primary backend-selection criterion.
 
 Batch 2 implements this model for `SELECT` result lists and parenthesized
 function-argument lists. Scanner gap metadata records authored line and blank
-line boundaries without adding another parser. Completely one-line lists are
-packed deterministically to soft width; authored groups are retained through
-soft width and split only at comma boundaries when hard width requires it.
+line boundaries without adding another parser. Completely one-line lists that must expand are rendered one item per line;
+authored groups are retained through soft width and split only at comma
+boundaries when hard width requires it.
 
 Comments remain in the scanner token order. Line comments always retain a
 physical line ending so they cannot consume a following token. Blank lines and

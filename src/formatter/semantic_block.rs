@@ -462,7 +462,7 @@ fn plan_select_lists(
         let lines = if authored {
             authored_list_lines(tokens, &items, indent, options)
         } else {
-            packed_list_lines(tokens, &items, indent, options.soft_line_width, options)
+            expanded_one_line_items(&items)
         };
 
         for (line_number, (item_index, blank_before)) in lines.into_iter().enumerate() {
@@ -613,7 +613,7 @@ fn plan_parenthesized_lists(
         let lines = if authored {
             authored_list_lines(tokens, &items, indent, options)
         } else {
-            packed_list_lines(tokens, &items, indent, options.soft_line_width, options)
+            expanded_one_line_items(&items)
         };
 
         plan.break_before(items[0].start, 1, indent);
@@ -663,15 +663,12 @@ fn authored_list_lines(
     )
 }
 
-fn packed_list_lines(
-    tokens: &[SqlToken<'_>],
-    items: &[ListItem],
-    indent: usize,
-    width: usize,
-    options: &FormatOptions,
-) -> Vec<(usize, bool)> {
-    let starts = vec![(0usize, false)];
-    split_groups_at_width(tokens, items, &starts, indent, width, options)
+fn expanded_one_line_items(items: &[ListItem]) -> Vec<(usize, bool)> {
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, _)| (index, false))
+        .collect()
 }
 
 fn split_groups_at_width(
