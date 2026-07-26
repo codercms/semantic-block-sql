@@ -357,6 +357,14 @@ classifier is extended in the same batch that introduces each new statement
 planner; generic token normalization is never the fallback for unsupported
 syntax.
 
+The first Batch 3 extension admits only `INSERT ... VALUES ... RETURNING`.
+Column lists, individual VALUES rows, and RETURNING expressions share the
+source-aware list planner: short forms stay compact, authored row groups remain
+stable, width-driven ungrouped lists expand one item per line, and complex rows
+may expand independently. `INSERT ... SELECT`, `WITH`, `OVERRIDING`, `DEFAULT
+VALUES`, and `ON CONFLICT` remain explicitly unsupported until their own
+fixture-backed planners are implemented.
+
 See `docs/batch-1-backend-spike.md` for evidence and the dependency update policy.
 
 See `docs/upstream-baseline.md`.

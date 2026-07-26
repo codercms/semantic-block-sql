@@ -163,13 +163,13 @@ Batch 2 evidence:
 
 ## Batch 3 — PostgreSQL statement coverage
 
-- [ ] `INSERT`.
-- [ ] Simple and complex `VALUES`.
+- [x] `INSERT` (`VALUES` subset; source queries remain unsupported).
+- [x] Simple and independently complex `VALUES` rows.
 - [ ] `ON CONFLICT` target predicate.
 - [ ] `ON CONFLICT DO UPDATE` action predicate.
 - [ ] `UPDATE ... FROM`.
 - [ ] `DELETE ... USING`.
-- [ ] `RETURNING`.
+- [x] `RETURNING` for fixture-backed `INSERT`.
 - [ ] Compact and expanded `MERGE`.
 - [ ] `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT`.
 - [ ] Lateral joins.
@@ -192,8 +192,8 @@ Batch 2 evidence:
 ## Batch 4 — Project CLI
 
 Batch 4 and the raw-string subset of Batch 5 were implemented together as one
-runnable MVP slice after Batch 2. Batch 3 remains deliberately deferred; this
-does not expand the formatter-core syntax claims.
+runnable MVP slice after Batch 2. Batch 3 is now proceeding incrementally behind
+fixture-backed AST support gates; CLI capabilities do not imply syntax support.
 
 ### Contract
 
@@ -369,6 +369,20 @@ One-line list expansion checkpoint evidence:
 - Authored multiline groups retain their existing grouping and are split only at
   safe item boundaries when the hard width requires it.
 - Updated SELECT and function-argument fixtures cover the policy.
+
+INSERT / VALUES / RETURNING checkpoint evidence:
+
+- PostgreSQL AST classification admits only `INSERT ... VALUES ... RETURNING`
+  without `WITH`, `OVERRIDING`, `ON CONFLICT`, `DEFAULT VALUES`, or a source
+  query.
+- `tests/batch3_insert.rs` covers compact INSERT, absent target-column lists,
+  authored multirow VALUES, independently expanded complex rows, width-driven
+  one-item-per-line column and RETURNING lists, exact comment preservation,
+  structural equivalence, idempotence, clean `check`, and unsupported variants.
+- `tests/cli_mvp.rs` continues to prove whole-project write atomicity using an
+  unsupported UPDATE statement now that basic INSERT is supported.
+- The checkpoint passes formatting, Clippy with warnings denied, all 67 tests,
+  documentation, and `git diff --check` in the packaged offline environment.
 
 Unsupported-syntax checkpoint evidence:
 

@@ -2,24 +2,30 @@ use std::collections::HashSet;
 
 use pg_query::NodeRef;
 use pg_query::protobuf::node::Node as NodeEnum;
-use pg_query::protobuf::{RawStmt, SelectStmt, SetOperation, Token};
+use pg_query::protobuf::{InsertStmt, OverridingKind, RawStmt, SelectStmt, SetOperation, Token};
 use serde_json::Value;
 
 use super::FormatDiagnostic;
 use super::tokens;
 
+#[derive(Debug, Default)]
+struct SupportedNodes {
+    recursive_unions: HashSet<usize>,
+    insert_values: HashSet<usize>,
+}
+
 pub(super) fn parse_supported_postgresql(source: &str) -> Result<(), FormatDiagnostic> {
     let parsed = pg_query::parse(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
 
-    let mut allowed_recursive_unions = HashSet::new();
+    let mut supported = SupportedNodes::default();
     for raw in &parsed.protobuf.stmts {
-        validate_statement(raw, &mut allowed_recursive_unions)
+        validate_statement(raw, &mut supported)
             .map_err(|feature| unsupported(source, raw, feature))?;
     }
 
     for (node, _, _, _) in parsed.protobuf.nodes() {
-        validate_nested_node(node, &allowed_recursive_unions).map_err(|feature| {
+        validate_nested_node(node, &supported).map_err(|feature| {
             FormatDiagnostic::UnsupportedSyntax {
                 feature: feature.into(),
                 start: 0,
@@ -31,10 +37,7 @@ pub(super) fn parse_supported_postgresql(source: &str) -> Result<(), FormatDiagn
     Ok(())
 }
 
-fn validate_statement(
-    raw: &RawStmt,
-    allowed_recursive_unions: &mut HashSet<usize>,
-) -> Result<(), &'static str> {
+fn validate_statement(raw: &RawStmt, supported: &mut SupportedNodes) -> Result<(), &'static str> {
     let node = raw
         .stmt
         .as_deref()
@@ -42,8 +45,8 @@ fn validate_statement(
         .ok_or("empty PostgreSQL statement")?;
 
     match node {
-        NodeEnum::SelectStmt(select) => validate_select(select, false, allowed_recursive_unions),
-        NodeEnum::InsertStmt(_) => Err("INSERT statement"),
+        NodeEnum::SelectStmt(select) => validate_select(select, false, supported),
+        NodeEnum::InsertStmt(insert) => validate_insert(insert, supported),
         NodeEnum::UpdateStmt(_) => Err("UPDATE statement"),
         NodeEnum::DeleteStmt(_) => Err("DELETE statement"),
         NodeEnum::MergeStmt(_) => Err("MERGE statement"),
@@ -56,12 +59,64 @@ fn validate_statement(
     }
 }
 
+fn validate_insert(
+    insert: &InsertStmt,
+    supported: &mut SupportedNodes,
+) -> Result<(), &'static str> {
+    if insert.relation.is_none() {
+        return Err("INSERT without a target relation");
+    }
+    if insert.with_clause.is_some() {
+        return Err("INSERT WITH clause");
+    }
+    if insert.on_conflict_clause.is_some() {
+        return Err("INSERT ON CONFLICT clause");
+    }
+    if matches!(
+        OverridingKind::try_from(insert.r#override).unwrap_or(OverridingKind::Undefined),
+        OverridingKind::OverridingUserValue | OverridingKind::OverridingSystemValue
+    ) {
+        return Err("INSERT OVERRIDING clause");
+    }
+
+    let select = insert
+        .select_stmt
+        .as_deref()
+        .and_then(|node| node.node.as_ref())
+        .and_then(|node| match node {
+            NodeEnum::SelectStmt(select) => Some(select),
+            _ => None,
+        })
+        .ok_or("INSERT without VALUES")?;
+
+    validate_select_fields(select, true)?;
+    if select.values_lists.is_empty() {
+        return Err("INSERT source query");
+    }
+    if SetOperation::try_from(select.op).unwrap_or(SetOperation::Undefined)
+        != SetOperation::SetopNone
+        || select.larg.is_some()
+        || select.rarg.is_some()
+        || select.with_clause.is_some()
+        || !select.target_list.is_empty()
+        || !select.from_clause.is_empty()
+        || select.where_clause.is_some()
+    {
+        return Err("INSERT source query");
+    }
+
+    supported
+        .insert_values
+        .insert(select.as_ref() as *const SelectStmt as usize);
+    Ok(())
+}
+
 fn validate_select(
     select: &SelectStmt,
     allow_recursive_union: bool,
-    allowed_recursive_unions: &mut HashSet<usize>,
+    supported: &mut SupportedNodes,
 ) -> Result<(), &'static str> {
-    validate_select_fields(select)?;
+    validate_select_fields(select, false)?;
 
     if let Some(with_clause) = &select.with_clause {
         for cte_node in &with_clause.ctes {
@@ -79,7 +134,7 @@ fn validate_select(
                 .ok_or("empty common table expression")?;
             match query {
                 NodeEnum::SelectStmt(select) => {
-                    validate_select(select, with_clause.recursive, allowed_recursive_unions)?
+                    validate_select(select, with_clause.recursive, supported)?
                 }
                 _ => return Err("data-modifying common table expression"),
             }
@@ -90,11 +145,13 @@ fn validate_select(
     match operation {
         SetOperation::SetopNone => Ok(()),
         SetOperation::SetopUnion if allow_recursive_union && select.all => {
-            allowed_recursive_unions.insert(select as *const SelectStmt as usize);
+            supported
+                .recursive_unions
+                .insert(select as *const SelectStmt as usize);
             let left = select.larg.as_deref().ok_or("incomplete UNION ALL")?;
             let right = select.rarg.as_deref().ok_or("incomplete UNION ALL")?;
-            validate_select(left, false, allowed_recursive_unions)?;
-            validate_select(right, false, allowed_recursive_unions)
+            validate_select(left, false, supported)?;
+            validate_select(right, false, supported)
         }
         SetOperation::SetopUnion => Err("general UNION or UNION ALL expression"),
         SetOperation::SetopIntersect => Err("INTERSECT expression"),
@@ -103,7 +160,7 @@ fn validate_select(
     }
 }
 
-fn validate_select_fields(select: &SelectStmt) -> Result<(), &'static str> {
+fn validate_select_fields(select: &SelectStmt, allow_values: bool) -> Result<(), &'static str> {
     if !select.distinct_clause.is_empty() {
         return Err("SELECT DISTINCT clause");
     }
@@ -119,7 +176,7 @@ fn validate_select_fields(select: &SelectStmt) -> Result<(), &'static str> {
     if !select.window_clause.is_empty() {
         return Err("WINDOW clause");
     }
-    if !select.values_lists.is_empty() {
+    if !allow_values && !select.values_lists.is_empty() {
         return Err("VALUES statement");
     }
     if !select.sort_clause.is_empty() {
@@ -134,16 +191,14 @@ fn validate_select_fields(select: &SelectStmt) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn validate_nested_node(
-    node: NodeRef<'_>,
-    allowed_recursive_unions: &HashSet<usize>,
-) -> Result<(), &'static str> {
+fn validate_nested_node(node: NodeRef<'_>, supported: &SupportedNodes) -> Result<(), &'static str> {
     match node {
         NodeRef::SelectStmt(select) => {
-            validate_select_fields(select)?;
+            let pointer = select as *const SelectStmt as usize;
+            validate_select_fields(select, supported.insert_values.contains(&pointer))?;
             let operation = SetOperation::try_from(select.op).unwrap_or(SetOperation::Undefined);
             if operation != SetOperation::SetopNone
-                && !allowed_recursive_unions.contains(&(select as *const SelectStmt as usize))
+                && !supported.recursive_unions.contains(&pointer)
             {
                 return Err("general set-operation expression");
             }

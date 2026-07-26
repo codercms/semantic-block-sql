@@ -10,9 +10,10 @@ recursively walks projects, respects ignore files, and supports local/CI
 
 The current formatter-core coverage is fixture-backed `SELECT`, authored
 result/function argument groups, booleans, compact/expanded `CASE`, joins, CTEs,
-and recursive CTEs. Unimplemented statement families and unowned SELECT shapes
-return the original source with `syntax.unsupported`; broader DML, DDL, `MERGE`,
-and PL/pgSQL layout remain later batches.
+recursive CTEs, and `INSERT ... VALUES ... RETURNING`. Unimplemented statement
+families and unowned statement variants return the original source with
+`syntax.unsupported`; `ON CONFLICT`, broader DML, DDL, `MERGE`, and PL/pgSQL
+layout remain later batches.
 
 The formatter uses the existing `pg_query` crate for the real PostgreSQL
 parser, scanner, token ranges, comments, and AST. Project code implements the

@@ -403,6 +403,13 @@ fn layout_rule(
     if kinds
         .iter()
         .flatten()
+        .any(|kind| matches!(kind, Token::Values))
+    {
+        return "layout.values";
+    }
+    if kinds
+        .iter()
+        .flatten()
         .any(|kind| matches!(kind, Token::Where | Token::And | Token::Or))
     {
         return "layout.boolean_group";

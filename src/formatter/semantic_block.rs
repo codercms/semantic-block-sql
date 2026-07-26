@@ -92,6 +92,17 @@ struct ParenthesizedList {
     expanded: bool,
 }
 
+#[derive(Debug, Clone)]
+struct InsertBlock {
+    start: usize,
+    end: usize,
+    base_depth: usize,
+    target_open: Option<usize>,
+    values: usize,
+    rows: Vec<(usize, usize)>,
+    returning: Option<usize>,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct TerminalSemicolonPlan {
     omit: Option<usize>,
@@ -107,7 +118,9 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
     let depths = token_depths(&tokens);
     let parens = parenthesis_pairs(&tokens);
     let cases = case_ranges(&tokens, options);
-    let parenthesized_lists = parenthesized_lists(&tokens, &depths, &parens, &cases, options);
+    let inserts = insert_blocks(&tokens, &depths, &parens);
+    let parenthesized_lists =
+        parenthesized_lists(&tokens, &depths, &parens, &cases, &inserts, options);
     let ctes = cte_blocks(&tokens, &depths, &parens);
     let boolean_ranges = boolean_ranges(&tokens, &depths, options);
     let mut plan = LayoutPlan::new(tokens.len());
@@ -117,6 +130,15 @@ pub(super) fn format(source: &str, options: &FormatOptions) -> Result<String, Fo
         &depths,
         &cases,
         &parenthesized_lists,
+        options,
+        &mut plan,
+    );
+    plan_insert_statements(
+        &tokens,
+        &depths,
+        &cases,
+        &parenthesized_lists,
+        &inserts,
         options,
         &mut plan,
     );
@@ -332,12 +354,15 @@ fn parenthesized_lists(
     depths: &[usize],
     parens: &HashMap<usize, usize>,
     cases: &[CaseRange],
+    inserts: &[InsertBlock],
     options: &FormatOptions,
 ) -> Vec<ParenthesizedList> {
     let mut lists = Vec::new();
 
     for (open, token) in tokens.iter().enumerate() {
-        if token.kind != Token::Ascii40 || !is_function_call_open(tokens, open) {
+        if token.kind != Token::Ascii40
+            || !(is_function_call_open(tokens, open) || is_insert_list_open(inserts, open))
+        {
             continue;
         }
         let Some(&close) = parens.get(&open) else {
@@ -359,7 +384,11 @@ fn parenthesized_lists(
             .any(|case| case.expanded && case.start > open && case.end < close)
             || (open + 1..close)
                 .any(|index| tokens[index].kind == Token::Select && depths[index] > depths[open]);
-        let compact = compact_width(tokens, open.saturating_sub(1), close + 1, options);
+        let compact_start = inserts
+            .iter()
+            .find(|insert| insert.target_open == Some(open))
+            .map_or_else(|| open.saturating_sub(1), |insert| insert.start);
+        let compact = compact_width(tokens, compact_start, close + 1, options);
         let has_top_level_comma = (open + 1..close)
             .any(|index| tokens[index].kind == Token::Ascii44 && depths[index] == inner_depth);
         let unavoidable_single_argument = !has_top_level_comma
@@ -385,6 +414,207 @@ fn is_function_call_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
                 Token::Coalesce | Token::Nullif | Token::Greatest | Token::Least
             )
     })
+}
+
+fn insert_blocks(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    parens: &HashMap<usize, usize>,
+) -> Vec<InsertBlock> {
+    let mut blocks = Vec::new();
+
+    for (start, token) in tokens.iter().enumerate() {
+        if token.kind != Token::Insert {
+            continue;
+        }
+        let base_depth = depths[start];
+        let end = (start + 1..tokens.len())
+            .find(|&index| {
+                depths[index] < base_depth
+                    || (depths[index] == base_depth && tokens[index].kind == Token::Ascii59)
+            })
+            .unwrap_or(tokens.len());
+        let Some(values) = (start + 1..end)
+            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Values)
+        else {
+            continue;
+        };
+        let returning = (values + 1..end)
+            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Returning);
+        let rows_end = returning.unwrap_or(end);
+        let target_open = (start + 1..values).find(|&index| {
+            depths[index] == base_depth
+                && tokens[index].kind == Token::Ascii40
+                && parens.get(&index).is_some_and(|close| *close < values)
+        });
+        let rows = (values + 1..rows_end)
+            .filter(|&index| {
+                depths[index] == base_depth
+                    && tokens[index].kind == Token::Ascii40
+                    && parens.get(&index).is_some_and(|close| *close < rows_end)
+            })
+            .filter_map(|open| parens.get(&open).copied().map(|close| (open, close)))
+            .collect();
+
+        blocks.push(InsertBlock {
+            start,
+            end,
+            base_depth,
+            target_open,
+            values,
+            rows,
+            returning,
+        });
+    }
+
+    blocks
+}
+
+fn is_insert_list_open(inserts: &[InsertBlock], open: usize) -> bool {
+    inserts.iter().any(|insert| {
+        insert.target_open == Some(open) || insert.rows.iter().any(|&(row, _)| row == open)
+    })
+}
+
+fn plan_insert_statements(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    cases: &[CaseRange],
+    lists: &[ParenthesizedList],
+    inserts: &[InsertBlock],
+    options: &FormatOptions,
+    plan: &mut LayoutPlan,
+) {
+    for insert in inserts {
+        let authored = tokens[insert.start + 1..insert.end]
+            .iter()
+            .any(|token| token.line_breaks_before > 0);
+        let has_expanded_list = lists.iter().any(|list| {
+            list.expanded
+                && (insert.target_open == Some(list.open)
+                    || insert.rows.iter().any(|&(open, _)| open == list.open))
+        });
+        let compact_statement_width = insert.base_depth * INDENT_WIDTH
+            + compact_width(tokens, insert.start, insert.end, options);
+        let width_driven = compact_statement_width > options.soft_line_width;
+        let expanded = authored || has_expanded_list || width_driven;
+        if !expanded {
+            continue;
+        }
+
+        plan.break_before(insert.values, 1, insert.base_depth);
+
+        let rows_are_multiline = insert.rows.len() > 1
+            || insert
+                .rows
+                .first()
+                .is_some_and(|(open, _)| tokens[*open].line_breaks_before > 0);
+        if rows_are_multiline {
+            for &(open, close) in &insert.rows {
+                plan.set_indent(open..close + 1, insert.base_depth + 1);
+                plan.break_before(open, 1, insert.base_depth + 1);
+            }
+        }
+
+        if let Some(returning) = insert.returning {
+            plan.break_before(returning, 1, insert.base_depth);
+            plan_keyword_list(
+                tokens,
+                depths,
+                cases,
+                lists,
+                returning,
+                insert.end,
+                insert.base_depth,
+                width_driven,
+                options,
+                plan,
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_keyword_list(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    cases: &[CaseRange],
+    lists: &[ParenthesizedList],
+    keyword: usize,
+    end: usize,
+    base_depth: usize,
+    force_expand: bool,
+    options: &FormatOptions,
+    plan: &mut LayoutPlan,
+) {
+    let list_end = (keyword + 1..end)
+        .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Ascii59)
+        .unwrap_or(end);
+    if keyword + 1 >= list_end {
+        return;
+    }
+
+    let mut items = split_list_items(
+        tokens,
+        depths,
+        cases,
+        lists,
+        keyword + 1,
+        list_end,
+        base_depth,
+    );
+    if items.is_empty() {
+        return;
+    }
+
+    let indent = base_depth + 1;
+    let authored = tokens[items[0].start].line_breaks_before > 0
+        || items
+            .iter()
+            .skip(1)
+            .any(|item| tokens[item.start].line_breaks_before > 0);
+    let has_complex = items.iter().any(|item| item.complex);
+    let compact_line_width =
+        base_depth * INDENT_WIDTH + compact_width(tokens, keyword, list_end, options);
+    let expanded = authored
+        || has_complex
+        || (force_expand && items.len() > 1)
+        || compact_line_width > options.soft_line_width;
+    if !expanded {
+        return;
+    }
+
+    for item in &items {
+        plan.set_indent(item.start..item.end, indent);
+        if let Some(comma) = item.comma {
+            plan.token_indents[comma] = Some(indent);
+        }
+    }
+    plan.break_before(items[0].start, 1, indent);
+    let lines = if authored {
+        authored_list_lines(tokens, &items, indent, options)
+    } else {
+        expanded_one_line_items(&items)
+    };
+    for (line_number, (item_index, blank_before)) in lines.into_iter().enumerate() {
+        if line_number == 0 {
+            continue;
+        }
+        plan.break_before(
+            items[item_index].start,
+            if blank_before { 2 } else { 1 },
+            indent,
+        );
+    }
+
+    for item in &mut items {
+        if tokens[item.start..item.end]
+            .iter()
+            .any(|token| token.kind == Token::SqlComment)
+        {
+            plan.set_indent(item.start..item.end, indent);
+        }
+    }
 }
 
 fn plan_select_lists(
@@ -1231,6 +1461,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Having
             | Token::HourP
             | Token::InnerP
+            | Token::Insert
             | Token::Intersect
             | Token::Is
             | Token::Join
@@ -1258,6 +1489,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Then
             | Token::TrueP
             | Token::Union
+            | Token::Values
             | Token::When
             | Token::Where
             | Token::With
@@ -1288,12 +1520,30 @@ pub(super) fn is_type_keyword(kind: Token) -> bool {
     )
 }
 
+fn is_insert_target_list_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
+    if tokens
+        .get(open)
+        .is_none_or(|token| token.kind != Token::Ascii40)
+    {
+        return false;
+    }
+    for token in tokens[..open].iter().rev() {
+        match token.kind {
+            Token::Ascii59 | Token::Values => return false,
+            Token::Insert => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn needs_space(tokens: &[SqlToken<'_>], previous: Option<usize>, current: usize) -> bool {
     let Some(previous_index) = previous else {
         return false;
     };
+    let current_index = current;
     let previous = &tokens[previous_index];
-    let current = &tokens[current];
+    let current = &tokens[current_index];
     if previous.kind == Token::SqlComment
         || (previous.kind == Token::CComment && current.line_breaks_before > 0)
     {
@@ -1312,6 +1562,9 @@ fn needs_space(tokens: &[SqlToken<'_>], previous: Option<usize>, current: usize)
         Token::Ascii40 | Token::Ascii91 | Token::Ascii46 | Token::Typecast
     ) {
         return false;
+    }
+    if current.kind == Token::Ascii40 && is_insert_target_list_open(tokens, current_index) {
+        return true;
     }
     if current.kind == Token::Ascii40
         && (is_function_call_syntax(tokens, previous_index)
