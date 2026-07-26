@@ -443,6 +443,22 @@ Unsupported-syntax checkpoint evidence:
 - The checkpoint passes formatting, Clippy with warnings denied, all 60 tests,
   documentation, and `git diff --check` in the packaged offline environment.
 
+Ownership-IR checkpoint evidence:
+
+- `validation::parse_supported_postgresql` now returns one `SupportedDocument`
+  containing an exhaustive `StatementKind` and PostgreSQL `RawStmt` byte span
+  for each fixture-backed top-level statement.
+- `ownership::bind_token_statements` maps those AST-owned spans to token-indexed
+  `TokenStatement` values.
+- INSERT, UPDATE, and DELETE planners dispatch only from owned statement spans;
+  they no longer scan the complete document for DML keywords.
+- Missing expected clause ownership is an internal `format.safety_failure`, not
+  a silently skipped planner.
+- `docs/formatter-architecture.md` records the implemented structs, functions,
+  safety pipeline, extension protocol, and forward-compatibility policy.
+- Existing supported output remains unchanged and the complete suite contains
+  82 passing tests, including an ownership binding unit test.
+
 ## Batch 6 — Performance and release polish
 
 - [ ] Establish correctness-preserving benchmarks.

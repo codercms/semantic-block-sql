@@ -1,4 +1,5 @@
 mod diagnostics;
+mod ownership;
 mod semantic_block;
 mod tokens;
 mod validation;
@@ -187,6 +188,8 @@ pub enum FormatDiagnostic {
         start: usize,
         end: usize,
     },
+    #[error("formatter ownership model failure: {0}")]
+    Ownership(String),
     #[error("formatted SQL is not structurally equivalent to the input")]
     SemanticMismatch,
     #[error("protected token changed during formatting: {0}")]
@@ -206,17 +209,17 @@ pub enum FormatDiagnostic {
 /// Formats one or more complete PostgreSQL statements without touching files.
 pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql, FormatDiagnostic> {
     options.validate()?;
-    validation::parse_supported_postgresql(source)?;
+    let document = validation::parse_supported_postgresql(source)?;
 
     let output = match options.style {
-        Style::SemanticBlock => semantic_block::format(source, options)?,
+        Style::SemanticBlock => semantic_block::format(source, options, &document)?,
     };
 
-    validation::parse_supported_postgresql(&output)?;
+    let output_document = validation::parse_supported_postgresql(&output)?;
     validation::validate_equivalent(source, &output)?;
 
     let second_pass = match options.style {
-        Style::SemanticBlock => semantic_block::format(&output, options)?,
+        Style::SemanticBlock => semantic_block::format(&output, options, &output_document)?,
     };
     if output != second_pass {
         return Err(FormatDiagnostic::NotIdempotent);

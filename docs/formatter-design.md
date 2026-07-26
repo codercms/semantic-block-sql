@@ -332,6 +332,14 @@ The facade remains pure and performs no filesystem writes. The CLI renders
 successful style diagnostics as `path:start-end: severity[rule_id]: message`;
 `fmt` and `diff` suppress fixed style errors but still surface warnings.
 
+## Code architecture
+
+The implemented parser, ownership IR, token model, layout planner, writer,
+extension protocol, and forward-compatibility behavior are documented in
+[`formatter-architecture.md`](formatter-architecture.md). The architecture
+document describes code structure; this design document remains the record of
+behavioral decisions.
+
 ## PostgreSQL backend strategy
 
 Batch 1 rejected a `libpgfmt` fork after running its unmodified tests and a

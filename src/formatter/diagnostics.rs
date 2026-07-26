@@ -167,7 +167,8 @@ pub(super) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diag
         FormatDiagnostic::HardLineExceeded { .. } => "layout.hard_line_width",
         FormatDiagnostic::SemanticMismatch
         | FormatDiagnostic::ProtectedTokenChanged(_)
-        | FormatDiagnostic::NotIdempotent => "format.safety_failure",
+        | FormatDiagnostic::NotIdempotent
+        | FormatDiagnostic::Ownership(_) => "format.safety_failure",
     };
     let source_range = match error {
         FormatDiagnostic::UnsupportedSyntax { start, end, .. } => SourceRange::new(*start, *end),

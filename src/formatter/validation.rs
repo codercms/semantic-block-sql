@@ -9,6 +9,7 @@ use pg_query::{Context, NodeRef};
 use serde_json::Value;
 
 use super::FormatDiagnostic;
+use super::ownership::{StatementKind, SupportedDocument, source_statement};
 use super::tokens;
 
 #[derive(Debug, Default)]
@@ -17,14 +18,18 @@ struct SupportedNodes {
     insert_values: HashSet<usize>,
 }
 
-pub(super) fn parse_supported_postgresql(source: &str) -> Result<(), FormatDiagnostic> {
+pub(super) fn parse_supported_postgresql(
+    source: &str,
+) -> Result<SupportedDocument, FormatDiagnostic> {
     let parsed = pg_query::parse(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
 
     let mut supported = SupportedNodes::default();
+    let mut statements = Vec::with_capacity(parsed.protobuf.stmts.len());
     for raw in &parsed.protobuf.stmts {
-        validate_statement(raw, &mut supported)
+        let kind = validate_statement(raw, &mut supported)
             .map_err(|feature| unsupported(source, raw, feature))?;
+        statements.push(source_statement(source, raw, kind));
     }
 
     for (node, _, context, _) in parsed.protobuf.nodes() {
@@ -37,10 +42,13 @@ pub(super) fn parse_supported_postgresql(source: &str) -> Result<(), FormatDiagn
         })?;
     }
 
-    Ok(())
+    Ok(SupportedDocument::new(statements))
 }
 
-fn validate_statement(raw: &RawStmt, supported: &mut SupportedNodes) -> Result<(), &'static str> {
+fn validate_statement(
+    raw: &RawStmt,
+    supported: &mut SupportedNodes,
+) -> Result<StatementKind, &'static str> {
     let node = raw
         .stmt
         .as_deref()
@@ -48,10 +56,22 @@ fn validate_statement(raw: &RawStmt, supported: &mut SupportedNodes) -> Result<(
         .ok_or("empty PostgreSQL statement")?;
 
     match node {
-        NodeEnum::SelectStmt(select) => validate_select(select, false, supported),
-        NodeEnum::InsertStmt(insert) => validate_insert(insert, supported),
-        NodeEnum::UpdateStmt(update) => validate_update(update, supported),
-        NodeEnum::DeleteStmt(delete) => validate_delete(delete, supported),
+        NodeEnum::SelectStmt(select) => {
+            validate_select(select, false, supported)?;
+            Ok(StatementKind::Select)
+        }
+        NodeEnum::InsertStmt(insert) => {
+            validate_insert(insert, supported)?;
+            Ok(StatementKind::Insert)
+        }
+        NodeEnum::UpdateStmt(update) => {
+            validate_update(update, supported)?;
+            Ok(StatementKind::Update)
+        }
+        NodeEnum::DeleteStmt(delete) => {
+            validate_delete(delete, supported)?;
+            Ok(StatementKind::Delete)
+        }
         NodeEnum::MergeStmt(_) => Err("MERGE statement"),
         NodeEnum::CreateStmt(_) => Err("CREATE TABLE statement"),
         NodeEnum::IndexStmt(_) => Err("CREATE INDEX statement"),
