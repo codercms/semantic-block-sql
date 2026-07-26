@@ -1,0 +1,193 @@
+# Extending PostgreSQL syntax support
+
+Status: **implemented contributor workflow**
+
+This guide describes the required code path for adding PostgreSQL syntax to the
+formatter. It supplements [`formatter-architecture.md`](formatter-architecture.md)
+and does not define formatting policy; the core specification remains
+[`semantic-block-sql-fmt-check-core-spec.md`](semantic-block-sql-fmt-check-core-spec.md).
+
+## Core rule
+
+PostgreSQL parser acceptance is necessary but not sufficient. A syntax shape is
+supported only when all three layers agree:
+
+1. AST validation accepts and describes the shape.
+2. Token ownership binds and verifies that description.
+3. A planner has fixtures for its formatting behavior.
+
+If any layer is missing, return the original statement with
+`syntax.unsupported` or an internal ownership safety diagnostic. Never let a
+known keyword fall through generic whitespace normalization.
+
+## Existing extension points
+
+| Concern | Main type/function | Location |
+| --- | --- | --- |
+| Parser-version gate | `REVIEWED_POSTGRESQL_VERSION` | `validation.rs` |
+| Statement dispatch | `StatementSpec` | `ownership.rs` |
+| Family capabilities | `InsertSpec`, `MergeSpec`, etc. | `ownership.rs` |
+| AST classification | `validate_statement` | `validation.rs` |
+| Family validation | `validate_insert`, `validate_merge`, etc. | `validation.rs` |
+| Source/token binding | `bind_token_statements` | `ownership.rs` |
+| Statement binding | `bind_*` | `layout_ir/statement.rs` |
+| Query binding | `bind_queries`, `bind_predicates` | `layout_ir/query.rs` |
+| Layout dispatch | `StatementLayout` | `layout_ir.rs` |
+| Statement planning | `plan_*_statements` | `semantic_block/statements.rs` |
+| Shared lists | `plan_keyword_list` and related helpers | `semantic_block/lists.rs` |
+| Token rendering | `render_token`, `needs_space` | `semantic_block/render.rs` |
+| Final safety | `format_sql`, `validate_equivalent` | `mod.rs`, `validation/equivalence.rs` |
+
+## Adding a variant to an existing statement
+
+Example: supporting another INSERT source or clause.
+
+### 1. Characterize PostgreSQL's AST
+
+Add a focused fixture or temporary unit test and inspect the pinned `pg_query`
+protobuf fields. Record:
+
+- the owning top-level node;
+- nested nodes and enum values;
+- cardinalities;
+- whether source locations exist;
+- adjacent syntax that must remain unsupported.
+
+Do not infer ownership only from token order.
+
+### 2. Extend the family capability record
+
+Update the corresponding `*Spec` type in `ownership.rs`. Prefer closed enums and
+counts over unrelated booleans:
+
+```rust
+pub(super) enum InsertSourceSpec {
+    DefaultValues,
+    Values { rows: usize },
+    Query { set_operations: usize },
+}
+```
+
+A field belongs in the capability record when the token binder can verify it.
+Avoid documentary fields that are never consumed.
+
+### 3. Extend AST validation
+
+Update the family validator in `validation.rs` and return the new capability.
+Validate nested expressions and reject nearby unowned forms explicitly.
+
+The validator must not expose the protobuf tree to the renderer. It should
+return only the formatter-relevant contract.
+
+### 4. Extend token binding
+
+Update the relevant binder in `layout_ir/statement.rs` or
+`layout_ir/query.rs`.
+
+The binder must:
+
+- search only inside its AST-owned half-open token range;
+- respect `base_depth`;
+- locate presentation boundaries;
+- compare clause presence, modes, and cardinalities with the `*Spec`;
+- return `FormatDiagnostic::Ownership` on disagreement.
+
+Do not add a document-wide keyword scan.
+
+### 5. Reuse or extend layout IR
+
+Use shared records where possible:
+
+- `TokenSpan`;
+- `QueryBlock` and `QueryClauses`;
+- `PredicateBlock`;
+- `WithBlock`;
+- delimited list ownership;
+- assignment and RETURNING list planning.
+
+Add a statement-specific record only for genuinely statement-specific grammar.
+
+### 6. Add planner behavior
+
+Use shared functions in `semantic_block/lists.rs`, existing predicate planning,
+and the token renderer. Keep statement-specific decisions in
+`semantic_block/statements.rs`.
+
+The planner must not duplicate AST validation. It receives already-verified
+ownership. Reuse the pass-wide `PlanningContext`; do not add another collection
+of token/depth/list/options parameters or suppress `clippy::too_many_arguments`.
+
+### 7. Add evidence
+
+Fixtures must include, where applicable:
+
+- compact input and output;
+- width-driven expansion;
+- comments at every ownership boundary;
+- authored list groups;
+- semantic equivalence;
+- idempotence;
+- clean `check` output after formatting;
+- adjacent unsupported shapes remaining byte-identical.
+
+## Adding a new statement family
+
+A new top-level family requires compiler-visible changes:
+
+1. Add a capability struct and `StatementSpec` variant.
+2. Add `expected_token`, `family_name`, and `has_with` match arms.
+3. Add a `validate_statement` branch and family validator.
+4. Add a `StatementLayout` variant.
+5. Add a binder in `layout_ir/statement.rs`.
+6. Add an iterator/accessor only if planning needs a family collection.
+7. Add a planner and call it from `semantic_block::format`.
+8. Add diagnostics and fixtures.
+
+Do not introduce a runtime registry to avoid these exhaustive matches. Compiler
+errors are intentional: they reveal every top-level integration point.
+
+## PostgreSQL parser upgrades
+
+A `pg_query` upgrade changes the embedded PostgreSQL grammar version. The
+formatter fails closed until `REVIEWED_POSTGRESQL_VERSION` is updated.
+
+Upgrade procedure:
+
+1. Inspect protobuf changes for all currently supported nodes.
+2. Review newly added enum variants and fields.
+3. Run the complete characterization and golden suite.
+4. Add unsupported fixtures for newly parsed but unowned syntax.
+5. Update capability records and binders only for intentionally supported
+   additions.
+6. Update the reviewed version constant in the same commit.
+
+A parser upgrade must never silently broaden formatter support.
+
+## Range and index conventions
+
+- Source ranges are UTF-8 byte offsets.
+- `TokenRange` is always half-open: `[start, end)`.
+- A statement's terminal semicolon is stored separately.
+- Clause indices point into the one immutable token slice for that formatting
+  pass.
+- Any new range type must document whether its end is inclusive or exclusive;
+  mixed semantics are forbidden.
+
+## Required validation gate
+
+```text
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+cargo doc --locked --no-deps
+git diff --check
+```
+
+Before committing, confirm:
+
+- validation and binding capabilities agree;
+- unsupported neighboring syntax is unchanged;
+- comments and protected tokens are byte-identical;
+- no document-wide statement discovery was introduced;
+- no existing statement planner was rewritten merely to add another family;
+- dead capability fields and duplicate helpers were removed.

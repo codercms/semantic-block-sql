@@ -9,10 +9,11 @@ Read these files before changing behavior:
 1. `docs/semantic-block-sql-fmt-check-core-spec.md`
 2. `docs/formatter-design.md`
 3. `docs/formatter-architecture.md`
-4. `docs/semantic-block-sql-work-handoff.md`
-5. `docs/semantic-block-sql-style-guide-ru.md`
-6. `.agent-skills/postgresql-sql-format/SKILL.md` and its referenced material
-7. `docs/implementation-checklist.md`
+4. `docs/formatter-extension-guide.md`
+5. `docs/semantic-block-sql-work-handoff.md`
+6. `docs/semantic-block-sql-style-guide-ru.md`
+7. `.agent-skills/postgresql-sql-format/SKILL.md` and its referenced material
+8. `docs/implementation-checklist.md`
 
 The core specification is authoritative for machine `fmt` / `check` behavior.
 The agent skill is human-formatting guidance and must not silently broaden the

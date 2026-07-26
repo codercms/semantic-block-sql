@@ -26,15 +26,28 @@ The formatter is designed around five constraints:
 
 ```text
 src/formatter/
-├── mod.rs             public facade and safety pipeline
-├── validation.rs      PostgreSQL AST support classification
-├── ownership.rs       AST-validated source-statement ownership
-├── structure.rs       syntax-neutral token depth/delimiter index
-├── layout_ir.rs       token-bound statements, queries, clauses and predicates
-├── tokens.rs          exact scanner tokens and authored gaps
-├── semantic_block.rs  shared layout planning and token-preserving writing
-└── diagnostics.rs     rule-level diagnostics and source ranges
+├── mod.rs                      public facade and safety pipeline
+├── validation.rs               PostgreSQL AST support classification
+├── validation/
+│   └── equivalence.rs          canonical AST and protected-token checks
+├── ownership.rs                validated statement-shape and source/token spans
+├── structure.rs                syntax-neutral depth/delimiter index
+├── layout_ir.rs                layout types and document-level dispatch
+├── layout_ir/
+│   ├── statement.rs            statement-family token binding and shape checks
+│   └── query.rs                SELECT, WITH, predicate, and set-operation binding
+├── semantic_block.rs           planning orchestration and query/expression rules
+├── semantic_block/
+│   ├── statements.rs           INSERT/UPDATE/DELETE/MERGE planners
+│   ├── lists.rs                shared list and parenthesized-argument planning
+│   └── render.rs               casing, spacing, and token rendering
+├── tokens.rs                   exact scanner tokens and authored gaps
+└── diagnostics.rs              rule diagnostics and source ranges
 ```
+
+The directories are implementation partitions, not plugin registries. Private
+module boundaries keep statement-specific code small while exhaustive enums
+remain the compiler-enforced dispatcher.
 
 Filesystem discovery, SQL directives, Go extraction, diff generation, and
 atomic rewriting remain outside the formatter core.
@@ -73,37 +86,45 @@ AST and token layout. `ownership.rs` records parser-proven source spans;
 `layout_ir.rs` binds those spans to exact tokens and derives reusable clause,
 query, WITH, and predicate ownership once per formatting pass.
 
-### `StatementKind`
+### `StatementSpec`
 
 ```rust
-pub(super) enum StatementKind {
-    Select,
-    Insert,
-    Update,
-    Delete,
-    Merge,
+pub(super) enum StatementSpec {
+    Select(SelectSpec),
+    Insert(InsertSpec),
+    Update(UpdateSpec),
+    Delete(DeleteSpec),
+    Merge(MergeSpec),
 }
 ```
 
-This closed Rust sum type is the central top-level dispatcher. A new statement
-family is added as a new variant only when its AST validation and layout planner
-are introduced together.
+This closed sum type is the top-level support contract. Each variant carries the
+exact capabilities proven by the PostgreSQL AST validator. For example,
+`InsertSpec` records source kind, target-column count, OVERRIDING mode,
+ON CONFLICT shape, and RETURNING item count. `MergeSpec` records every branch
+action and its cardinality.
 
-Unknown PostgreSQL node variants do not enter the planner. They produce
-`syntax.unsupported` and preserve the original statement.
+The token binder must reproduce those capabilities from scanner tokens. A
+mismatch is `FormatDiagnostic::Ownership`; it is never silently accepted. This
+prevents validation and rendering support from drifting into two independent
+lists of assumptions.
+
+A new statement family is a new enum variant. Rust's exhaustive matches identify
+every dispatcher that must be updated. A new variant of an existing statement
+extends its capability record instead of introducing a registry entry or an
+untyped feature flag.
 
 ### `SourceStatement`
 
 ```rust
 pub(super) struct SourceStatement {
-    pub kind: StatementKind,
-    pub start: usize,
-    pub end: usize,
+    pub spec: StatementSpec,
+    pub range: SourceRange,
 }
 ```
 
-A source statement owns one UTF-8 byte span from PostgreSQL's `RawStmt`
-locations. The terminal semicolon is included when present.
+A source statement owns one UTF-8 byte range from PostgreSQL's `RawStmt`
+locations. The range includes the terminal semicolon when one exists.
 
 ### `SupportedDocument`
 
@@ -115,30 +136,60 @@ pub(super) struct SupportedDocument {
 
 This is produced by `validation::parse_supported_postgresql`. It proves that
 every top-level statement and every checked nested construct belongs to the
-fixture-backed support boundary.
+fixture-backed support boundary. The full protobuf tree is deliberately not
+exposed to layout code.
 
-It intentionally contains only formatter-relevant ownership metadata rather
-than exposing the full protobuf tree to every layout function.
-
-### `TokenStatement`
+### `StatementTokens`
 
 ```rust
-pub(super) struct TokenStatement {
-    pub kind: StatementKind,
-    pub start: usize,
-    pub end: usize,
+pub(super) struct StatementTokens {
+    pub spec: StatementSpec,
+    pub range: TokenRange,
+    pub semicolon: Option<usize>,
     pub base_depth: usize,
 }
 ```
 
-`bind_token_statements` maps AST-owned byte spans to scanner-token spans.
-Statement planners receive only these owned spans. They no longer discover DML
-statements by scanning the complete document for words such as `INSERT`,
-`UPDATE`, or `DELETE`.
+`TokenRange` is always half-open: `[start, end)`. It never includes the terminal
+semicolon, which is stored separately. The previous mixed convention—where one
+`end` field was sometimes inclusive and sometimes exclusive—has been removed.
 
-If an AST-supported statement cannot be bound to the expected token shape, the
-formatter returns `FormatDiagnostic::Ownership`. This is an internal safety
-failure, not a silent fallback.
+Individual clause positions remain token indices because every layout record
+indexes the same immutable token slice for one formatting pass. Wrapping every
+position in a newtype would add conversion noise without preventing a realistic
+cross-buffer error. Ranges are wrapped because boundary semantics are genuinely
+error-prone; statement capability and cardinality checks protect individual
+clause positions.
+
+`bind_token_statements` maps AST-owned byte ranges to these token ranges. If a
+validated statement cannot bind to its expected token or range, formatting
+fails safely.
+
+### Shape agreement
+
+The support and binding stages form an explicit contract:
+
+```text
+PostgreSQL AST
+    -> StatementSpec
+    -> statement token range
+    -> family binder
+    -> verify presence, mode, and cardinality
+    -> StatementLayout
+```
+
+Examples of verified properties include:
+
+- WITH presence;
+- SELECT/INSERT set-operation count;
+- INSERT source kind and VALUES row count;
+- OVERRIDING USER versus SYSTEM;
+- ON CONFLICT target/action shape and assignment count;
+- UPDATE/DELETE source, predicate, and RETURNING presence;
+- MERGE branch count, action kind, assignment/value cardinality, and conditions.
+
+A unit test deliberately constructs a contradictory `StatementSpec` and proves
+that layout binding returns an ownership safety failure.
 
 ## AST support classification
 
@@ -153,7 +204,7 @@ the formatter merely because a crate version changed.
 ### Top-level statement classification
 
 `validate_statement` matches PostgreSQL protobuf sum types and returns a
-`StatementKind` for the exact supported family:
+capability-bearing `StatementSpec` for the exact supported shape:
 
 ```rust
 match node {
@@ -175,6 +226,11 @@ sources because no planner owns them yet.
 After top-level classification, nested PostgreSQL nodes are traversed to reject
 unowned constructs such as unsupported subqueries, window forms, or lateral
 sources.
+
+Nested SELECT and VALUES nodes are classified from their structural protobuf
+fields. The validator does not use memory addresses or parser-allocation
+identity as persistent node IDs. This keeps validation deterministic and avoids
+coupling support decisions to one in-memory parse instance.
 
 This makes support explicit. Successful parsing alone never implies formatter
 support.
@@ -200,7 +256,9 @@ comments, authored groups, and original token spelling.
 
 ## Layout planning
 
-`semantic_block.rs` builds a token-indexed `LayoutPlan`:
+`semantic_block.rs` orchestrates planning and builds a token-indexed
+`LayoutPlan`. Statement, list, and rendering rules live in focused child
+modules rather than one growing formatter file:
 
 ```rust
 struct LayoutPlan {
@@ -211,6 +269,12 @@ struct LayoutPlan {
 
 Planning functions request line breaks and indentation. The writer later emits
 tokens in their original order.
+
+Every statement, query, and keyword-list planner receives one immutable
+`PlanningContext` containing the token slice, depth index, CASE analysis,
+parenthesized-list analysis, and formatting options for that pass. This avoids
+long parameter lists and, more importantly, prevents callers from accidentally
+combining analyses produced from different token buffers.
 
 Current shared analyses include:
 
@@ -284,8 +348,9 @@ Do not infer grammar ownership from keywords alone.
 
 ### 2. Extend the closed ownership model
 
-For a new statement family, add a `StatementKind` variant. For a new variant of
-an existing family, extend its family-specific validated shape instead.
+For a new statement family, add a `StatementSpec` variant and its capability
+record. For a new variant of an existing family, extend that record instead.
+Every capability recorded here must later be verified by its token binder.
 
 Do not create a dynamic registry merely to avoid a Rust `match`; exhaustive
 matches are useful because compiler errors identify every dispatcher that must
@@ -336,6 +401,9 @@ cargo doc --locked --no-deps
 git diff --check
 ```
 
+The detailed compiler-guided procedure and review checklist are in
+[`formatter-extension-guide.md`](formatter-extension-guide.md).
+
 ## Forward compatibility policy
 
 A PostgreSQL upgrade can produce four outcomes:
@@ -368,7 +436,7 @@ The ownership migration is complete for the currently supported SQL families:
 
 New PostgreSQL syntax normally extends one family validator and one layout-IR
 binder, then reuses existing clause, list, predicate, CASE, CTE, and writer
-logic. A new statement family adds one exhaustive `StatementKind` and
+logic. A new statement family adds one exhaustive `StatementSpec` and
 `StatementLayout` variant. Existing families do not need to be rewritten.
 
 The architecture is now exercised by SELECT, INSERT, UPDATE, DELETE, and

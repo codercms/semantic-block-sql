@@ -69,6 +69,33 @@ Earlier project requests also clarified these application-level points:
 
 Any future ambiguity is recorded here before implementation.
 
+## Architecture hardening decisions
+
+The formatter uses a closed, compiler-checked ownership model rather than a
+runtime statement registry. `StatementSpec` carries the exact AST-validated
+capabilities for each supported top-level statement. Token binders must verify
+those capabilities before producing `StatementLayout` records.
+
+This resolves four earlier architecture risks:
+
+- validation and layout can no longer independently claim different clause
+  shapes without producing an ownership safety failure;
+- statement token ranges are always half-open, with the terminal semicolon
+  stored separately;
+- nested SELECT/VALUES validation uses deterministic protobuf shape checks
+  rather than in-memory pointer identity;
+- layout binding, statement planning, list planning, rendering, and semantic
+  equivalence now live in focused modules instead of two growing monoliths.
+
+Individual clause positions remain indices into the one immutable scanner-token
+slice. Only ranges are wrapped because boundary semantics are the realistic
+source of index bugs; capability/cardinality verification protects clause
+positions without introducing pervasive conversion wrappers.
+
+The implemented architecture and extension workflow are documented in
+[`formatter-architecture.md`](formatter-architecture.md) and
+[`formatter-extension-guide.md`](formatter-extension-guide.md).
+
 ## Non-negotiable invariants
 
 ### Semantic safety

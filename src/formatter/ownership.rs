@@ -1,28 +1,159 @@
 use pg_query::protobuf::{RawStmt, Token};
 
-use super::FormatDiagnostic;
 use super::tokens::SqlToken;
+use super::{FormatDiagnostic, SourceRange};
 
-/// PostgreSQL statement family whose exact AST shape passed the support gate.
-///
-/// This is deliberately a closed sum type. Adding a statement family requires
-/// an explicit validation branch and an explicit layout dispatcher, while
-/// unknown future PostgreSQL nodes remain fail-safe unsupported syntax.
+/// Exact top-level SELECT capabilities proven by PostgreSQL AST validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StatementKind {
-    Select,
-    Insert,
-    Update,
-    Delete,
-    Merge,
+pub(super) struct SelectSpec {
+    pub has_with: bool,
+    pub set_operations: usize,
 }
 
-/// UTF-8 byte span owned by one top-level PostgreSQL statement.
+/// INSERT source shape accepted by the validator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum InsertSourceSpec {
+    DefaultValues,
+    Values { rows: usize },
+    Query { set_operations: usize },
+}
+
+/// PostgreSQL OVERRIDING mode accepted by INSERT or MERGE INSERT.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum OverrideSpec {
+    None,
+    User,
+    System,
+}
+
+/// ON CONFLICT action shape accepted by the validator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ConflictActionSpec {
+    Nothing,
+    Update { assignments: usize, has_where: bool },
+}
+
+/// ON CONFLICT ownership capabilities proven by AST validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ConflictSpec {
+    pub has_target: bool,
+    pub has_target_where: bool,
+    pub action: ConflictActionSpec,
+}
+
+/// Exact top-level INSERT capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct InsertSpec {
+    pub has_with: bool,
+    pub target_columns: usize,
+    pub overriding: OverrideSpec,
+    pub source: InsertSourceSpec,
+    pub conflict: Option<ConflictSpec>,
+    pub returning_items: usize,
+}
+
+/// Exact top-level UPDATE capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct UpdateSpec {
+    pub has_with: bool,
+    pub assignments: usize,
+    pub from_relations: usize,
+    pub has_where: bool,
+    pub returning_items: usize,
+}
+
+/// Exact top-level DELETE capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct DeleteSpec {
+    pub has_with: bool,
+    pub using_relations: usize,
+    pub has_where: bool,
+    pub returning_items: usize,
+}
+
+/// MERGE branch action shape accepted by the validator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MergeActionSpec {
+    Delete,
+    Nothing,
+    Update {
+        assignments: usize,
+    },
+    Insert {
+        target_columns: usize,
+        values: usize,
+        overriding: OverrideSpec,
+    },
+}
+
+/// Exact MERGE branch capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct MergeBranchSpec {
+    pub has_condition: bool,
+    pub action: MergeActionSpec,
+}
+
+/// Exact top-level MERGE capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MergeSpec {
+    pub has_with: bool,
+    pub branches: Vec<MergeBranchSpec>,
+    pub returning_items: usize,
+}
+
+/// Exact statement shape accepted by the PostgreSQL AST support gate.
+///
+/// This is deliberately a closed sum type. Adding a statement family requires
+/// an explicit validation branch and an explicit layout dispatcher. Adding a
+/// syntax variant to an existing family requires extending its capability
+/// record, which makes the token binder verify the same shape that validation
+/// accepted rather than rediscovering support implicitly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum StatementSpec {
+    Select(SelectSpec),
+    Insert(InsertSpec),
+    Update(UpdateSpec),
+    Delete(DeleteSpec),
+    Merge(MergeSpec),
+}
+
+impl StatementSpec {
+    pub fn expected_token(&self) -> Token {
+        match self {
+            Self::Select(_) => Token::Select,
+            Self::Insert(_) => Token::Insert,
+            Self::Update(_) => Token::Update,
+            Self::Delete(_) => Token::DeleteP,
+            Self::Merge(_) => Token::Merge,
+        }
+    }
+
+    pub fn family_name(&self) -> &'static str {
+        match self {
+            Self::Select(_) => "SELECT",
+            Self::Insert(_) => "INSERT",
+            Self::Update(_) => "UPDATE",
+            Self::Delete(_) => "DELETE",
+            Self::Merge(_) => "MERGE",
+        }
+    }
+
+    pub fn has_with(&self) -> bool {
+        match self {
+            Self::Select(spec) => spec.has_with,
+            Self::Insert(spec) => spec.has_with,
+            Self::Update(spec) => spec.has_with,
+            Self::Delete(spec) => spec.has_with,
+            Self::Merge(spec) => spec.has_with,
+        }
+    }
+}
+
+/// UTF-8 byte range owned by one top-level PostgreSQL statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SourceStatement {
-    pub kind: StatementKind,
-    pub start: usize,
-    pub end: usize,
+    pub spec: StatementSpec,
+    pub range: SourceRange,
 }
 
 /// AST-validated top-level ownership model shared by validation and layout.
@@ -41,20 +172,41 @@ impl SupportedDocument {
     }
 }
 
-/// Token-indexed form of [`SourceStatement`]. `end` is the terminal semicolon
-/// token index when present, otherwise the exclusive token bound.
+/// Half-open token range `[start, end)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct TokenStatement {
-    pub kind: StatementKind,
+pub(super) struct TokenRange {
     pub start: usize,
     pub end: usize,
+}
+
+impl TokenRange {
+    pub fn new(start: usize, end: usize) -> Result<Self, FormatDiagnostic> {
+        if start >= end {
+            return Err(FormatDiagnostic::Ownership(format!(
+                "invalid empty token range {start}..{end}"
+            )));
+        }
+        Ok(Self { start, end })
+    }
+}
+
+/// Token-indexed form of [`SourceStatement`].
+///
+/// `range` is always half-open and excludes a terminal semicolon. The optional
+/// semicolon is stored separately, so callers cannot accidentally interpret one
+/// field as inclusive in one statement and exclusive in another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct StatementTokens {
+    pub spec: StatementSpec,
+    pub range: TokenRange,
+    pub semicolon: Option<usize>,
     pub base_depth: usize,
 }
 
 pub(super) fn source_statement(
     source: &str,
     raw: &RawStmt,
-    kind: StatementKind,
+    spec: StatementSpec,
 ) -> SourceStatement {
     let start = usize::try_from(raw.stmt_location)
         .unwrap_or(0)
@@ -68,46 +220,54 @@ pub(super) fn source_statement(
     if source.as_bytes().get(end) == Some(&b';') {
         end += 1;
     }
-    SourceStatement { kind, start, end }
+    SourceStatement {
+        spec,
+        range: SourceRange::new(start, end),
+    }
 }
 
 pub(super) fn bind_token_statements(
     document: &SupportedDocument,
     tokens: &[SqlToken<'_>],
     depths: &[usize],
-) -> Result<Vec<TokenStatement>, FormatDiagnostic> {
+) -> Result<Vec<StatementTokens>, FormatDiagnostic> {
     let mut result = Vec::with_capacity(document.statements().len());
 
     for statement in document.statements() {
         let start = tokens
             .iter()
-            .position(|token| token.start >= statement.start && token.start < statement.end)
+            .position(|token| {
+                token.start >= statement.range.start && token.start < statement.range.end
+            })
             .ok_or_else(|| {
                 FormatDiagnostic::Ownership(format!(
-                    "statement {:?} at bytes {}..{} has no source token",
-                    statement.kind, statement.start, statement.end
+                    "{} statement at bytes {}..{} has no source token",
+                    statement.spec.family_name(),
+                    statement.range.start,
+                    statement.range.end
                 ))
             })?;
-        let exclusive_end = tokens
+        let source_end = tokens
             .iter()
-            .position(|token| token.start >= statement.end)
+            .position(|token| token.start >= statement.range.end)
             .unwrap_or(tokens.len());
-        if exclusive_end <= start {
+        if source_end <= start {
             return Err(FormatDiagnostic::Ownership(format!(
-                "statement {:?} at bytes {}..{} has an empty token span",
-                statement.kind, statement.start, statement.end
+                "{} statement at bytes {}..{} has an empty token span",
+                statement.spec.family_name(),
+                statement.range.start,
+                statement.range.end
             )));
         }
-        let end = if tokens[exclusive_end - 1].kind == Token::Ascii59 {
-            exclusive_end - 1
-        } else {
-            exclusive_end
-        };
+
+        let semicolon = (tokens[source_end - 1].kind == Token::Ascii59).then_some(source_end - 1);
+        let end = semicolon.unwrap_or(source_end);
+        let range = TokenRange::new(start, end)?;
         let base_depth = depths[start];
-        result.push(TokenStatement {
-            kind: statement.kind,
-            start,
-            end,
+        result.push(StatementTokens {
+            spec: statement.spec.clone(),
+            range,
+            semicolon,
             base_depth,
         });
     }
@@ -121,7 +281,7 @@ mod tests {
     use crate::formatter::tokens::tokenize;
 
     #[test]
-    fn binds_multiple_statements_to_independent_token_spans() {
+    fn binds_multiple_statements_with_half_open_ranges_and_separate_semicolons() {
         let source = "select 1;\nupdate public.items set value = 2;";
         let tokens = tokenize(source).expect("scan succeeds");
         let mut depth = 0usize;
@@ -139,22 +299,49 @@ mod tests {
             .collect::<Vec<_>>();
         let document = SupportedDocument::new(vec![
             SourceStatement {
-                kind: StatementKind::Select,
-                start: 0,
-                end: 9,
+                spec: StatementSpec::Select(SelectSpec {
+                    has_with: false,
+                    set_operations: 0,
+                }),
+                range: SourceRange::new(0, 9),
             },
             SourceStatement {
-                kind: StatementKind::Update,
-                start: 10,
-                end: source.len(),
+                spec: StatementSpec::Update(UpdateSpec {
+                    has_with: false,
+                    assignments: 1,
+                    from_relations: 0,
+                    has_where: false,
+                    returning_items: 0,
+                }),
+                range: SourceRange::new(10, source.len()),
             },
         ]);
 
         let bound = bind_token_statements(&document, &tokens, &depths).expect("bind succeeds");
         assert_eq!(bound.len(), 2);
-        assert_eq!(tokens[bound[0].start].kind, Token::Select);
-        assert_eq!(tokens[bound[0].end].kind, Token::Ascii59);
-        assert_eq!(tokens[bound[1].start].kind, Token::Update);
-        assert_eq!(tokens[bound[1].end].kind, Token::Ascii59);
+        assert_eq!(tokens[bound[0].range.start].kind, Token::Select);
+        assert_eq!(tokens[bound[0].range.end].kind, Token::Ascii59);
+        assert_eq!(bound[0].semicolon, Some(bound[0].range.end));
+        assert_eq!(tokens[bound[1].range.start].kind, Token::Update);
+        assert_eq!(tokens[bound[1].range.end].kind, Token::Ascii59);
+        assert_eq!(bound[1].semicolon, Some(bound[1].range.end));
+    }
+
+    #[test]
+    fn no_semicolon_keeps_the_statement_range_half_open() {
+        let source = "SELECT 1";
+        let tokens = tokenize(source).expect("scan succeeds");
+        let document = SupportedDocument::new(vec![SourceStatement {
+            spec: StatementSpec::Select(SelectSpec {
+                has_with: false,
+                set_operations: 0,
+            }),
+            range: SourceRange::new(0, source.len()),
+        }]);
+        let depths = vec![0; tokens.len()];
+
+        let bound = bind_token_statements(&document, &tokens, &depths).expect("bind succeeds");
+        assert_eq!(bound[0].range.end, tokens.len());
+        assert_eq!(bound[0].semicolon, None);
     }
 }

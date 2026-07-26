@@ -458,11 +458,12 @@ Layout-IR consolidation evidence:
 
 Ownership-IR checkpoint evidence:
 
-- `validation::parse_supported_postgresql` now returns one `SupportedDocument`
-  containing an exhaustive `StatementKind` and PostgreSQL `RawStmt` byte span
-  for each fixture-backed top-level statement.
+- `validation::parse_supported_postgresql` returns one `SupportedDocument`
+  containing an exhaustive statement specification and PostgreSQL `RawStmt`
+  byte span for each fixture-backed top-level statement.
 - `ownership::bind_token_statements` maps those AST-owned spans to token-indexed
-  `TokenStatement` values.
+  statement values; the later hardening checkpoint replaced these with
+  capability-bearing `StatementSpec` and half-open `StatementTokens`.
 - INSERT, UPDATE, and DELETE planners dispatch only from owned statement spans;
   they no longer scan the complete document for DML keywords.
 - Missing expected clause ownership is an internal `format.safety_failure`, not
@@ -483,7 +484,7 @@ Query, INSERT-variant, and MERGE tranche evidence:
   LIMIT/OFFSET/FETCH, and general UNION / INTERSECT / EXCEPT branch boundaries.
 - UPDATE and DELETE reuse the same `WithBlock` implementation for SELECT-backed
   CTEs; data-modifying CTEs remain fail-safe unsupported.
-- MERGE adds one exhaustive `StatementKind::Merge` and
+- MERGE adds one exhaustive `StatementSpec::Merge` and
   `StatementLayout::Merge`, with `MergeBlock`, `MergeBranch`, and `MergeAction`
   ownership. Branch actions reuse the existing assignment, delimited-list,
   predicate, comment, casing, and writer machinery.
@@ -498,6 +499,42 @@ Query, INSERT-variant, and MERGE tranche evidence:
 - The checkpoint passes formatting, Clippy with warnings denied, all 96 tests,
   documentation, and `git diff --check` in the packaged offline environment.
 
+
+## Architecture hardening checkpoint
+
+- [x] Replace family-only `StatementKind` with capability-bearing
+  `StatementSpec` variants.
+- [x] Require DML and MERGE binders to verify clause presence, modes,
+  cardinalities, and branch actions against the AST-validated shape.
+- [x] Replace mixed inclusive/exclusive statement token bounds with half-open
+  `TokenRange` plus a separate terminal semicolon.
+- [x] Remove pointer-address allowlists from nested SELECT/VALUES validation.
+- [x] Split layout binding into document, statement, and query modules.
+- [x] Split planning into orchestration, statement, list, and rendering modules.
+- [x] Separate structural equivalence from support classification.
+- [x] Add a deliberate validator/binder disagreement regression test.
+- [x] Document architecture and the compiler-guided PostgreSQL extension path.
+- [x] Complete full quality gate and self-review.
+- [x] Commit and package durable checkpoint.
+
+Architecture-hardening evidence:
+
+- `StatementSpec` now carries the exact AST-proven shape for SELECT, INSERT,
+  UPDATE, DELETE, and MERGE; every field is consumed by token binding.
+- `StatementTokens` uses a half-open `TokenRange` and a separate optional
+  terminal semicolon.
+- Family binders compare clause presence, enum modes, list cardinalities,
+  branch actions, and set-operation counts against the validated shape.
+- Nested SELECT/VALUES support is structural and deterministic; parser object
+  addresses are no longer used as node identity.
+- Layout ownership, statement binding, query binding, statement planning, list
+  planning, rendering, and semantic equivalence are split into focused modules.
+- All planners share one immutable `PlanningContext`; the formatter contains no
+  `clippy::too_many_arguments` suppressions.
+- The deliberate validator/binder mismatch test fails closed with an ownership
+  safety diagnostic.
+- The complete gate passes formatting, Clippy with warnings denied, all 98
+  tests, Rustdoc, and `git diff --check` in the packaged offline environment.
 
 ## Batch 6 — Performance and release polish
 

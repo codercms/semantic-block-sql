@@ -14,7 +14,7 @@ were introduced.
 The formatter now has one ownership pipeline:
 
 1. `validation::parse_supported_postgresql` classifies exact PostgreSQL AST
-   shapes into the closed `StatementKind` sum type.
+   shapes into the closed `StatementSpec` sum type.
 2. `ownership::SupportedDocument` records top-level source spans.
 3. `structure::TokenStructure` computes token depth and matching delimiters once.
 4. `layout_ir::LayoutDocument` binds statements, queries, clauses, predicates,
@@ -22,7 +22,7 @@ The formatter now has one ownership pipeline:
 5. `semantic_block` planners consume only those owned records and reuse shared
    list, predicate, CASE, comment, width, casing, and writer logic.
 
-Adding MERGE required one `StatementKind` variant, one validator, one
+Adding MERGE required one `StatementSpec` variant, one validator, one
 `StatementLayout` variant, one binder, and one planner. Existing statement
 planners did not need to change their ownership models.
 
