@@ -68,6 +68,8 @@ Each Go file:
 - SQL `off/on` markers must be standalone lines and delimit complete statement
   regions.
 - Hidden paths and symlink traversal are skipped during discovery.
+- `.gitignore` rules apply to explicitly traversed directory trees even when
+  the tree itself is not a Git repository.
 - Unix atomic replacement/permission behavior is integration-tested; other
   supported-platform gates remain release work.
 - `--jobs` controls parallel discovery. Formatting remains deterministic and
@@ -87,4 +89,6 @@ The CLI integration suite covers commands, stdin, strict configuration,
 project traversal, nested ignore files, explicit ignored files, SQL and Go
 directives, malformed input, no-write paths, whole-project preflight,
 whole-Go-file rollback, unified diff, CRLF, permissions, and stable exit
-classes.
+classes. GitHub Actions repeats the complete test suite on Rust 1.88 and current
+stable; the MSRV job also enforces formatting, Clippy, documentation, and patch
+whitespace.

@@ -245,7 +245,8 @@ Batch 4 evidence:
   ignored paths, stable exit classes, unified diff, CRLF, permissions, and
   pre-write planning.
 - Discovery uses pinned `ignore 0.4.31`; `.semblockignore` is registered as a
-  highest-precedence custom ignore filename.
+  highest-precedence custom ignore filename. `.gitignore` is deliberately
+  applied even when an explicit traversal root is not itself a Git repository.
 - The CLI plans and validates every source before the first `fmt` write, then
   replaces each changed file through a same-directory temporary file.
 
@@ -311,7 +312,7 @@ Batch 5 MVP evidence:
 - [ ] Add bounded `--jobs` parallel processing only if useful.
 - [ ] Prove deterministic output and diagnostics across job counts.
 - [ ] Define supported platforms and MSRV.
-- [ ] Add CI matrix.
+- [x] Add CI matrix for Rust 1.88 and current stable on Ubuntu 24.04.
 - [ ] Add release profiles and reproducible release procedure.
 - [ ] Produce release binaries/checksums.
 - [ ] Document installation.

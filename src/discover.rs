@@ -61,6 +61,7 @@ pub fn discover(
             .git_ignore(discovery.respect_gitignore)
             .git_global(discovery.respect_gitignore)
             .git_exclude(discovery.respect_gitignore)
+            .require_git(false)
             .add_custom_ignore_filename(&discovery.ignore_file);
 
         let walker = builder.build_parallel();

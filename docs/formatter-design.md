@@ -391,7 +391,8 @@ project rules.
 
 Discovery uses `ignore 0.4.31`. Custom `.semblockignore` files have higher
 precedence than ordinary ignore files; more deeply nested custom files win
-within that level. `.gitignore` is enabled by default. Hidden paths and
+within that level. `.gitignore` is enabled by default for every traversed
+directory tree, including trees that are not Git repositories. Hidden paths and
 symlink traversal are disabled. An explicit file argument bypasses directory
 ignore matching and is processed.
 
