@@ -2,7 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use pg_query::protobuf::{KeywordKind, Token};
 
-use super::ownership::{StatementKind, SupportedDocument, TokenStatement, bind_token_statements};
+use super::layout_ir::{
+    DeleteBlock, InsertBlock, InsertSource, LayoutDocument, PredicateBlock, QueryBlock,
+    UpdateBlock, WithBlock,
+};
+use super::ownership::SupportedDocument;
+use super::structure::TokenStructure;
 use super::tokens::{SqlToken, tokenize};
 use super::{
     FormatDiagnostic, FormatOptions, FormatWarning, INDENT_WIDTH, NotEqualPolicy, SemicolonPolicy,
@@ -79,61 +84,11 @@ struct ListItem {
     complex: bool,
 }
 
-#[derive(Debug)]
-struct CteBlock {
-    with_index: usize,
-    ctes: Vec<(usize, usize)>,
-    main_select: usize,
-}
-
 #[derive(Debug, Clone, Copy)]
 struct ParenthesizedList {
     open: usize,
     close: usize,
     expanded: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct OnConflictBlock {
-    start: usize,
-    target_open: Option<usize>,
-    action: usize,
-    update: bool,
-    set: Option<usize>,
-    action_where: Option<usize>,
-}
-
-#[derive(Debug, Clone)]
-struct InsertBlock {
-    start: usize,
-    end: usize,
-    base_depth: usize,
-    target_open: Option<usize>,
-    values: usize,
-    rows: Vec<(usize, usize)>,
-    on_conflict: Option<OnConflictBlock>,
-    returning: Option<usize>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct UpdateBlock {
-    start: usize,
-    end: usize,
-    base_depth: usize,
-    set: usize,
-    from: Option<usize>,
-    where_clause: Option<usize>,
-    returning: Option<usize>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct DeleteBlock {
-    start: usize,
-    end: usize,
-    base_depth: usize,
-    using: Option<usize>,
-    where_clause: Option<usize>,
-    returning: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -152,30 +107,31 @@ pub(super) fn format(
         return Ok(String::new());
     }
 
-    let depths = token_depths(&tokens);
-    let statements = bind_token_statements(document, &tokens, &depths)?;
-    let parens = parenthesis_pairs(&tokens);
+    let structure = TokenStructure::new(&tokens);
+    let depths = structure.depths();
+    let parens = structure.parenthesis_pairs();
+    let layout = LayoutDocument::bind(document, &tokens, &structure)?;
     let cases = case_ranges(&tokens, options);
-    let inserts = insert_blocks(&tokens, &depths, &parens, &statements)?;
-    let updates = update_blocks(&tokens, &depths, &statements)?;
-    let deletes = delete_blocks(&tokens, &depths, &statements)?;
+    let inserts = layout.inserts().cloned().collect::<Vec<_>>();
+    let updates = layout.updates().copied().collect::<Vec<_>>();
+    let deletes = layout.deletes().copied().collect::<Vec<_>>();
     let parenthesized_lists =
-        parenthesized_lists(&tokens, &depths, &parens, &cases, &inserts, options);
-    let ctes = cte_blocks(&tokens, &depths, &parens);
-    let boolean_ranges = boolean_ranges(&tokens, &depths, options);
+        parenthesized_lists(&tokens, depths, parens, &cases, &inserts, options);
+    let boolean_ranges = boolean_ranges(&tokens, depths, layout.predicates(), options);
     let mut plan = LayoutPlan::new(tokens.len());
 
     let expanded_selects = plan_select_lists(
         &tokens,
-        &depths,
+        depths,
         &cases,
         &parenthesized_lists,
+        layout.queries(),
         options,
         &mut plan,
     );
     plan_insert_statements(
         &tokens,
-        &depths,
+        depths,
         &cases,
         &parenthesized_lists,
         &inserts,
@@ -184,7 +140,7 @@ pub(super) fn format(
     );
     plan_update_statements(
         &tokens,
-        &depths,
+        depths,
         &cases,
         &parenthesized_lists,
         &boolean_ranges,
@@ -194,7 +150,7 @@ pub(super) fn format(
     );
     plan_delete_statements(
         &tokens,
-        &depths,
+        depths,
         &cases,
         &parenthesized_lists,
         &boolean_ranges,
@@ -204,7 +160,7 @@ pub(super) fn format(
     );
     plan_parenthesized_lists(
         &tokens,
-        &depths,
+        depths,
         &cases,
         &parenthesized_lists,
         options,
@@ -212,15 +168,16 @@ pub(super) fn format(
     );
     plan_query_clauses(
         &tokens,
-        &depths,
+        depths,
+        layout.queries(),
         &boolean_ranges,
-        &ctes,
+        layout.with_blocks(),
         &expanded_selects,
         &mut plan,
     );
-    plan_booleans(&tokens, &depths, &boolean_ranges, &parens, &mut plan);
-    plan_cases(&tokens, &depths, &cases, &mut plan);
-    plan_ctes(&tokens, &depths, &ctes, &mut plan);
+    plan_booleans(&tokens, depths, &boolean_ranges, parens, &mut plan);
+    plan_cases(&tokens, depths, &cases, &mut plan);
+    plan_ctes(&tokens, depths, layout.with_blocks(), &mut plan);
 
     let terminal_semicolon = terminal_semicolon_plan(&tokens, options.semicolon_policy);
     let mut writer = Writer::new();
@@ -348,41 +305,6 @@ fn is_indivisible(token: &SqlToken<'_>) -> bool {
     ) || token.text.starts_with('"')
 }
 
-fn token_depths(tokens: &[SqlToken<'_>]) -> Vec<usize> {
-    let mut depth = 0usize;
-    tokens
-        .iter()
-        .map(|token| {
-            if token.kind == Token::Ascii41 {
-                depth = depth.saturating_sub(1);
-            }
-            let current = depth;
-            if token.kind == Token::Ascii40 {
-                depth += 1;
-            }
-            current
-        })
-        .collect()
-}
-
-fn parenthesis_pairs(tokens: &[SqlToken<'_>]) -> HashMap<usize, usize> {
-    let mut stack = Vec::new();
-    let mut pairs = HashMap::new();
-    for (index, token) in tokens.iter().enumerate() {
-        match token.kind {
-            Token::Ascii40 => stack.push(index),
-            Token::Ascii41 => {
-                if let Some(open) = stack.pop() {
-                    pairs.insert(open, index);
-                    pairs.insert(index, open);
-                }
-            }
-            _ => {}
-        }
-    }
-    pairs
-}
-
 fn case_ranges(tokens: &[SqlToken<'_>], options: &FormatOptions) -> Vec<CaseRange> {
     let mut stack = Vec::new();
     let mut ranges = Vec::new();
@@ -454,7 +376,7 @@ fn parenthesized_lists(
         let compact_start = inserts
             .iter()
             .find(|insert| insert.target_open == Some(open))
-            .map_or_else(|| open.saturating_sub(1), |insert| insert.start);
+            .map_or_else(|| open.saturating_sub(1), |insert| insert.span.start);
         let compact = compact_width(tokens, compact_start, close + 1, options);
         let has_top_level_comma = (open + 1..close)
             .any(|index| tokens[index].kind == Token::Ascii44 && depths[index] == inner_depth);
@@ -483,162 +405,6 @@ fn is_function_call_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
     })
 }
 
-fn insert_blocks(
-    tokens: &[SqlToken<'_>],
-    depths: &[usize],
-    parens: &HashMap<usize, usize>,
-    statements: &[TokenStatement],
-) -> Result<Vec<InsertBlock>, FormatDiagnostic> {
-    let mut blocks = Vec::new();
-
-    for statement in statements
-        .iter()
-        .filter(|statement| statement.kind == StatementKind::Insert)
-    {
-        let start = statement.start;
-        if tokens[start].kind != Token::Insert {
-            return Err(FormatDiagnostic::Ownership(format!(
-                "INSERT statement starts with token {:?}",
-                tokens[start].kind
-            )));
-        }
-        let base_depth = statement.base_depth;
-        let end = statement.end;
-        let values = (start + 1..end)
-            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Values)
-            .ok_or_else(|| {
-                FormatDiagnostic::Ownership("supported INSERT has no VALUES clause".into())
-            })?;
-        let returning = (values + 1..end)
-            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Returning);
-        let conflict_start = (values + 1..returning.unwrap_or(end)).find(|&index| {
-            depths[index] == base_depth
-                && tokens[index].kind == Token::On
-                && tokens
-                    .get(index + 1)
-                    .is_some_and(|next| next.kind == Token::Conflict)
-        });
-        let on_conflict = conflict_start
-            .map(|conflict| {
-                let boundary = returning.unwrap_or(end);
-                let action = (conflict + 2..boundary)
-                    .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Do)
-                    .ok_or_else(|| {
-                        FormatDiagnostic::Ownership("ON CONFLICT has no DO action".into())
-                    })?;
-                let target_open = (conflict + 2..action).find(|&index| {
-                    depths[index] == base_depth
-                        && tokens[index].kind == Token::Ascii40
-                        && parens.get(&index).is_some_and(|close| *close < action)
-                });
-                let update = tokens
-                    .get(action + 1)
-                    .is_some_and(|token| token.kind == Token::Update);
-                let set = if update {
-                    Some(
-                        (action + 1..boundary)
-                            .find(|&index| {
-                                depths[index] == base_depth && tokens[index].kind == Token::Set
-                            })
-                            .ok_or_else(|| {
-                                FormatDiagnostic::Ownership(
-                                    "ON CONFLICT DO UPDATE has no SET clause".into(),
-                                )
-                            })?,
-                    )
-                } else {
-                    None
-                };
-                let action_where = set.and_then(|set| {
-                    (set + 1..boundary).find(|&index| {
-                        depths[index] == base_depth && tokens[index].kind == Token::Where
-                    })
-                });
-                Ok(OnConflictBlock {
-                    start: conflict,
-                    target_open,
-                    action,
-                    update,
-                    set,
-                    action_where,
-                })
-            })
-            .transpose()?;
-        let rows_end = conflict_start.or(returning).unwrap_or(end);
-        let target_open = (start + 1..values).find(|&index| {
-            depths[index] == base_depth
-                && tokens[index].kind == Token::Ascii40
-                && parens.get(&index).is_some_and(|close| *close < values)
-        });
-        let rows = (values + 1..rows_end)
-            .filter(|&index| {
-                depths[index] == base_depth
-                    && tokens[index].kind == Token::Ascii40
-                    && parens.get(&index).is_some_and(|close| *close < rows_end)
-            })
-            .filter_map(|open| parens.get(&open).copied().map(|close| (open, close)))
-            .collect();
-
-        blocks.push(InsertBlock {
-            start,
-            end,
-            base_depth,
-            target_open,
-            values,
-            rows,
-            on_conflict,
-            returning,
-        });
-    }
-
-    Ok(blocks)
-}
-
-fn update_blocks(
-    tokens: &[SqlToken<'_>],
-    depths: &[usize],
-    statements: &[TokenStatement],
-) -> Result<Vec<UpdateBlock>, FormatDiagnostic> {
-    let mut blocks = Vec::new();
-
-    for statement in statements
-        .iter()
-        .filter(|statement| statement.kind == StatementKind::Update)
-    {
-        let start = statement.start;
-        if tokens[start].kind != Token::Update {
-            return Err(FormatDiagnostic::Ownership(format!(
-                "UPDATE statement starts with token {:?}",
-                tokens[start].kind
-            )));
-        }
-        let base_depth = statement.base_depth;
-        let end = statement.end;
-        let set = (start + 1..end)
-            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Set)
-            .ok_or_else(|| {
-                FormatDiagnostic::Ownership("supported UPDATE has no SET clause".into())
-            })?;
-        let from = (set + 1..end)
-            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::From);
-        let where_clause = (set + 1..end)
-            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Where);
-        let returning = (set + 1..end)
-            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Returning);
-        blocks.push(UpdateBlock {
-            start,
-            end,
-            base_depth,
-            set,
-            from,
-            where_clause,
-            returning,
-        });
-    }
-
-    Ok(blocks)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn plan_update_statements(
     tokens: &[SqlToken<'_>],
@@ -651,28 +417,28 @@ fn plan_update_statements(
     plan: &mut LayoutPlan,
 ) {
     for update in updates {
-        let authored = tokens[update.start + 1..update.end]
+        let authored = tokens[update.span.start + 1..update.span.end]
             .iter()
             .any(|token| token.line_breaks_before > 0);
-        let compact_statement_width = update.base_depth * INDENT_WIDTH
-            + compact_width(tokens, update.start, update.end, options);
+        let compact_statement_width = update.span.base_depth * INDENT_WIDTH
+            + compact_width(tokens, update.span.start, update.span.end, options);
         let width_driven = compact_statement_width > options.soft_line_width;
         let has_expanded_predicate = update.where_clause.is_some_and(|where_clause| {
             boolean_ranges
                 .iter()
-                .any(|range| range.start == where_clause + 1 && range.end <= update.end)
+                .any(|range| range.start == where_clause + 1 && range.end <= update.span.end)
         });
         let expanded = authored || update.from.is_some() || width_driven || has_expanded_predicate;
         if !expanded {
             continue;
         }
 
-        plan.break_before(update.set, 1, update.base_depth);
+        plan.break_before(update.set, 1, update.span.base_depth);
         let set_end = update
             .from
             .or(update.where_clause)
             .or(update.returning)
-            .unwrap_or(update.end);
+            .unwrap_or(update.span.end);
         plan_keyword_list(
             tokens,
             depths,
@@ -680,73 +446,34 @@ fn plan_update_statements(
             lists,
             update.set,
             set_end,
-            update.base_depth,
+            update.span.base_depth,
             true,
             options,
             plan,
         );
 
         if let Some(from) = update.from {
-            plan.break_before(from, 1, update.base_depth);
+            plan.break_before(from, 1, update.span.base_depth);
         }
         if let Some(where_clause) = update.where_clause {
-            plan.break_before(where_clause, 1, update.base_depth);
+            plan.break_before(where_clause, 1, update.span.base_depth);
         }
         if let Some(returning) = update.returning {
-            plan.break_before(returning, 1, update.base_depth);
+            plan.break_before(returning, 1, update.span.base_depth);
             plan_keyword_list(
                 tokens,
                 depths,
                 cases,
                 lists,
                 returning,
-                update.end,
-                update.base_depth,
+                update.span.end,
+                update.span.base_depth,
                 width_driven,
                 options,
                 plan,
             );
         }
     }
-}
-
-fn delete_blocks(
-    tokens: &[SqlToken<'_>],
-    depths: &[usize],
-    statements: &[TokenStatement],
-) -> Result<Vec<DeleteBlock>, FormatDiagnostic> {
-    let mut blocks = Vec::new();
-
-    for statement in statements
-        .iter()
-        .filter(|statement| statement.kind == StatementKind::Delete)
-    {
-        let start = statement.start;
-        if tokens[start].kind != Token::DeleteP {
-            return Err(FormatDiagnostic::Ownership(format!(
-                "DELETE statement starts with token {:?}",
-                tokens[start].kind
-            )));
-        }
-        let base_depth = statement.base_depth;
-        let end = statement.end;
-        let using = (start + 1..end)
-            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Using);
-        let where_clause = (start + 1..end)
-            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Where);
-        let returning = (start + 1..end)
-            .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Returning);
-        blocks.push(DeleteBlock {
-            start,
-            end,
-            base_depth,
-            using,
-            where_clause,
-            returning,
-        });
-    }
-
-    Ok(blocks)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -761,16 +488,16 @@ fn plan_delete_statements(
     plan: &mut LayoutPlan,
 ) {
     for delete in deletes {
-        let authored = tokens[delete.start + 1..delete.end]
+        let authored = tokens[delete.span.start + 1..delete.span.end]
             .iter()
             .any(|token| token.line_breaks_before > 0);
-        let compact_statement_width = delete.base_depth * INDENT_WIDTH
-            + compact_width(tokens, delete.start, delete.end, options);
+        let compact_statement_width = delete.span.base_depth * INDENT_WIDTH
+            + compact_width(tokens, delete.span.start, delete.span.end, options);
         let width_driven = compact_statement_width > options.soft_line_width;
         let has_expanded_predicate = delete.where_clause.is_some_and(|where_clause| {
             boolean_ranges
                 .iter()
-                .any(|range| range.start == where_clause + 1 && range.end <= delete.end)
+                .any(|range| range.start == where_clause + 1 && range.end <= delete.span.end)
         });
         let expanded = authored || delete.using.is_some() || width_driven || has_expanded_predicate;
         if !expanded {
@@ -778,21 +505,21 @@ fn plan_delete_statements(
         }
 
         if let Some(using) = delete.using {
-            plan.break_before(using, 1, delete.base_depth);
+            plan.break_before(using, 1, delete.span.base_depth);
         }
         if let Some(where_clause) = delete.where_clause {
-            plan.break_before(where_clause, 1, delete.base_depth);
+            plan.break_before(where_clause, 1, delete.span.base_depth);
         }
         if let Some(returning) = delete.returning {
-            plan.break_before(returning, 1, delete.base_depth);
+            plan.break_before(returning, 1, delete.span.base_depth);
             plan_keyword_list(
                 tokens,
                 depths,
                 cases,
                 lists,
                 returning,
-                delete.end,
-                delete.base_depth,
+                delete.span.end,
+                delete.span.base_depth,
                 width_driven,
                 options,
                 plan,
@@ -821,7 +548,7 @@ fn plan_insert_statements(
     plan: &mut LayoutPlan,
 ) {
     for insert in inserts {
-        let authored = tokens[insert.start + 1..insert.end]
+        let authored = tokens[insert.span.start + 1..insert.span.end]
             .iter()
             .any(|token| token.line_breaks_before > 0);
         let has_expanded_list = lists.iter().any(|list| {
@@ -832,8 +559,8 @@ fn plan_insert_statements(
                         .on_conflict
                         .is_some_and(|conflict| conflict.target_open == Some(list.open)))
         });
-        let compact_statement_width = insert.base_depth * INDENT_WIDTH
-            + compact_width(tokens, insert.start, insert.end, options);
+        let compact_statement_width = insert.span.base_depth * INDENT_WIDTH
+            + compact_width(tokens, insert.span.start, insert.span.end, options);
         let width_driven = compact_statement_width > options.soft_line_width;
         let has_update = insert.on_conflict.is_some_and(|conflict| conflict.update);
         let expanded = authored || has_expanded_list || width_driven || has_update;
@@ -841,7 +568,11 @@ fn plan_insert_statements(
             continue;
         }
 
-        plan.break_before(insert.values, 1, insert.base_depth);
+        if let Some(values) = insert.values_keyword() {
+            plan.break_before(values, 1, insert.span.base_depth);
+        } else if let InsertSource::Query { start } = insert.source {
+            plan.break_before(start, 1, insert.span.base_depth);
+        }
 
         let rows_are_multiline = insert.rows.len() > 1
             || insert
@@ -850,21 +581,21 @@ fn plan_insert_statements(
                 .is_some_and(|(open, _)| tokens[*open].line_breaks_before > 0);
         if rows_are_multiline {
             for &(open, close) in &insert.rows {
-                plan.set_indent(open..close + 1, insert.base_depth + 1);
-                plan.break_before(open, 1, insert.base_depth + 1);
+                plan.set_indent(open..close + 1, insert.span.base_depth + 1);
+                plan.break_before(open, 1, insert.span.base_depth + 1);
             }
         }
 
         if let Some(conflict) = insert.on_conflict {
-            plan.break_before(conflict.start, 1, insert.base_depth);
+            plan.break_before(conflict.start, 1, insert.span.base_depth);
             if conflict.update {
-                plan.break_before(conflict.action, 1, insert.base_depth);
+                plan.break_before(conflict.action, 1, insert.span.base_depth);
                 if let Some(set) = conflict.set {
-                    plan.break_before(set, 1, insert.base_depth);
+                    plan.break_before(set, 1, insert.span.base_depth);
                     let set_end = conflict
                         .action_where
                         .or(insert.returning)
-                        .unwrap_or(insert.end);
+                        .unwrap_or(insert.span.end);
                     plan_keyword_list(
                         tokens,
                         depths,
@@ -872,28 +603,28 @@ fn plan_insert_statements(
                         lists,
                         set,
                         set_end,
-                        insert.base_depth,
+                        insert.span.base_depth,
                         true,
                         options,
                         plan,
                     );
                 }
                 if let Some(action_where) = conflict.action_where {
-                    plan.break_before(action_where, 1, insert.base_depth);
+                    plan.break_before(action_where, 1, insert.span.base_depth);
                 }
             }
         }
 
         if let Some(returning) = insert.returning {
-            plan.break_before(returning, 1, insert.base_depth);
+            plan.break_before(returning, 1, insert.span.base_depth);
             plan_keyword_list(
                 tokens,
                 depths,
                 cases,
                 lists,
                 returning,
-                insert.end,
-                insert.base_depth,
+                insert.span.end,
+                insert.span.base_depth,
                 width_driven,
                 options,
                 plan,
@@ -990,24 +721,21 @@ fn plan_select_lists(
     depths: &[usize],
     cases: &[CaseRange],
     parenthesized_lists: &[ParenthesizedList],
+    queries: &[QueryBlock],
     options: &FormatOptions,
     plan: &mut LayoutPlan,
 ) -> HashSet<usize> {
     let mut expanded_selects = HashSet::new();
 
-    for (select, token) in tokens.iter().enumerate() {
-        if token.kind != Token::Select {
-            continue;
-        }
-        let base_depth = depths[select];
-        let end = (select + 1..tokens.len())
-            .find(|&index| {
-                depths[index] < base_depth
-                    || (depths[index] == base_depth
-                        && (is_select_list_terminator(tokens, index)
-                            || tokens[index].kind == Token::Ascii59))
-            })
-            .unwrap_or(tokens.len());
+    for query in queries {
+        let select = query.select;
+        let base_depth = query.base_depth;
+        let end = query
+            .clauses
+            .ordered_boundaries(query.end)
+            .into_iter()
+            .next()
+            .unwrap_or(query.end);
         if select + 1 >= end {
             continue;
         }
@@ -1316,27 +1044,29 @@ fn split_groups_at_width(
 fn plan_query_clauses(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
+    queries: &[QueryBlock],
     boolean_ranges: &[BooleanRange],
-    ctes: &[CteBlock],
+    with_blocks: &[WithBlock],
     expanded_selects: &HashSet<usize>,
     plan: &mut LayoutPlan,
 ) {
-    let cte_main_selects: HashSet<_> = ctes.iter().map(|cte| cte.main_select).collect();
-    let cte_body_selects: HashSet<_> = ctes
+    let with_body_starts: HashSet<_> = with_blocks.iter().map(|with| with.body_start).collect();
+    let cte_body_selects: HashSet<_> = with_blocks
         .iter()
-        .flat_map(|cte| {
-            cte.ctes.iter().filter_map(|&(open, close)| {
-                (open + 1..close).find(|&index| tokens[index].kind == Token::Select)
+        .flat_map(|with| {
+            with.definitions.iter().filter_map(|&(open, close)| {
+                queries
+                    .iter()
+                    .find(|query| query.select > open && query.select < close)
+                    .map(|query| query.select)
             })
         })
         .collect();
 
-    for (select, token) in tokens.iter().enumerate() {
-        if token.kind != Token::Select {
-            continue;
-        }
-        let base_depth = depths[select];
-        let end = query_end(tokens, depths, select, base_depth);
+    for query in queries {
+        let select = query.select;
+        let base_depth = query.base_depth;
+        let end = query.end;
         let has_join = (select + 1..end)
             .any(|index| depths[index] == base_depth && is_join_start(tokens, index));
         let has_expanded_boolean = boolean_ranges
@@ -1345,74 +1075,47 @@ fn plan_query_clauses(
         let expanded = expanded_selects.contains(&select)
             || has_join
             || has_expanded_boolean
-            || cte_main_selects.contains(&select)
+            || with_body_starts.contains(&select)
             || cte_body_selects.contains(&select);
         if !expanded {
             continue;
         }
 
-        for (index, &depth) in depths.iter().enumerate().take(end).skip(select + 1) {
-            if depth != base_depth {
-                continue;
+        for boundary in query.clauses.ordered_boundaries(end) {
+            if boundary < end {
+                plan.break_before(boundary, 1, base_depth);
             }
-            if is_major_clause_start(tokens, index) || is_join_start(tokens, index) {
+        }
+        for (index, depth) in depths.iter().enumerate().take(end).skip(select + 1) {
+            if *depth == base_depth && is_join_start(tokens, index) {
                 plan.break_before(index, 1, base_depth);
             }
         }
     }
 }
 
-fn query_end(tokens: &[SqlToken<'_>], depths: &[usize], select: usize, base_depth: usize) -> usize {
-    (select + 1..tokens.len())
-        .find(|&index| {
-            depths[index] < base_depth
-                || (depths[index] == base_depth && tokens[index].kind == Token::Ascii59)
-        })
-        .unwrap_or(tokens.len())
-}
-
 fn boolean_ranges(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
+    predicates: &[PredicateBlock],
     options: &FormatOptions,
 ) -> Vec<BooleanRange> {
     let mut result = Vec::new();
 
-    for (index, token) in tokens.iter().enumerate() {
-        if !matches!(token.kind, Token::Where | Token::On) {
-            continue;
-        }
-        let base_depth = depths[index];
-        let end = (index + 1..tokens.len())
-            .find(|&candidate| {
-                depths[candidate] < base_depth
-                    || (depths[candidate] == base_depth
-                        && (is_major_clause_start(tokens, candidate)
-                            || is_join_start(tokens, candidate)
-                            || matches!(
-                                tokens[candidate].kind,
-                                Token::Ascii59
-                                    | Token::Do
-                                    | Token::Union
-                                    | Token::Using
-                                    | Token::Intersect
-                                    | Token::Except
-                            )))
-            })
-            .unwrap_or(tokens.len());
-        let has_connector = (index + 1..end).any(|candidate| {
-            depths[candidate] >= base_depth
+    for predicate in predicates {
+        let has_connector = (predicate.start..predicate.end).any(|candidate| {
+            depths[candidate] >= predicate.base_depth
                 && matches!(tokens[candidate].kind, Token::And | Token::Or)
         });
-        let hides_structure = base_depth * INDENT_WIDTH
-            + compact_width(tokens, index, end, options)
+        let hides_structure = predicate.base_depth * INDENT_WIDTH
+            + compact_width(tokens, predicate.introducer, predicate.end, options)
             > options.soft_line_width;
 
         if has_connector || hides_structure {
             result.push(BooleanRange {
-                start: index + 1,
-                end,
-                base_depth,
+                start: predicate.start,
+                end: predicate.end,
+                base_depth: predicate.base_depth,
             });
         }
     }
@@ -1495,67 +1198,15 @@ fn plan_cases(
     }
 }
 
-fn cte_blocks(
-    tokens: &[SqlToken<'_>],
-    depths: &[usize],
-    parens: &HashMap<usize, usize>,
-) -> Vec<CteBlock> {
-    let mut result = Vec::new();
-
-    for (with_index, token) in tokens.iter().enumerate() {
-        if token.kind != Token::With {
-            continue;
-        }
-        let base_depth = depths[with_index];
-        let mut definitions = Vec::new();
-        let mut main_select = None;
-
-        for index in with_index + 1..tokens.len() {
-            if depths[index] < base_depth || tokens[index].kind == Token::Ascii59 {
-                break;
-            }
-            if depths[index] == base_depth && tokens[index].kind == Token::Select {
-                main_select = Some(index);
-                break;
-            }
-            if depths[index] != base_depth || tokens[index].kind != Token::As {
-                continue;
-            }
-            let open = (index + 1..tokens.len()).take(4).find(|&candidate| {
-                depths[candidate] == base_depth && tokens[candidate].kind == Token::Ascii40
-            });
-            let Some(open) = open else {
-                continue;
-            };
-            let Some(&close) = parens.get(&open) else {
-                continue;
-            };
-            if (open + 1..close).any(|candidate| tokens[candidate].kind == Token::Select) {
-                definitions.push((open, close));
-            }
-        }
-
-        if let Some(main_select) = main_select.filter(|_| !definitions.is_empty()) {
-            result.push(CteBlock {
-                with_index,
-                ctes: definitions,
-                main_select,
-            });
-        }
-    }
-
-    result
-}
-
 fn plan_ctes(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
-    blocks: &[CteBlock],
+    blocks: &[WithBlock],
     plan: &mut LayoutPlan,
 ) {
     for block in blocks {
         let base_indent = depths[block.with_index];
-        for (position, &(open, close)) in block.ctes.iter().enumerate() {
+        for (position, &(open, close)) in block.definitions.iter().enumerate() {
             if open + 1 < close {
                 plan.break_before(open + 1, 1, base_indent + 1);
             }
@@ -1570,8 +1221,8 @@ fn plan_ctes(
                     let blank = tokens[after_close + 1].line_breaks_before > 1;
                     plan.break_before(after_close + 1, usize::from(blank) + 1, base_indent);
                 }
-            } else if position + 1 == block.ctes.len() {
-                plan.break_before(block.main_select, 1, base_indent);
+            } else if position + 1 == block.definitions.len() {
+                plan.break_before(block.body_start, 1, base_indent);
             }
 
             for index in open + 1..close {
@@ -1586,7 +1237,7 @@ fn plan_ctes(
                 }
             }
         }
-        plan.break_before(block.main_select, 1, base_indent);
+        plan.break_before(block.body_start, 1, base_indent);
     }
 }
 
@@ -1628,38 +1279,6 @@ fn compact_width(
         previous = Some(index);
     }
     width
-}
-
-fn is_select_list_terminator(tokens: &[SqlToken<'_>], index: usize) -> bool {
-    matches!(
-        tokens[index].kind,
-        Token::From
-            | Token::Where
-            | Token::GroupP
-            | Token::Having
-            | Token::Order
-            | Token::Limit
-            | Token::Offset
-            | Token::Union
-            | Token::Intersect
-            | Token::Except
-            | Token::Returning
-    )
-}
-
-fn is_major_clause_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
-    match tokens[index].kind {
-        Token::From
-        | Token::Where
-        | Token::Having
-        | Token::Limit
-        | Token::Offset
-        | Token::Returning => true,
-        Token::GroupP | Token::Order => tokens
-            .get(index + 1)
-            .is_some_and(|next| next.kind == Token::By),
-        _ => false,
-    }
 }
 
 fn is_join_start(tokens: &[SqlToken<'_>], index: usize) -> bool {

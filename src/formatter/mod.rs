@@ -1,6 +1,8 @@
 mod diagnostics;
+mod layout_ir;
 mod ownership;
 mod semantic_block;
+mod structure;
 mod tokens;
 mod validation;
 

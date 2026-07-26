@@ -28,9 +28,11 @@ The formatter is designed around five constraints:
 src/formatter/
 ├── mod.rs             public facade and safety pipeline
 ├── validation.rs      PostgreSQL AST support classification
-├── ownership.rs       AST-validated statement ownership IR
+├── ownership.rs       AST-validated source-statement ownership
+├── structure.rs       syntax-neutral token depth/delimiter index
+├── layout_ir.rs       token-bound statements, queries, clauses and predicates
 ├── tokens.rs          exact scanner tokens and authored gaps
-├── semantic_block.rs  source-preserving layout planning and writing
+├── semantic_block.rs  shared layout planning and token-preserving writing
 └── diagnostics.rs     rule-level diagnostics and source ranges
 ```
 
@@ -66,7 +68,10 @@ source is returned unchanged with a diagnostic.
 
 ## Ownership IR
 
-`ownership.rs` is the boundary between PostgreSQL's AST and token layout.
+`ownership.rs` and `layout_ir.rs` form the boundary between PostgreSQL's
+AST and token layout. `ownership.rs` records parser-proven source spans;
+`layout_ir.rs` binds those spans to exact tokens and derives reusable clause,
+query, WITH, and predicate ownership once per formatting pass.
 
 ### `StatementKind`
 
@@ -209,12 +214,23 @@ Current shared analyses include:
 - terminal semicolon policy;
 - soft and hard width decisions.
 
-DML planners are now dispatched from `TokenStatement` ownership. Their internal
-clause structures—`InsertBlock`, `UpdateBlock`, `DeleteBlock`, and
-`OnConflictBlock`—are token-range layout IR for the currently supported shape.
+All statement planners now consume one `LayoutDocument` produced by
+`layout_ir::LayoutDocument::bind`. Its closed `StatementLayout` sum type owns
+SELECT, INSERT, UPDATE, and DELETE spans. Shared child records include:
 
-These structures are not PostgreSQL parsers. They locate clause boundaries only
-inside an AST-validated statement span whose legal shape is already known.
+- `QueryBlock` and `QueryClauses` for every SELECT branch;
+- `WithBlock` for CTE definitions and the owning statement body;
+- `PredicateBlock` for WHERE, HAVING, JOIN ON, and ON CONFLICT predicates;
+- `InsertBlock`, `UpdateBlock`, and `DeleteBlock` for family-specific clauses;
+- `TokenSpan` for reusable owned token ranges.
+
+The formatter no longer runs independent document-wide statement, SELECT, CTE,
+or predicate discovery passes. Generic expression analyses such as CASE and
+parenthesized-list complexity operate only after every statement has passed AST
+classification and token ownership binding.
+
+These structures are not PostgreSQL parsers. They locate presentation
+boundaries only inside an AST-validated span whose legal shape is already known.
 
 ## Writer
 
@@ -324,23 +340,29 @@ A PostgreSQL upgrade can produce four outcomes:
 This policy lets the parser be upgraded independently without allowing new
 syntax to fall accidentally into generic whitespace normalization.
 
-## Current migration boundary
+## Current architecture boundary
 
-The top-level DML path now uses `SupportedDocument` and `TokenStatement`.
-SELECT, CTE, CASE, boolean, and generic parenthesized-list discovery still use
-whole-document token passes after AST validation.
+The ownership migration is complete for the currently supported SQL families:
 
-Future architecture batches should migrate these analyses to owned statement or
-expression spans when doing so reduces ambiguity. They should not perform a
-large rewrite merely for structural uniformity; each migration must accompany
-new syntax coverage or remove concrete duplicated ownership logic.
+1. PostgreSQL AST validation produces `SupportedDocument`;
+2. `TokenStructure` indexes delimiter depth once;
+3. `LayoutDocument` binds all top-level statements, SELECT branches, WITH
+   definitions, clauses, and predicates;
+4. layout planners consume only these owned records and shared list/expression
+   primitives;
+5. the writer emits original tokens in original order.
 
-The next intended extensions are:
+New PostgreSQL syntax normally extends one family validator and one layout-IR
+binder, then reuses existing clause, list, predicate, CASE, CTE, and writer
+logic. A new statement family adds one exhaustive `StatementKind` and
+`StatementLayout` variant. Existing families do not need to be rewritten.
 
-1. shared nested-query ownership;
-2. `INSERT ... SELECT` and `OVERRIDING`;
-3. DML `WITH` using the same CTE ownership model;
-4. general query/set-operation ownership;
+The next syntax extensions are:
+
+1. `INSERT ... SELECT`, `OVERRIDING`, and `DEFAULT VALUES`;
+2. DML `WITH` using the shared `WithBlock`;
+3. GROUP BY, HAVING, ORDER BY, LIMIT/OFFSET/FETCH, and general set operations;
+4. richer source relations and subqueries;
 5. MERGE branch ownership;
 6. DDL and routine ownership;
 7. PL/pgSQL body ownership.

@@ -443,6 +443,19 @@ Unsupported-syntax checkpoint evidence:
 - The checkpoint passes formatting, Clippy with warnings denied, all 60 tests,
   documentation, and `git diff --check` in the packaged offline environment.
 
+Layout-IR consolidation evidence:
+
+- `structure::TokenStructure` computes token depths and matching parentheses
+  once for the complete formatting pass.
+- `layout_ir::LayoutDocument` binds the AST-owned source statements into one
+  exhaustive `StatementLayout` sum type and shared `QueryBlock`, `WithBlock`,
+  `QueryClauses`, and `PredicateBlock` records.
+- SELECT-list, query-clause, CTE, boolean, INSERT, UPDATE, and DELETE planners no
+  longer rediscover ownership independently across the whole token stream.
+- The migration is behavior-preserving: the complete existing suite remains
+  green and new unit tests cover structural indexing plus query/predicate
+  binding.
+
 Ownership-IR checkpoint evidence:
 
 - `validation::parse_supported_postgresql` now returns one `SupportedDocument`
