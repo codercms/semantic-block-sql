@@ -1,11 +1,11 @@
 # PostgreSQL SQL Format Agent Skill
 
-Agent Skill for formatting PostgreSQL SQL and PL/pgSQL with the Semantic Block SQL style.
+Vendor-neutral agent skill for formatting PostgreSQL SQL and PL/pgSQL with the Semantic Block SQL style.
 
-## Layout
+## Canonical repository location
 
 ```text
-postgresql-sql-format/
+.agent-skills/postgresql-sql-format/
 ├── SKILL.md
 ├── README.md
 ├── references/
@@ -17,20 +17,28 @@ postgresql-sql-format/
     └── formatting-cases.md
 ```
 
-`SKILL.md` is the concise always-loaded contract. References are read only for complex or ambiguous statements.
+`SKILL.md` is the concise contract. References are loaded only for complex or ambiguous statements.
 
-## Codex
+This directory is the only maintained skill copy in the repository. Do not edit a client-specific copy and then copy it back.
+
+## Codex installation
+
+From the repository root:
 
 ```bash
 mkdir -p .agents/skills
-cp -R postgresql-sql-format .agents/skills/postgresql-sql-format
+cp -R .agent-skills/postgresql-sql-format .agents/skills/postgresql-sql-format
 ```
 
-## Claude Code
+## Claude Code installation
+
+From the repository root:
 
 ```bash
 mkdir -p .claude/skills
-cp -R postgresql-sql-format .claude/skills/postgresql-sql-format
+cp -R .agent-skills/postgresql-sql-format .claude/skills/postgresql-sql-format
 ```
 
-Repository version: `2.0.0` (derived from the preserved `1.0.0` upload).
+These installation copies are local client configuration and should not be committed. Keeping one canonical repository copy avoids symlink portability issues and divergent instructions.
+
+Repository skill version: `2.0.0`.
