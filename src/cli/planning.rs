@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc;
 
+use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use semblock::config::Config;
 use semblock::source::{FormattedSource, Language, format_source, infer_language};
 
@@ -24,41 +24,19 @@ pub(super) fn build_plans(
         return Ok(Vec::new());
     }
 
-    let worker_count = jobs.min(files.len()).max(1);
-    let next = AtomicUsize::new(0);
-    let (sender, receiver) = mpsc::channel();
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(jobs.min(files.len()).max(1))
+        .build()
+        .map_err(|error| {
+            RunError::filesystem(format!("failed to initialize formatting workers: {error}"))
+        })?;
 
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            let sender = sender.clone();
-            let files = &files;
-            let next = &next;
-            scope.spawn(move || {
-                loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(path) = files.get(index) else {
-                        break;
-                    };
-                    let result = plan_file(path.clone(), requested_language, config);
-                    if sender.send((index, result)).is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-    });
-    drop(sender);
-
-    let mut results: Vec<Option<Result<Plan, RunError>>> =
-        std::iter::repeat_with(|| None).take(files.len()).collect();
-    for (index, result) in receiver {
-        results[index] = Some(result);
-    }
-
-    results
-        .into_iter()
-        .map(|result| result.expect("every planning job returned a result"))
-        .collect()
+    pool.install(|| {
+        files
+            .par_iter()
+            .map(|path| plan_file(path.clone(), requested_language, config))
+            .collect()
+    })
 }
 
 fn plan_file(
