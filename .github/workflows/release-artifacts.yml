@@ -73,13 +73,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           dnf install --assumeyes \
             binutils \
             ca-certificates \
             clang \
             clang-devel \
             cmake \
-            curl \
             file \
             gcc \
             gcc-c++ \
@@ -88,8 +88,14 @@ jobs:
             make \
             pkgconf-pkg-config \
             python3 \
-            tar \
-            zstd
+            tar
+
+          # Rocky containers normally provide curl-minimal. Avoid replacing it
+          # with the conflicting full curl package merely to bootstrap rustup.
+          if ! command -v curl >/dev/null 2>&1; then
+            dnf install --assumeyes curl-minimal
+          fi
+          curl --version
 
       - name: Locate libclang
         shell: bash
@@ -130,7 +136,7 @@ jobs:
             | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - name: Build release binary
+      - name: Build Linux binary
         shell: bash
         run: |
           set -euo pipefail
@@ -138,15 +144,20 @@ jobs:
           cargo build --locked --release --target x86_64-unknown-linux-gnu
           strip --strip-unneeded target/x86_64-unknown-linux-gnu/release/semblock
 
-      - name: Verify Linux compatibility
+      - name: Smoke-test Linux binary
         shell: bash
         run: |
           set -euo pipefail
           binary="target/x86_64-unknown-linux-gnu/release/semblock"
-
           "$binary" --version
           file "$binary"
           ldd "$binary"
+
+      - name: Verify Linux GLIBC compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/x86_64-unknown-linux-gnu/release/semblock"
 
           max_glibc="$({
             readelf --version-info "$binary" \
@@ -212,20 +223,19 @@ jobs:
       image: ${{ matrix.image }}
 
     steps:
-      - name: Install archive tools
+      - name: Install archive and runtime dependencies
         shell: bash
         run: |
           set -euo pipefail
           if command -v dnf >/dev/null 2>&1; then
-            dnf install --assumeyes gzip libstdc++ tar zstd
+            dnf install --assumeyes gzip libstdc++ tar
           else
             apt-get update
             DEBIAN_FRONTEND=noninteractive apt-get install --yes \
               ca-certificates \
               gzip \
               libstdc++6 \
-              tar \
-              zstd
+              tar
           fi
 
       - name: Download Linux artifact
@@ -303,11 +313,13 @@ jobs:
           rustc --version --verbose
           cargo --version
 
-      - name: Build and verify Windows binary
+      - name: Build Windows binary
+        shell: pwsh
+        run: cargo build --locked --release --target x86_64-pc-windows-msvc
+
+      - name: Smoke-test Windows binary
         shell: pwsh
         run: |
-          cargo build --locked --release --target x86_64-pc-windows-msvc
-
           $Binary = "target\x86_64-pc-windows-msvc\release\semblock.exe"
           & $Binary --version
           if ($LASTEXITCODE -ne 0) {
@@ -395,16 +407,26 @@ jobs:
           rustc --version --verbose
           cargo --version
 
-      - name: Build and verify macOS binary
+      - name: Build macOS binary
         shell: bash
         run: |
           set -euo pipefail
           cargo build --locked --release --target "${{ matrix.target }}"
+          strip -x "target/${{ matrix.target }}/release/semblock"
 
+      - name: Smoke-test macOS binary
+        shell: bash
+        run: |
+          set -euo pipefail
           binary="target/${{ matrix.target }}/release/semblock"
-          strip -x "$binary"
           "$binary" --version
           file "$binary"
+
+      - name: Verify macOS architecture and deployment target
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/semblock"
 
           actual_arch="$(lipo -archs "$binary")"
           if [[ "$actual_arch" != "${{ matrix.arch }}" ]]; then
@@ -513,4 +535,3 @@ jobs:
               --verify-tag \
               --generate-notes \
               --title "$TAG"
-          fi
