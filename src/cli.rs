@@ -409,9 +409,11 @@ impl RunError {
             message: message.into(),
         }
     }
+
     fn config(error: ConfigError) -> Self {
         Self::usage(error.to_string())
     }
+
     fn source(error: SourceError) -> Self {
         match error {
             SourceError::UnknownLanguage(_) | SourceError::GoDisabled => {
@@ -423,6 +425,7 @@ impl RunError {
             },
         }
     }
+
     pub(super) fn source_with_path(path: &Path, error: SourceError) -> Self {
         match error {
             SourceError::UnknownLanguage(_) | SourceError::GoDisabled => {
@@ -434,21 +437,26 @@ impl RunError {
             },
         }
     }
+
     fn discovery(error: DiscoverError) -> Self {
         Self::filesystem(error.to_string())
     }
+
     fn git(error: GitError) -> Self {
         Self::filesystem(error.to_string())
     }
+
     fn rewrite(error: RewriteError) -> Self {
         Self::filesystem(error.to_string())
     }
+
     pub(super) fn filesystem(message: impl Into<String>) -> Self {
         Self {
             code: 4,
             message: message.into(),
         }
     }
+
     pub fn exit_code(&self) -> ExitCode {
         ExitCode::from(self.code)
     }
