@@ -2,11 +2,16 @@ mod cli;
 
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use cli::Cli;
 
 fn main() -> ExitCode {
-    match Cli::parse().run() {
+    let matches = Cli::command()
+        .version(env!("CARGO_PKG_VERSION"))
+        .get_matches();
+    let cli = Cli::from_arg_matches(&matches).expect("Clap validated CLI arguments");
+
+    match cli.run() {
         Ok(code) => code,
         Err(error) => {
             eprintln!("semblock: {error}");
