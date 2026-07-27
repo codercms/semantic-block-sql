@@ -17,6 +17,12 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedConfig {
+    pub config: Config,
+    pub path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveryConfig {
     pub respect_gitignore: bool,
     pub ignore_file: String,
@@ -112,12 +118,19 @@ struct FileGoConfig {
 
 impl Config {
     pub fn load(explicit: Option<&Path>) -> Result<Self, ConfigError> {
+        Ok(Self::load_resolved(explicit)?.config)
+    }
+
+    pub fn load_resolved(explicit: Option<&Path>) -> Result<ResolvedConfig, ConfigError> {
         let path = match explicit {
             Some(path) => Some(path.to_path_buf()),
             None => find_default_config()?,
         };
         let Some(path) = path else {
-            return Ok(Self::default());
+            return Ok(ResolvedConfig {
+                config: Self::default(),
+                path: None,
+            });
         };
 
         let source = fs::read_to_string(&path).map_err(|source| ConfigError::Read {
@@ -128,7 +141,26 @@ impl Config {
             path: path.clone(),
             message: error.to_string(),
         })?;
-        Self::from_file(file)
+        Ok(ResolvedConfig {
+            config: Self::from_file(file)?,
+            path: Some(path),
+        })
+    }
+
+    pub fn to_toml(&self) -> String {
+        format!(
+            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\n\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nraw_strings = {}\ninterpreted_strings = {}\n",
+            semicolon_policy_name(self.format.semicolon_policy),
+            not_equal_policy_name(self.format.not_equal_policy),
+            self.format.soft_line_width,
+            self.format.hard_line_width,
+            self.discovery.respect_gitignore,
+            toml_string(&self.discovery.ignore_file),
+            self.go.enabled,
+            self.go.auto_detect,
+            self.go.raw_strings,
+            self.go.interpreted_strings,
+        )
     }
 
     fn from_file(file: FileConfig) -> Result<Self, ConfigError> {
@@ -216,4 +248,23 @@ fn find_default_config() -> Result<Option<PathBuf>, ConfigError> {
             return Ok(None);
         }
     }
+}
+
+fn semicolon_policy_name(policy: SemicolonPolicy) -> &'static str {
+    match policy {
+        SemicolonPolicy::Preserve => "preserve",
+        SemicolonPolicy::Require => "require",
+        SemicolonPolicy::Omit => "omit",
+    }
+}
+
+fn not_equal_policy_name(policy: NotEqualPolicy) -> &'static str {
+    match policy {
+        NotEqualPolicy::Preserve => "preserve",
+        NotEqualPolicy::PreferBang => "prefer_bang",
+    }
+}
+
+fn toml_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
