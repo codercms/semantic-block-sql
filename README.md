@@ -1,132 +1,142 @@
 # semblock
 
-`semblock` is a fast, deterministic PostgreSQL formatter implementing
-the **Semantic Block SQL** style.
+`semblock` is a deterministic, fail-safe PostgreSQL formatter and checker implementing the **Semantic Block SQL** style.
 
-The repository now has a **runnable CLI MVP**. It formats standalone `.sql`
-files and complete PostgreSQL statements inside Go raw backtick strings,
-recursively walks projects, respects ignore files, and supports local/CI
-`fmt`, `check`, and `diff` workflows.
+It formats supported PostgreSQL syntax structurally, preserves comments and authored logical groups, and leaves unsupported syntax byte-identical with an explicit `syntax.unsupported` diagnostic instead of guessing.
 
-The current formatter-core coverage is fixture-backed `SELECT`, authored
-result/function argument groups, booleans, compact/expanded `CASE`, joins, CTEs,
-recursive and general set operations, grouping/sorting/pagination clauses,
-`INSERT` with VALUES, SELECT, DEFAULT VALUES, OVERRIDING, RETURNING, and
-`ON CONFLICT`, bounded `UPDATE ... FROM` and `DELETE ... USING`, shared DML
-`WITH`, a bounded PostgreSQL 17 `MERGE` planner covering DELETE, UPDATE,
-INSERT, and DO NOTHING branches, top-level `VALUES`, window and filtered
-aggregate forms, lateral derived/function sources, basic `CREATE TABLE`,
-feature-rich `CREATE INDEX`, multi-action `ALTER TABLE`, multiple/joined/
-derived/function relation sources for DML and MERGE, `CREATE VIEW`, and
-`CREATE MATERIALIZED VIEW`.
-Unimplemented statement families and unowned statement variants return the
-original source with `syntax.unsupported`; routines, PL/pgSQL, richer DDL, and
-unreviewed relation-source shapes remain later batches.
+The project is currently an early, usable release. It is suitable for repository-wide formatting experiments and CI enforcement when unsupported statements are treated as diagnostics rather than silently rewritten.
 
-The formatter uses the existing `pg_query` crate for the real PostgreSQL
-parser, scanner, token ranges, comments, and AST. Project code implements the
-Semantic Block layout policy, not another SQL parser.
+## Features
 
-## Project documents
+- `fmt`, `check`, and `diff` commands;
+- standalone `.sql` files and complete PostgreSQL statements in Go raw strings;
+- recursive project discovery with `.gitignore` and nested `.semblockignore` support;
+- atomic project writes: one invalid file prevents every planned rewrite;
+- PostgreSQL parsing through the pinned `pg_query` backend;
+- stable rule IDs and UTF-8 byte ranges for editor and CI integrations;
+- parse-equivalence, protected-token, comment-preservation, and idempotence safety gates.
 
-- [Core `fmt` / `check` specification](docs/semantic-block-sql-fmt-check-core-spec.md)
-- [Formatter design](docs/formatter-design.md)
-- [Formatter architecture](docs/formatter-architecture.md)
-- [Implementation checklist](docs/implementation-checklist.md)
-- [Release builds](docs/release-builds.md)
-- [Upstream baseline](docs/upstream-baseline.md)
-- [Batch 1 backend spike](docs/batch-1-backend-spike.md)
-- [Batch 2 formatter-core MVP](docs/batch-2-core-mvp.md)
-- [Batch 3 query and MERGE coverage](docs/batch-3-query-merge.md)
-- [Batch 5 values, windows, lateral sources, and DDL](docs/batch-5-values-windows-ddl.md)
-- [Batch 6 relation sources and views](docs/batch-6-sources-views.md)
-- [Runnable CLI and Go MVP](docs/batch-4-5-cli-mvp.md)
-- [Technical handoff](docs/semantic-block-sql-work-handoff.md)
-- [Russian style guide](docs/semantic-block-sql-style-guide-ru.md)
-- [Source artifact provenance](docs/source/README.md)
-- [Repository working rules](AGENTS.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
+## Installation
 
-The canonical repository-scoped formatting skill is stored in
-`.agent-skills/postgresql-sql-format/`. The `.agents/skills/` and
-`.claude/skills/` entries are symlinks to that one copy.
+Prebuilt archives are published on the GitHub Releases page for:
 
-## Build and run
+| Platform | Artifact target | Runtime baseline |
+| --- | --- | --- |
+| Windows x64 | `x86_64-pc-windows-msvc` | Windows 10+ |
+| Linux x64 | `x86_64-unknown-linux-gnu` | GLIBC 2.34+; tested on RHEL/Rocky 9, Debian 12, and Ubuntu 24.04 |
+| macOS Intel | `x86_64-apple-darwin` | macOS 14+ |
+| macOS Apple Silicon | `aarch64-apple-darwin` | macOS 14+ |
 
-Rust 1.88, a C toolchain, and libclang are required because the pinned
-`pg_query` backend compiles PostgreSQL's parser.
+Download the archive for your platform, verify it against `SHA256SUMS`, extract it, and place `semblock` or `semblock.exe` on `PATH`.
+
+Confirm the installation:
 
 ```bash
-cargo build --release
-./target/release/semblock --help
+semblock --version
+semblock --help
 ```
 
 ## Usage
 
+Format files in place:
+
 ```bash
 semblock fmt .
-semblock check .
-semblock diff .
 semblock fmt migrations/001_init.sql
+```
+
+Check formatting without writing:
+
+```bash
+semblock check .
+```
+
+Print unified diffs without writing:
+
+```bash
+semblock diff .
+```
+
+Read one source from standard input:
+
+```bash
 semblock fmt --stdin --filename query.sql
+```
+
+Process Go files explicitly:
+
+```bash
 semblock fmt --language go ./internal/...
 ```
 
-`check` emits stable rule IDs with UTF-8 byte ranges:
+`check` and `diff` exit with code `1` when formatting changes are required, making both commands suitable for CI.
 
-```text
-query.sql:0-6: error[casing.keyword]: SQL keyword or grammar construct must be `SELECT` instead of `select`
-query.sql:10-10: error[spacing.comma]: token spacing does not match the mandatory spacing rule
-```
+## Supported inputs
 
-Directory discovery includes `.sql` and `.go` by default. It respects
-`.gitignore` and nested `.semblockignore` files. `.semblockignore` uses
-gitignore syntax, has higher precedence than ordinary ignore files, and more
-nested files win within that level. Hidden paths are skipped. Passing a file
-explicitly processes it even when an ignore rule matches it.
+Directory discovery includes `.sql` and `.go` files by default. It respects `.gitignore` and nested `.semblockignore` files. An explicitly named file is processed even when an ignore rule matches it.
 
-Go auto-detection formats only raw backtick literals that:
+Go support formats raw backtick literals that:
 
 - belong to a `const`, `var`, regular assignment, or short assignment;
 - begin with a supported SQL statement keyword; and
-- parse as one or more complete PostgreSQL statements.
+- contain one or more complete PostgreSQL statements.
 
-Interpreted Go strings and incomplete fragments such as a standalone `WHERE`
-clause are skipped. An explicit SQL marker makes a raw literal mandatory and
-therefore diagnostic on parse failure.
+Interpreted Go strings and incomplete fragments such as a standalone `WHERE` clause are skipped.
+
+## SQL coverage
+
+The formatter has fixture-backed structural support for substantial PostgreSQL syntax, including:
+
+- `SELECT`, CTEs, recursive and general set operations;
+- result, argument, grouping, sorting, pagination, and window layouts;
+- booleans, joins, `CASE`, filtered and ordered aggregates;
+- top-level `VALUES`;
+- `INSERT` with `VALUES`, query sources, `DEFAULT VALUES`, `OVERRIDING`, `RETURNING`, and `ON CONFLICT`;
+- `UPDATE ... FROM`, `DELETE ... USING`, and shared DML `WITH`;
+- PostgreSQL 17 `MERGE` with matched and not-matched actions;
+- multiple, joined, derived, function, lateral, and parenthesized relation sources;
+- basic `CREATE TABLE`, feature-rich `CREATE INDEX`, and multi-action `ALTER TABLE`;
+- `CREATE VIEW` and `CREATE MATERIALIZED VIEW`.
+
+Important remaining areas include routines, PL/pgSQL, richer table and partition DDL, and several advanced relation-source variants.
+
+A PostgreSQL statement may be valid while still being unsupported by the formatter. In that case, `semblock` preserves the statement and emits `syntax.unsupported`. This is a deliberate safety boundary, not a parser error.
 
 ## Directives
+
+Go source directives:
 
 ```go
 // semblock:file-ignore
 package legacy
 
 // semblock:ignore
-const legacyQuery = `select vendor_specific_magic(...)`
+const legacyQuery = `select vendor_specific_magic(...);`
 
 // semblock:sql
-const query = `/* injected */ select id from public.items;`
+const query = `select id from public.items;`
 
 // language=SQL
 const jetbrainsQuery = `select id from public.items;`
 ```
 
+SQL directives:
+
 ```sql
 -- semblock:file-ignore
+```
 
+```sql
 -- semblock:off
 SELECT vendor_specific_magic(...);
 -- semblock:on
 ```
 
-These directives affect `fmt`, `check`, and `diff`. Nested, unmatched, or
-misplaced directives are errors; ignored SQL regions remain byte-identical.
+Nested, unmatched, or misplaced directives are errors. Ignored regions remain byte-identical.
 
 ## Configuration
 
-`semblock` searches for `semblock.toml` from the current directory upward.
-`--config` selects an explicit file. Unknown fields and unsupported values are
-errors.
+`semblock` searches for `semblock.toml` from the current directory upward. Use `--config` to select an explicit file. Unknown fields and unsupported values are errors.
 
 ```toml
 dialect = "postgresql"
@@ -151,10 +161,15 @@ raw_strings = true
 interpreted_strings = false
 ```
 
-Indentation is always four spaces. Authored list groups, blank lines, and comment
-boundaries are mandatory and are therefore not configurable.
+Indentation is always four spaces. Authored list groups, blank lines, and comment boundaries are mandatory and are not configurable.
 
-Exit codes are stable:
+## Diagnostics and exit codes
+
+Example diagnostic:
+
+```text
+query.sql:0-6: error[casing.keyword]: SQL keyword or grammar construct must be `SELECT` instead of `select`
+```
 
 | Code | Meaning |
 | --- | --- |
@@ -164,10 +179,52 @@ Exit codes are stable:
 | `3` | SQL, directive, or Go parse/validation failure. |
 | `4` | Discovery, filesystem, or atomic replacement failure. |
 
+## Build from source
+
+Requirements:
+
+- Rust 1.88;
+- a C/C++ build toolchain;
+- CMake;
+- Clang and `libclang`.
+
+The native toolchain is required because `pg_query` compiles PostgreSQL parser sources.
+
+```bash
+git clone https://github.com/codercms/semantic-block-sql.git
+cd semantic-block-sql
+cargo build --locked --release
+./target/release/semblock --version
+```
+
+On Windows, the binary is written to `target\release\semblock.exe`.
+
 ## Development
+
+Read [AGENTS.md](AGENTS.md) before changing formatter behavior. The core formatter contract, architecture, extension procedure, and historical implementation notes are indexed in [docs/README.md](docs/README.md).
+
+Run the complete local gate:
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
+cargo doc --locked --no-deps
+git diff --check
 ```
+
+New PostgreSQL syntax is added through explicit AST capability records, owned token ranges, golden fixtures, semantic-equivalence checks, and idempotence tests. Unsupported syntax must remain fail-safe.
+
+## Agent skill
+
+The repository contains one canonical, vendor-neutral formatting skill at:
+
+```text
+.agent-skills/postgresql-sql-format/
+```
+
+Copy that directory into an agent-specific discovery path only when needed. The repository does not maintain duplicate Codex- and Claude-specific copies.
+
+## License
+
+MIT. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

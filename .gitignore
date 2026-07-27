@@ -6,3 +6,8 @@
 *.profraw
 *.profdata
 .DS_Store
+
+# Optional local agent-skill installation paths. The canonical skill lives in
+# .agent-skills/postgresql-sql-format/.
+/.agents/
+/.claude/

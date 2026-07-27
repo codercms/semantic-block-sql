@@ -4,26 +4,28 @@ These instructions apply to the whole repository.
 
 ## Source of truth
 
-Read these files before changing behavior:
+Read these files before changing formatter behavior:
 
 1. `docs/semantic-block-sql-fmt-check-core-spec.md`
 2. `docs/formatter-design.md`
 3. `docs/formatter-architecture.md`
 4. `docs/formatter-extension-guide.md`
-5. `docs/semantic-block-sql-work-handoff.md`
-6. `docs/semantic-block-sql-style-guide-ru.md`
-7. `.agent-skills/postgresql-sql-format/SKILL.md` and its referenced material
-8. `docs/implementation-checklist.md`
+5. `docs/semantic-block-sql-style-guide-ru.md`
+6. `.agent-skills/postgresql-sql-format/SKILL.md` and its referenced material
+7. `docs/implementation-checklist.md`
 
 The core specification is authoritative for machine `fmt` / `check` behavior.
 The agent skill is human-formatting guidance and must not silently broaden the
-core contract. When other documents conflict, the latest explicit project
+core contract. When current documents conflict, the latest explicit project
 requirement wins. Record the resolution in `docs/formatter-design.md`.
+
+Historical batch notes and the initial work handoff are indexed in
+`docs/README.md`. They explain how the project evolved, but they do not override
+current specifications or architecture documents.
 
 ## Batch gate
 
 - Work batch by batch and keep `docs/implementation-checklist.md` current.
-- Do not begin formatter implementation before Batch 0 is committed.
 - Commit each coherent completed batch before starting the next batch.
 - Do not mix unrelated cleanup into a batch.
 - Do not claim support for a PostgreSQL construct without a fixture.
@@ -31,8 +33,6 @@ requirement wins. Record the resolution in `docs/formatter-design.md`.
 ## Architecture
 
 - Do not write a PostgreSQL parser.
-- Investigate `libpgfmt` first. Record concrete limitations before choosing a
-  different backend.
 - Keep project discovery, directives, SQL formatting, host-language extraction,
   diffing, diagnostics, and rewriting as separate modules.
 - Expose one reusable formatter API for CLI, stdin, Go literals, and future IDE
@@ -42,6 +42,9 @@ requirement wins. Record the resolution in `docs/formatter-design.md`.
   literals already located structurally.
 - Prefer small dependency surfaces. Verify version, license, MSRV, activity, and
   architectural fit before adding a crate.
+- Extend PostgreSQL support through the typed ownership IR and exhaustive Rust
+  enums described in `docs/formatter-extension-guide.md`; do not add global
+  keyword scans or permissive fallbacks.
 
 ## Semantic and rewrite safety
 
@@ -59,6 +62,8 @@ requirement wins. Record the resolution in `docs/formatter-design.md`.
   Go file before an atomic write.
 - Malformed, unmatched, or incorrectly nested directives produce diagnostics;
   never guess.
+- Valid PostgreSQL outside the reviewed ownership model must remain byte-identical
+  and report `syntax.unsupported`.
 
 ## Development workflow
 
@@ -76,13 +81,15 @@ requirement wins. Record the resolution in `docs/formatter-design.md`.
   - dead code.
 - Keep public behavior and exit codes documented.
 - Remove dead code before completing a batch.
-- The project license is MIT, as selected in the repository's initial commit.
-  Preserve all third-party notices required by any forked or vendored code.
+- Preserve all third-party notices required by forked, copied, or vendored code.
 
 ## Tooling
 
-- The minimum Rust version is provisional until Batch 1, but the current
-  preferred backend requires Rust 1.88 and edition 2024.
-- Use `cargo fmt`, `cargo clippy`, and focused `cargo test` targets once Rust
-  code exists.
+- The minimum supported Rust version is 1.88 with edition 2024.
+- Run:
+  - `cargo fmt --all -- --check`
+  - `cargo clippy --locked --all-targets -- -D warnings`
+  - `cargo test --locked --all-targets`
+  - `cargo doc --locked --no-deps`
+  - `git diff --check`
 - Pin any formatter fork or vendored backend to a reviewed upstream commit.
