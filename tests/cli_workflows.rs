@@ -20,7 +20,7 @@ fn run(root: &Path, args: &[&str], stdin: Option<&str>) -> Output {
                 .stdin
                 .take()
                 .unwrap()
-                .write_all.input.as_bytes())
+                .write_all(input.as_bytes())
                 .unwrap();
             child.wait_with_output().unwrap()
         }
@@ -82,10 +82,7 @@ fn staged_selection_ignores_unstaged_and_unsupported_files() {
     let root = TempDir::new().unwrap();
     git(root.path(), &["init", "-b", "main"]);
     git(root.path(), &["config", "user.name", "Tests"]);
-    git(
-        root.path(),
-        &["config", "user.email", "tests@example.invalid"],
-    );
+    git(root.path(), &["config", "user.email", "tests@example.invalid"]);
     write(root.path(), "query.sql", "SELECT 1;\n");
     write(root.path(), "note.txt", "baseline\n");
     git(root.path(), &["add", "."]);
