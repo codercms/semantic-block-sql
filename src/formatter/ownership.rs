@@ -8,6 +8,13 @@ use super::{FormatDiagnostic, SourceRange};
 pub(super) struct SelectSpec {
     pub has_with: bool,
     pub set_operations: usize,
+    pub named_windows: usize,
+}
+
+/// Top-level VALUES capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ValuesSpec {
+    pub rows: usize,
 }
 
 /// INSERT source shape accepted by the validator.
@@ -101,6 +108,51 @@ pub(super) struct MergeSpec {
     pub returning_items: usize,
 }
 
+/// CREATE TABLE element kind used to preserve the authored order while still
+/// enforcing the column/constraint boundary in layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CreateTableElementSpec {
+    Column,
+    Constraint,
+}
+
+/// Exact CREATE TABLE capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CreateTableSpec {
+    pub if_not_exists: bool,
+    pub elements: Vec<CreateTableElementSpec>,
+}
+
+/// Exact CREATE INDEX capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CreateIndexSpec {
+    pub unique: bool,
+    pub concurrent: bool,
+    pub if_not_exists: bool,
+    pub key_items: usize,
+    pub include_items: usize,
+    pub options: usize,
+    pub has_tablespace: bool,
+    pub has_where: bool,
+}
+
+/// Coarse ALTER TABLE action groups used only for stable blank-line grouping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AlterTableActionGroup {
+    Add,
+    Alter,
+    Drop,
+    Set,
+    Other,
+}
+
+/// Exact ALTER TABLE capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AlterTableSpec {
+    pub if_exists: bool,
+    pub action_groups: Vec<AlterTableActionGroup>,
+}
+
 /// Exact statement shape accepted by the PostgreSQL AST support gate.
 ///
 /// This is deliberately a closed sum type. Adding a statement family requires
@@ -111,40 +163,53 @@ pub(super) struct MergeSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum StatementSpec {
     Select(SelectSpec),
+    Values(ValuesSpec),
     Insert(InsertSpec),
     Update(UpdateSpec),
     Delete(DeleteSpec),
     Merge(MergeSpec),
+    CreateTable(CreateTableSpec),
+    CreateIndex(CreateIndexSpec),
+    AlterTable(AlterTableSpec),
 }
 
 impl StatementSpec {
     pub fn expected_token(&self) -> Token {
         match self {
             Self::Select(_) => Token::Select,
+            Self::Values(_) => Token::Values,
             Self::Insert(_) => Token::Insert,
             Self::Update(_) => Token::Update,
             Self::Delete(_) => Token::DeleteP,
             Self::Merge(_) => Token::Merge,
+            Self::CreateTable(_) | Self::CreateIndex(_) => Token::Create,
+            Self::AlterTable(_) => Token::Alter,
         }
     }
 
     pub fn family_name(&self) -> &'static str {
         match self {
             Self::Select(_) => "SELECT",
+            Self::Values(_) => "VALUES",
             Self::Insert(_) => "INSERT",
             Self::Update(_) => "UPDATE",
             Self::Delete(_) => "DELETE",
             Self::Merge(_) => "MERGE",
+            Self::CreateTable(_) => "CREATE TABLE",
+            Self::CreateIndex(_) => "CREATE INDEX",
+            Self::AlterTable(_) => "ALTER TABLE",
         }
     }
 
     pub fn has_with(&self) -> bool {
         match self {
             Self::Select(spec) => spec.has_with,
+            Self::Values(_) => false,
             Self::Insert(spec) => spec.has_with,
             Self::Update(spec) => spec.has_with,
             Self::Delete(spec) => spec.has_with,
             Self::Merge(spec) => spec.has_with,
+            Self::CreateTable(_) | Self::CreateIndex(_) | Self::AlterTable(_) => false,
         }
     }
 }
@@ -302,6 +367,7 @@ mod tests {
                 spec: StatementSpec::Select(SelectSpec {
                     has_with: false,
                     set_operations: 0,
+                    named_windows: 0,
                 }),
                 range: SourceRange::new(0, 9),
             },
@@ -335,6 +401,7 @@ mod tests {
             spec: StatementSpec::Select(SelectSpec {
                 has_with: false,
                 set_operations: 0,
+                named_windows: 0,
             }),
             range: SourceRange::new(0, source.len()),
         }]);

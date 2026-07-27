@@ -2,7 +2,7 @@ use semblock::{FormatDiagnostic, FormatOptions, Severity, format_sql, format_sql
 
 #[test]
 fn unsupported_statement_family_returns_original_source() {
-    let source = "CREATE TABLE items (id bigint);";
+    let source = "CREATE TABLE child (id bigint) INHERITS (parent);";
     let formatted = format_sql_result(source, &FormatOptions::default());
 
     assert_eq!(formatted.output, source);
@@ -24,11 +24,7 @@ fn unsupported_statement_family_returns_original_source() {
 fn unowned_select_layouts_are_explicitly_unsupported() {
     for source in [
         "SELECT id INTO archived_items FROM items;",
-        "SELECT COUNT(*) FILTER (WHERE active) FROM items;",
-        "SELECT row_number() OVER () FROM items;",
-        "SELECT * FROM LATERAL (SELECT 1) source;",
         "SELECT id FROM items FOR UPDATE;",
-        "VALUES (1), (2);",
     ] {
         let formatted = format_sql_result(source, &FormatOptions::default());
         assert_eq!(formatted.output, source, "{source}");

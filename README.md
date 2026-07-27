@@ -13,12 +13,13 @@ result/function argument groups, booleans, compact/expanded `CASE`, joins, CTEs,
 recursive and general set operations, grouping/sorting/pagination clauses,
 `INSERT` with VALUES, SELECT, DEFAULT VALUES, OVERRIDING, RETURNING, and
 `ON CONFLICT`, bounded `UPDATE ... FROM` and `DELETE ... USING`, shared DML
-`WITH`, and a bounded PostgreSQL 17 `MERGE` planner covering DELETE, UPDATE,
-INSERT, and DO NOTHING branches.
+`WITH`, a bounded PostgreSQL 17 `MERGE` planner covering DELETE, UPDATE,
+INSERT, and DO NOTHING branches, top-level `VALUES`, window and filtered
+aggregate forms, lateral derived/function sources, basic `CREATE TABLE`,
+feature-rich `CREATE INDEX`, and multi-action `ALTER TABLE`.
 Unimplemented statement families and unowned statement variants return the
-original source with `syntax.unsupported`; DDL, routines, PL/pgSQL, windows,
-FILTER, lateral sources, and richer relation/subquery ownership remain later
-batches.
+original source with `syntax.unsupported`; routines, PL/pgSQL, richer DDL,
+and richer relation/subquery ownership remain later batches.
 
 The formatter uses the existing `pg_query` crate for the real PostgreSQL
 parser, scanner, token ranges, comments, and AST. Project code implements the
@@ -34,6 +35,7 @@ Semantic Block layout policy, not another SQL parser.
 - [Batch 1 backend spike](docs/batch-1-backend-spike.md)
 - [Batch 2 formatter-core MVP](docs/batch-2-core-mvp.md)
 - [Batch 3 query and MERGE coverage](docs/batch-3-query-merge.md)
+- [Batch 5 values, windows, lateral sources, and DDL](docs/batch-5-values-windows-ddl.md)
 - [Runnable CLI and Go MVP](docs/batch-4-5-cli-mvp.md)
 - [Technical handoff](docs/semantic-block-sql-work-handoff.md)
 - [Russian style guide](docs/semantic-block-sql-style-guide-ru.md)

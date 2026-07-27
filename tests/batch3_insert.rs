@@ -56,7 +56,6 @@ fn unsupported_insert_variants_remain_unchanged() {
     for source in [
         "WITH changed AS (DELETE FROM staging.items RETURNING id) INSERT INTO public.items (id) SELECT id FROM changed;",
         "INSERT INTO public.items (id) SELECT id FROM staging.items FOR UPDATE;",
-        "INSERT INTO public.items (id) SELECT row_number() OVER () FROM staging.items;",
     ] {
         let formatted = format_sql_result(source, &FormatOptions::default());
         assert_eq!(formatted.output, source, "{source}");

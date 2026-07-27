@@ -2,8 +2,9 @@ use pg_query::protobuf::Token;
 
 use super::*;
 use crate::formatter::ownership::{
-    ConflictActionSpec, DeleteSpec, InsertSourceSpec, InsertSpec, MergeActionSpec, MergeSpec,
-    OverrideSpec, SelectSpec, StatementTokens, UpdateSpec,
+    AlterTableSpec, ConflictActionSpec, CreateIndexSpec, CreateTableSpec, DeleteSpec,
+    InsertSourceSpec, InsertSpec, MergeActionSpec, MergeSpec, OverrideSpec, SelectSpec,
+    StatementTokens, UpdateSpec, ValuesSpec,
 };
 
 pub(super) fn bind_body_start(
@@ -42,10 +43,344 @@ pub(super) fn bind_select(
         ),
         spec.set_operations,
     )?;
+    let window = find_kind(
+        tokens,
+        depths,
+        body_start + 1,
+        statement.range.end,
+        statement.base_depth,
+        Token::Window,
+    );
+    let named_windows = window
+        .map(|window| {
+            let end = (window + 1..statement.range.end)
+                .find(|index| {
+                    depths[*index] == statement.base_depth
+                        && matches!(
+                            tokens[*index].kind,
+                            Token::Order | Token::Limit | Token::Offset | Token::Fetch | Token::For
+                        )
+                })
+                .unwrap_or(statement.range.end);
+            item_count(tokens, depths, window + 1, end, statement.base_depth)
+        })
+        .unwrap_or(0);
+    require_count(
+        "SELECT",
+        "WINDOW definition count",
+        named_windows,
+        spec.named_windows,
+    )?;
     Ok(TokenSpan {
         start: statement.range.start,
         end: statement.range.end,
         base_depth: statement.base_depth,
+    })
+}
+
+pub(super) fn bind_values(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: &StatementTokens,
+    body_start: usize,
+    spec: &ValuesSpec,
+) -> Result<ValuesBlock, FormatDiagnostic> {
+    let rows = (body_start + 1..statement.range.end)
+        .filter(|index| {
+            structure.depth(*index) == statement.base_depth && tokens[*index].kind == Token::Ascii40
+        })
+        .map(|open| {
+            structure
+                .matching_parenthesis(open)
+                .map(|close| (open, close))
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("VALUES row has no closing parenthesis".into())
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    require_count("VALUES", "row count", rows.len(), spec.rows)?;
+    Ok(ValuesBlock {
+        span: TokenSpan {
+            start: statement.range.start,
+            end: statement.range.end,
+            base_depth: statement.base_depth,
+        },
+        keyword: body_start,
+        rows,
+    })
+}
+
+pub(super) fn bind_create_table(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: &StatementTokens,
+    body_start: usize,
+    spec: &CreateTableSpec,
+) -> Result<CreateTableBlock, FormatDiagnostic> {
+    let depths = structure.depths();
+    let table = find_kind(
+        tokens,
+        depths,
+        body_start + 1,
+        statement.range.end,
+        statement.base_depth,
+        Token::Table,
+    )
+    .ok_or_else(|| FormatDiagnostic::Ownership("CREATE TABLE has no TABLE token".into()))?;
+    require_presence(
+        "CREATE TABLE",
+        "IF NOT EXISTS clause",
+        has_sequence(
+            tokens,
+            depths,
+            table + 1,
+            statement.range.end,
+            statement.base_depth,
+            &[Token::IfP, Token::Not, Token::Exists],
+        ),
+        spec.if_not_exists,
+    )?;
+    let open = (table + 1..statement.range.end)
+        .find(|index| {
+            depths[*index] == statement.base_depth && tokens[*index].kind == Token::Ascii40
+        })
+        .ok_or_else(|| FormatDiagnostic::Ownership("CREATE TABLE has no element list".into()))?;
+    let close = structure.matching_parenthesis(open).ok_or_else(|| {
+        FormatDiagnostic::Ownership("CREATE TABLE element list is unclosed".into())
+    })?;
+    let ranges = split_item_ranges(tokens, depths, open + 1, close, statement.base_depth + 1)?;
+    require_count(
+        "CREATE TABLE",
+        "element count",
+        ranges.len(),
+        spec.elements.len(),
+    )?;
+    let items = ranges
+        .into_iter()
+        .zip(spec.elements.iter().copied())
+        .map(|(range, kind)| CreateTableItem { range, kind })
+        .collect();
+    Ok(CreateTableBlock {
+        span: TokenSpan {
+            start: statement.range.start,
+            end: statement.range.end,
+            base_depth: statement.base_depth,
+        },
+        open,
+        close,
+        items,
+    })
+}
+
+pub(super) fn bind_create_index(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: &StatementTokens,
+    body_start: usize,
+    spec: &CreateIndexSpec,
+) -> Result<CreateIndexBlock, FormatDiagnostic> {
+    let depths = structure.depths();
+    let base = statement.base_depth;
+    let index = find_kind(
+        tokens,
+        depths,
+        body_start + 1,
+        statement.range.end,
+        base,
+        Token::Index,
+    )
+    .ok_or_else(|| FormatDiagnostic::Ownership("CREATE INDEX has no INDEX token".into()))?;
+    require_presence(
+        "CREATE INDEX",
+        "UNIQUE modifier",
+        find_kind(tokens, depths, body_start + 1, index, base, Token::Unique).is_some(),
+        spec.unique,
+    )?;
+    require_presence(
+        "CREATE INDEX",
+        "CONCURRENTLY modifier",
+        find_kind(
+            tokens,
+            depths,
+            body_start + 1,
+            statement.range.end,
+            base,
+            Token::Concurrently,
+        )
+        .is_some(),
+        spec.concurrent,
+    )?;
+    require_presence(
+        "CREATE INDEX",
+        "IF NOT EXISTS clause",
+        has_sequence(
+            tokens,
+            depths,
+            index + 1,
+            statement.range.end,
+            base,
+            &[Token::IfP, Token::Not, Token::Exists],
+        ),
+        spec.if_not_exists,
+    )?;
+    let on = find_kind(
+        tokens,
+        depths,
+        index + 1,
+        statement.range.end,
+        base,
+        Token::On,
+    )
+    .ok_or_else(|| FormatDiagnostic::Ownership("CREATE INDEX has no ON clause".into()))?;
+    let key_open = (on + 1..statement.range.end)
+        .find(|candidate| depths[*candidate] == base && tokens[*candidate].kind == Token::Ascii40)
+        .ok_or_else(|| FormatDiagnostic::Ownership("CREATE INDEX has no key list".into()))?;
+    let key_close = structure
+        .matching_parenthesis(key_open)
+        .ok_or_else(|| FormatDiagnostic::Ownership("CREATE INDEX key list is unclosed".into()))?;
+    let key_items = split_item_ranges(tokens, depths, key_open + 1, key_close, base + 1)?;
+    require_count(
+        "CREATE INDEX",
+        "key item count",
+        key_items.len(),
+        spec.key_items,
+    )?;
+
+    let include_index = find_kind(
+        tokens,
+        depths,
+        key_close + 1,
+        statement.range.end,
+        base,
+        Token::Include,
+    );
+    let include = include_index
+        .map(|include| bind_owned_list(tokens, structure, include, statement.range.end, base))
+        .transpose()?;
+    require_count(
+        "CREATE INDEX",
+        "INCLUDE item count",
+        include.as_ref().map_or(0, |(_, _, _, items)| items.len()),
+        spec.include_items,
+    )?;
+
+    let with_index = find_kind(
+        tokens,
+        depths,
+        key_close + 1,
+        statement.range.end,
+        base,
+        Token::With,
+    );
+    let with_options = with_index
+        .map(|with| bind_owned_list(tokens, structure, with, statement.range.end, base))
+        .transpose()?;
+    require_count(
+        "CREATE INDEX",
+        "storage parameter count",
+        with_options
+            .as_ref()
+            .map_or(0, |(_, _, _, items)| items.len()),
+        spec.options,
+    )?;
+
+    let tablespace = find_kind(
+        tokens,
+        depths,
+        key_close + 1,
+        statement.range.end,
+        base,
+        Token::Tablespace,
+    );
+    let where_clause = find_kind(
+        tokens,
+        depths,
+        key_close + 1,
+        statement.range.end,
+        base,
+        Token::Where,
+    );
+    require_presence(
+        "CREATE INDEX",
+        "TABLESPACE clause",
+        tablespace.is_some(),
+        spec.has_tablespace,
+    )?;
+    require_presence(
+        "CREATE INDEX",
+        "WHERE clause",
+        where_clause.is_some(),
+        spec.has_where,
+    )?;
+
+    Ok(CreateIndexBlock {
+        span: TokenSpan {
+            start: statement.range.start,
+            end: statement.range.end,
+            base_depth: base,
+        },
+        key_open,
+        key_close,
+        key_items,
+        include,
+        with_options,
+        tablespace,
+        where_clause,
+    })
+}
+
+pub(super) fn bind_alter_table(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    statement: &StatementTokens,
+    body_start: usize,
+    spec: &AlterTableSpec,
+) -> Result<AlterTableBlock, FormatDiagnostic> {
+    let base = statement.base_depth;
+    let table = find_kind(
+        tokens,
+        depths,
+        body_start + 1,
+        statement.range.end,
+        base,
+        Token::Table,
+    )
+    .ok_or_else(|| FormatDiagnostic::Ownership("ALTER TABLE has no TABLE token".into()))?;
+    require_presence(
+        "ALTER TABLE",
+        "IF EXISTS clause",
+        has_sequence(
+            tokens,
+            depths,
+            table + 1,
+            statement.range.end,
+            base,
+            &[Token::IfP, Token::Exists],
+        ),
+        spec.if_exists,
+    )?;
+    let action_start = (table + 1..statement.range.end)
+        .find(|index| depths[*index] == base && is_alter_action_start(tokens[*index].kind))
+        .ok_or_else(|| FormatDiagnostic::Ownership("ALTER TABLE has no action".into()))?;
+    let ranges = split_item_ranges(tokens, depths, action_start, statement.range.end, base)?;
+    require_count(
+        "ALTER TABLE",
+        "action count",
+        ranges.len(),
+        spec.action_groups.len(),
+    )?;
+    let actions = ranges
+        .into_iter()
+        .zip(spec.action_groups.iter().copied())
+        .map(|(range, group)| AlterTableAction { range, group })
+        .collect();
+    Ok(AlterTableBlock {
+        span: TokenSpan {
+            start: statement.range.start,
+            end: statement.range.end,
+            base_depth: base,
+        },
+        actions,
     })
 }
 
@@ -798,6 +1133,104 @@ fn parenthesized_item_count(
         close,
         structure.depth(open) + 1,
     ))
+}
+
+fn bind_owned_list(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    keyword: usize,
+    end: usize,
+    base_depth: usize,
+) -> Result<(usize, usize, usize, Vec<TokenRange>), FormatDiagnostic> {
+    let open = (keyword + 1..end)
+        .find(|index| {
+            structure.depth(*index) == base_depth && tokens[*index].kind == Token::Ascii40
+        })
+        .ok_or_else(|| {
+            FormatDiagnostic::Ownership(format!(
+                "{} clause has no parenthesized list",
+                tokens[keyword].text
+            ))
+        })?;
+    let close = structure.matching_parenthesis(open).ok_or_else(|| {
+        FormatDiagnostic::Ownership(format!(
+            "{} clause has an unclosed parenthesized list",
+            tokens[keyword].text
+        ))
+    })?;
+    let items = split_item_ranges(tokens, structure.depths(), open + 1, close, base_depth + 1)?;
+    Ok((keyword, open, close, items))
+}
+
+fn split_item_ranges(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    start: usize,
+    end: usize,
+    depth: usize,
+) -> Result<Vec<TokenRange>, FormatDiagnostic> {
+    if start >= end {
+        return Ok(Vec::new());
+    }
+    let mut ranges = Vec::new();
+    let mut item_start = start;
+    for comma in start..end {
+        if depths[comma] != depth || tokens[comma].kind != Token::Ascii44 {
+            continue;
+        }
+        let item_end = tokens
+            .get(comma + 1)
+            .filter(|next| next.is_comment() && next.line_breaks_before == 0)
+            .map_or(comma, |_| (comma + 2).min(end));
+        ranges.push(TokenRange::new(item_start, item_end)?);
+        item_start = item_end.max(comma + 1);
+    }
+    if item_start < end {
+        ranges.push(TokenRange::new(item_start, end)?);
+    }
+    Ok(ranges)
+}
+
+fn has_sequence(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    start: usize,
+    end: usize,
+    depth: usize,
+    sequence: &[Token],
+) -> bool {
+    if sequence.is_empty() {
+        return true;
+    }
+    let indexes = (start..end)
+        .filter(|index| depths[*index] == depth && !tokens[*index].is_comment())
+        .collect::<Vec<_>>();
+    indexes.windows(sequence.len()).any(|window| {
+        window
+            .iter()
+            .zip(sequence)
+            .all(|(index, expected)| tokens[*index].kind == *expected)
+    })
+}
+
+fn is_alter_action_start(kind: Token) -> bool {
+    matches!(
+        kind,
+        Token::AddP
+            | Token::Alter
+            | Token::Drop
+            | Token::Set
+            | Token::Reset
+            | Token::EnableP
+            | Token::DisableP
+            | Token::Force
+            | Token::No
+            | Token::Owner
+            | Token::Cluster
+            | Token::Attach
+            | Token::Detach
+            | Token::Validate
+    )
 }
 
 fn bound_override(

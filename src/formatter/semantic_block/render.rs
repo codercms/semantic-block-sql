@@ -20,6 +20,7 @@ pub(in crate::formatter) fn render_token(
     if is_on_conflict_excluded(tokens, index)
         || is_overriding_value_keyword(tokens, index)
         || is_merge_match_side_keyword(tokens, index)
+        || is_with_ordinality_keyword(tokens, index)
     {
         return token.text.to_uppercase();
     }
@@ -217,6 +218,13 @@ fn is_merge_match_side_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
         .any(|token| token.kind == Token::Matched)
 }
 
+fn is_with_ordinality_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    tokens[index].kind == Token::Ordinality
+        && tokens
+            .get(index.wrapping_sub(1))
+            .is_some_and(|previous| previous.kind == Token::With)
+}
+
 fn is_string_literal(kind: Token) -> bool {
     matches!(kind, Token::Sconst | Token::Usconst)
 }
@@ -224,76 +232,120 @@ fn is_string_literal(kind: Token) -> bool {
 fn is_keyword_like(kind: Token) -> bool {
     matches!(
         kind,
-        Token::All
+        Token::AddP
+            | Token::All
+            | Token::Alter
+            | Token::Always
             | Token::And
             | Token::As
+            | Token::Attach
+            | Token::Between
             | Token::By
+            | Token::Cascade
             | Token::Case
+            | Token::Check
             | Token::Coalesce
+            | Token::Column
+            | Token::Concurrently
             | Token::Conflict
+            | Token::Constraint
+            | Token::Create
             | Token::Cross
             | Token::CurrentDate
+            | Token::CurrentP
             | Token::CurrentRole
             | Token::CurrentSchema
             | Token::CurrentTime
             | Token::CurrentTimestamp
             | Token::CurrentUser
             | Token::DayP
-            | Token::Distinct
             | Token::DeleteP
+            | Token::Distinct
             | Token::Do
+            | Token::Drop
             | Token::Else
             | Token::EndP
             | Token::Except
+            | Token::Exists
+            | Token::Exclude
             | Token::FalseP
             | Token::Fetch
+            | Token::Filter
             | Token::FirstP
+            | Token::Following
+            | Token::Foreign
             | Token::From
             | Token::Full
+            | Token::Generated
             | Token::GroupP
+            | Token::Groups
             | Token::Having
             | Token::HourP
+            | Token::IdentityP
+            | Token::IfP
+            | Token::Include
+            | Token::Index
             | Token::InnerP
             | Token::Insert
             | Token::Intersect
             | Token::Is
             | Token::Join
+            | Token::Key
+            | Token::LastP
             | Token::Left
             | Token::Limit
             | Token::Localtime
             | Token::Localtimestamp
-            | Token::MinuteP
             | Token::Matched
             | Token::Merge
+            | Token::MinuteP
             | Token::MonthP
             | Token::Natural
-            | Token::Nothing
+            | Token::No
             | Token::Not
-            | Token::Only
+            | Token::Nothing
             | Token::NullP
             | Token::Nullif
+            | Token::NullsP
             | Token::Offset
+            | Token::Others
             | Token::On
+            | Token::Only
             | Token::Or
             | Token::Order
             | Token::OuterP
+            | Token::Over
             | Token::Overriding
+            | Token::Partition
+            | Token::Preceding
+            | Token::Primary
             | Token::Recursive
+            | Token::References
+            | Token::Restrict
             | Token::Returning
             | Token::Right
+            | Token::Row
             | Token::Rows
             | Token::SecondP
             | Token::Select
-            | Token::Set
             | Token::SessionUser
+            | Token::Set
+            | Token::Table
+            | Token::Tablespace
             | Token::Then
+            | Token::Ties
             | Token::TrueP
+            | Token::Unbounded
             | Token::Union
+            | Token::Unique
             | Token::Update
             | Token::User
+            | Token::Validate
             | Token::Values
             | Token::When
             | Token::Where
+            | Token::Window
+            | Token::Within
             | Token::With
             | Token::YearP
     )
@@ -331,7 +383,7 @@ fn is_insert_target_list_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
     }
     for token in tokens[..open].iter().rev() {
         match token.kind {
-            Token::Ascii59 | Token::Values => return false,
+            Token::Ascii59 | Token::Values | Token::Select => return false,
             Token::Insert => return true,
             _ => {}
         }
@@ -372,6 +424,9 @@ pub(super) fn needs_space(
     if current.kind == Token::Ascii40 && is_insert_target_list_open(tokens, current_index) {
         return true;
     }
+    if current.kind == Token::Ascii40 && is_ddl_list_open(tokens, current_index) {
+        return true;
+    }
     if current.kind == Token::Ascii40
         && (is_function_call_syntax(tokens, previous_index)
             || is_type_modifier_syntax(tokens, previous_index)
@@ -385,6 +440,36 @@ pub(super) fn needs_space(
         return false;
     }
     true
+}
+
+fn is_ddl_list_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
+    if tokens
+        .get(open)
+        .is_none_or(|token| token.kind != Token::Ascii40)
+    {
+        return false;
+    }
+    let statement_start = tokens[..open]
+        .iter()
+        .rposition(|token| token.kind == Token::Ascii59)
+        .map_or(0, |semicolon| semicolon + 1);
+    let mut depth = 0usize;
+    let mut create = false;
+    let mut table = false;
+    let mut index = false;
+    let mut on = false;
+    for token in &tokens[statement_start..open] {
+        match token.kind {
+            Token::Ascii40 | Token::Ascii91 => depth += 1,
+            Token::Ascii41 | Token::Ascii93 => depth = depth.saturating_sub(1),
+            Token::Create if depth == 0 => create = true,
+            Token::Table if depth == 0 => table = true,
+            Token::Index if depth == 0 => index = true,
+            Token::On if depth == 0 => on = true,
+            _ => {}
+        }
+    }
+    depth == 0 && create && (table || (index && on))
 }
 
 fn is_unary_sign(tokens: &[SqlToken<'_>], index: usize) -> bool {

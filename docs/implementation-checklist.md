@@ -172,22 +172,36 @@ Batch 2 evidence:
 - [x] `RETURNING` for fixture-backed `INSERT`.
 - [x] Compact and expanded bounded `MERGE` branches.
 - [x] `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT`.
-- [ ] Lateral joins.
+- [x] Lateral derived-table and function sources.
 - [x] Grouping, `HAVING`, ordering, and pagination clauses.
-- [ ] Window expressions and named windows.
-- [ ] `FILTER`.
+- [x] Window expressions and named windows.
+- [x] `FILTER` and ordered aggregate clauses.
 - [ ] PostgreSQL casts, arrays, and JSON expressions.
-- [ ] `CREATE TABLE`.
-- [ ] Simple one-line `CREATE INDEX`.
-- [ ] Simple one-line partial index.
-- [ ] Complex multiline `CREATE INDEX`.
-- [ ] `ALTER TABLE`.
+- [x] Basic `CREATE TABLE` columns and table constraints.
+- [x] Simple one-line `CREATE INDEX`.
+- [x] Simple one-line partial index.
+- [x] Complex multiline `CREATE INDEX`.
+- [x] Multi-action `ALTER TABLE` with syntactic action groups.
 - [ ] PL/pgSQL blocks.
 - [ ] Dollar quoting.
-- [ ] Comments for each statement family.
-- [ ] Golden, parse, idempotence, and safety fixtures for every checked item.
+- [x] Comments for every currently claimed Batch 3 statement family.
+- [x] Golden, parse, idempotence, and safety fixtures for every checked item.
 - [ ] Batch 3 full tests and self-review.
 - [ ] Dead-code removal, docs, checklist, and commit.
+
+Values, windows, lateral, and DDL tranche evidence:
+
+- top-level VALUES owns row boundaries and preserves authored grouping;
+- QueryBlock owns wrapper parentheses for nested and lateral SELECT sources;
+- WindowBlock owns OVER, WITHIN GROUP, and named WINDOW bodies;
+- CREATE TABLE validates and binds columns versus table constraints;
+- CREATE INDEX owns keys, INCLUDE, storage parameters, TABLESPACE, and WHERE;
+- ALTER TABLE owns action ranges and AST-derived syntactic action groups;
+- `tests/batch5_values_windows.rs` and `tests/batch5_ddl.rs` require golden
+  output, semantic equivalence, idempotence, clean check output, exact comment
+  preservation, and fail-safe neighboring variants.
+- authored blank lines between complete top-level statements are preserved.
+
 
 ## Batch 4 — Project CLI
 

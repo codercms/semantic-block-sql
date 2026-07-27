@@ -36,11 +36,25 @@ pub(super) fn bind_queries(
                 })
                 .unwrap_or(statement.range.end);
             let list_start = select_list_start(tokens, structure, select, end);
+            let wrapper = (statement.range.start..select)
+                .rev()
+                .find(|open| {
+                    tokens[*open].kind == Token::Ascii40
+                        && structure
+                            .matching_parenthesis(*open)
+                            .is_some_and(|close| close >= end && close < statement.range.end)
+                })
+                .and_then(|open| {
+                    structure
+                        .matching_parenthesis(open)
+                        .map(|close| (open, close))
+                });
             queries.push(QueryBlock {
                 select,
                 list_start,
                 end,
                 base_depth,
+                wrapper,
                 clauses: bind_query_clauses(tokens, depths, select, end, base_depth),
             });
         }
@@ -104,6 +118,93 @@ pub(super) fn bind_set_operations(
             }
         }
     }
+    result
+}
+
+pub(super) fn bind_window_blocks(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    queries: &[QueryBlock],
+) -> Vec<WindowBlock> {
+    let depths = structure.depths();
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+
+    for query in queries {
+        for index in query.select..query.end {
+            let candidate = match tokens[index].kind {
+                Token::Over => tokens
+                    .get(index + 1)
+                    .and_then(|next| (next.kind == Token::Ascii40).then_some(index + 1)),
+                Token::GroupP
+                    if index > query.select && tokens[index - 1].kind == Token::Within =>
+                {
+                    tokens
+                        .get(index + 1)
+                        .and_then(|next| (next.kind == Token::Ascii40).then_some(index + 1))
+                }
+                Token::As
+                    if depths[index] == query.base_depth
+                        && query.clauses.window.is_some_and(|window| index > window) =>
+                {
+                    tokens
+                        .get(index + 1)
+                        .and_then(|next| (next.kind == Token::Ascii40).then_some(index + 1))
+                }
+                _ => None,
+            };
+            let Some(open) = candidate else {
+                continue;
+            };
+            if !seen.insert(open) {
+                continue;
+            }
+            let Some(close) = structure.matching_parenthesis(open) else {
+                continue;
+            };
+            if close >= query.end {
+                continue;
+            }
+            let inner_depth = depths[open] + 1;
+            let mut partition_by = None;
+            let mut order_by = None;
+            let mut frame = None;
+            for token_index in open + 1..close {
+                if depths[token_index] != inner_depth {
+                    continue;
+                }
+                match tokens[token_index].kind {
+                    Token::Partition
+                        if tokens
+                            .get(token_index + 1)
+                            .is_some_and(|next| next.kind == Token::By) =>
+                    {
+                        partition_by.get_or_insert(token_index);
+                    }
+                    Token::Order
+                        if tokens
+                            .get(token_index + 1)
+                            .is_some_and(|next| next.kind == Token::By) =>
+                    {
+                        order_by.get_or_insert(token_index);
+                    }
+                    Token::Rows | Token::Range | Token::Groups => {
+                        frame.get_or_insert(token_index);
+                    }
+                    _ => {}
+                }
+            }
+            result.push(WindowBlock {
+                open,
+                close,
+                partition_by,
+                order_by,
+                frame,
+                base_depth: depths[open],
+            });
+        }
+    }
+    result.sort_by_key(|block| block.open);
     result
 }
 
@@ -294,7 +395,22 @@ pub(super) fn bind_predicates(
                     }
                 }
             }
-            StatementLayout::Select(_) => {}
+            StatementLayout::CreateIndex(index) => {
+                if let Some(where_clause) = index.where_clause {
+                    push_predicate(
+                        &mut result,
+                        &mut seen,
+                        PredicateKind::IndexWhere,
+                        where_clause,
+                        index.span.end,
+                        index.span.base_depth,
+                    );
+                }
+            }
+            StatementLayout::Select(_)
+            | StatementLayout::Values(_)
+            | StatementLayout::CreateTable(_)
+            | StatementLayout::AlterTable(_) => {}
         }
     }
 

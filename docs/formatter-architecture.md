@@ -39,6 +39,7 @@ src/formatter/
 ├── semantic_block.rs           planning orchestration and query/expression rules
 ├── semantic_block/
 │   ├── statements.rs           INSERT/UPDATE/DELETE/MERGE planners
+│   ├── ddl.rs                  VALUES and DDL planners
 │   ├── lists.rs                shared list and parenthesized-argument planning
 │   └── render.rs               casing, spacing, and token rendering
 ├── tokens.rs                   exact scanner tokens and authored gaps
@@ -95,6 +96,10 @@ pub(super) enum StatementSpec {
     Update(UpdateSpec),
     Delete(DeleteSpec),
     Merge(MergeSpec),
+    Values(ValuesSpec),
+    CreateTable(CreateTableSpec),
+    CreateIndex(CreateIndexSpec),
+    AlterTable(AlterTableSpec),
 }
 ```
 
@@ -186,7 +191,11 @@ Examples of verified properties include:
 - OVERRIDING USER versus SYSTEM;
 - ON CONFLICT target/action shape and assignment count;
 - UPDATE/DELETE source, predicate, and RETURNING presence;
-- MERGE branch count, action kind, assignment/value cardinality, and conditions.
+- MERGE branch count, action kind, assignment/value cardinality, and conditions;
+- top-level VALUES row count;
+- CREATE TABLE element kind and count;
+- CREATE INDEX modifiers, key/include/option counts, and secondary clauses;
+- ALTER TABLE action count and syntactic action groups.
 
 A unit test deliberately constructs a contradictory `StatementSpec` and proves
 that layout binding returns an ownership safety failure.
@@ -213,6 +222,9 @@ match node {
     NodeEnum::UpdateStmt(update) => ...,
     NodeEnum::DeleteStmt(delete) => ...,
     NodeEnum::MergeStmt(merge) => ...,
+    NodeEnum::CreateStmt(table) => ...,
+    NodeEnum::IndexStmt(index) => ...,
+    NodeEnum::AlterTableStmt(alter) => ...,
     _ => Err("unimplemented PostgreSQL statement family"),
 }
 ```
@@ -439,16 +451,16 @@ binder, then reuses existing clause, list, predicate, CASE, CTE, and writer
 logic. A new statement family adds one exhaustive `StatementSpec` and
 `StatementLayout` variant. Existing families do not need to be rewritten.
 
-The architecture is now exercised by SELECT, INSERT, UPDATE, DELETE, and
-MERGE. The latest syntax tranche adds INSERT SELECT/OVERRIDING/DEFAULT VALUES,
-shared DML WITH, grouping/sorting/pagination clauses, general set operations,
-and fixture-backed MERGE branches without altering older family planners.
+The architecture is now exercised by SELECT, INSERT, UPDATE, DELETE, MERGE,
+top-level VALUES, CREATE TABLE, CREATE INDEX, and ALTER TABLE. Query ownership
+also covers filtered and ordered aggregates, window bodies, named WINDOW
+clauses, and lateral derived/function sources. These additions extend exhaustive
+capability records and binders without altering older family planners.
 
 The next syntax extensions are:
 
-1. windows, FILTER, and named WINDOW clauses;
-2. lateral, derived, function, and multi-relation sources;
-3. top-level VALUES and richer data-modifying expressions/subqueries;
-4. CREATE TABLE, CREATE INDEX, and ALTER TABLE ownership;
-5. routine and PL/pgSQL body ownership;
-6. protected template ranges, property tests, and fuzzing.
+1. richer joined, function, and multi-relation DML/MERGE sources;
+2. richer CREATE TABLE variants, views, and additional ALTER ownership;
+3. routine and PL/pgSQL body ownership;
+4. PostgreSQL arrays, JSON expressions, and additional expression families;
+5. protected template ranges, property tests, and fuzzing.

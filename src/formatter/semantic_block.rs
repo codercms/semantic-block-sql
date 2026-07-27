@@ -13,10 +13,12 @@ use super::{
     FormatDiagnostic, FormatOptions, FormatWarning, INDENT_WIDTH, NotEqualPolicy, SemicolonPolicy,
 };
 
+mod ddl;
 mod lists;
 mod render;
 mod statements;
 
+use ddl::{plan_alter_tables, plan_create_indexes, plan_create_tables, plan_values_statements};
 use lists::{parenthesized_lists, plan_keyword_list, plan_parenthesized_lists, plan_select_lists};
 use render::needs_space;
 pub(super) use render::{
@@ -139,6 +141,10 @@ pub(super) fn format(
     let updates = layout.updates().copied().collect::<Vec<_>>();
     let deletes = layout.deletes().copied().collect::<Vec<_>>();
     let merges = layout.merges().cloned().collect::<Vec<_>>();
+    let values = layout.values().cloned().collect::<Vec<_>>();
+    let create_tables = layout.create_tables().cloned().collect::<Vec<_>>();
+    let create_indexes = layout.create_indexes().cloned().collect::<Vec<_>>();
+    let alter_tables = layout.alter_tables().cloned().collect::<Vec<_>>();
     let parenthesized_lists =
         parenthesized_lists(&tokens, depths, parens, &cases, &inserts, &merges, options);
     let boolean_ranges = boolean_ranges(&tokens, depths, layout.predicates(), options);
@@ -150,6 +156,13 @@ pub(super) fn format(
         options,
     };
     let mut plan = LayoutPlan::new(tokens.len());
+
+    for span in layout.statement_spans().skip(1) {
+        let authored_lines = tokens[span.start].line_breaks_before;
+        if authored_lines > 0 {
+            plan.break_before(span.start, authored_lines.min(2), span.base_depth);
+        }
+    }
 
     let mut expanded_selects = plan_select_lists(
         &tokens,
@@ -165,6 +178,10 @@ pub(super) fn format(
     plan_update_statements(&context, &boolean_ranges, &updates, &mut plan);
     plan_delete_statements(&context, &boolean_ranges, &deletes, &mut plan);
     plan_merge_statements(&context, &merges, &mut plan);
+    plan_values_statements(&context, &values, &mut plan);
+    plan_create_tables(&context, &create_tables, &mut plan);
+    plan_create_indexes(&context, &create_indexes, &mut plan);
+    plan_alter_tables(&context, &alter_tables, &mut plan);
     plan_parenthesized_lists(
         &tokens,
         depths,
@@ -181,6 +198,7 @@ pub(super) fn format(
         &expanded_selects,
         &mut plan,
     );
+    plan_window_blocks(&context, layout.window_blocks(), &mut plan);
     plan_set_operations(layout.set_operations(), &mut plan);
     plan_booleans(&tokens, depths, &boolean_ranges, parens, &mut plan);
     plan_cases(&tokens, depths, &cases, &mut plan);
@@ -232,6 +250,47 @@ pub(super) fn format(
     }
 
     Ok(writer.finish(source.ends_with('\n')))
+}
+
+fn plan_window_blocks(
+    context: &PlanningContext<'_, '_>,
+    blocks: &[super::layout_ir::WindowBlock],
+    plan: &mut LayoutPlan,
+) {
+    for block in blocks {
+        let authored = context.tokens[block.open + 1..block.close]
+            .iter()
+            .any(|token| token.line_breaks_before > 0);
+        let width = compact_width(context.tokens, block.open, block.close + 1, context.options)
+            + block.base_depth * INDENT_WIDTH;
+        let has_multiple_sections = [block.partition_by, block.order_by, block.frame]
+            .into_iter()
+            .flatten()
+            .count()
+            > 1;
+        if !authored && !has_multiple_sections && width <= context.options.soft_line_width {
+            continue;
+        }
+        let indent = plan.indent_for(block.open, block.base_depth) + 1;
+        let first = block
+            .partition_by
+            .or(block.order_by)
+            .or(block.frame)
+            .unwrap_or(block.open + 1);
+        plan.break_before(first, 1, indent);
+        for boundary in [block.partition_by, block.order_by, block.frame]
+            .into_iter()
+            .flatten()
+        {
+            plan.break_before(boundary, 1, indent);
+        }
+        plan.set_indent(block.open + 1..block.close, indent);
+        plan.break_before(
+            block.close,
+            1,
+            plan.indent_for(block.open, block.base_depth),
+        );
+    }
 }
 
 fn terminal_semicolon_plan(
@@ -390,6 +449,12 @@ fn plan_query_clauses(
             continue;
         }
 
+        if let Some((_open, close)) = query.wrapper {
+            plan.break_before(select, 1, base_depth);
+            plan.set_indent(select..close, base_depth);
+            plan.break_before(close, 1, base_depth.saturating_sub(1));
+        }
+
         for boundary in query.clauses.ordered_boundaries(end) {
             if boundary < end {
                 plan.break_before(boundary, 1, base_depth);
@@ -407,6 +472,10 @@ fn plan_query_clauses(
             let by = clause + 1;
             let list_end = query.clauses.next_after(clause, end);
             plan_keyword_list(context, by, list_end, base_depth, false, plan);
+        }
+        if let Some(window) = query.clauses.window {
+            let list_end = query.clauses.next_after(window, end);
+            plan_keyword_list(context, window, list_end, base_depth, false, plan);
         }
     }
 }

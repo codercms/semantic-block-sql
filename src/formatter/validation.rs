@@ -1,8 +1,9 @@
 use super::FormatDiagnostic;
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    CmdType, DeleteStmt, InsertStmt, MergeMatchKind, MergeStmt, Node, OnConflictAction,
-    OverridingKind, RawStmt, SelectStmt, SetOperation, UpdateStmt,
+    AlterTableStmt, AlterTableType, CmdType, ColumnDef, ConstrType, Constraint, CreateStmt,
+    DeleteStmt, IndexStmt, InsertStmt, MergeMatchKind, MergeStmt, Node, ObjectType, OnCommitAction,
+    OnConflictAction, OverridingKind, RawStmt, SelectStmt, SetOperation, UpdateStmt,
 };
 use pg_query::{Context, NodeRef};
 mod equivalence;
@@ -10,9 +11,10 @@ mod equivalence;
 pub use equivalence::validate_equivalent;
 
 use super::ownership::{
-    ConflictActionSpec, ConflictSpec, DeleteSpec, InsertSourceSpec, InsertSpec, MergeActionSpec,
-    MergeBranchSpec, MergeSpec, OverrideSpec, SelectSpec, StatementSpec, SupportedDocument,
-    UpdateSpec, source_statement,
+    AlterTableActionGroup, AlterTableSpec, ConflictActionSpec, ConflictSpec, CreateIndexSpec,
+    CreateTableElementSpec, CreateTableSpec, DeleteSpec, InsertSourceSpec, InsertSpec,
+    MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, SelectSpec, StatementSpec,
+    SupportedDocument, UpdateSpec, ValuesSpec, source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -63,10 +65,13 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
         .ok_or("empty PostgreSQL statement")?;
 
     match node {
-        NodeEnum::SelectStmt(select) => {
-            let spec = validate_select(select, false)?;
-            Ok(StatementSpec::Select(spec))
+        NodeEnum::SelectStmt(select) if is_values_select_shape(select) => {
+            validate_values_select(select)?;
+            Ok(StatementSpec::Values(ValuesSpec {
+                rows: select.values_lists.len(),
+            }))
         }
+        NodeEnum::SelectStmt(select) => Ok(StatementSpec::Select(validate_select(select, false)?)),
         NodeEnum::InsertStmt(insert) => {
             let spec = validate_insert(insert)?;
             Ok(StatementSpec::Insert(spec))
@@ -83,13 +88,304 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
             let spec = validate_merge(merge)?;
             Ok(StatementSpec::Merge(spec))
         }
-        NodeEnum::CreateStmt(_) => Err("CREATE TABLE statement"),
-        NodeEnum::IndexStmt(_) => Err("CREATE INDEX statement"),
-        NodeEnum::AlterTableStmt(_) => Err("ALTER TABLE statement"),
+        NodeEnum::CreateStmt(create) => {
+            Ok(StatementSpec::CreateTable(validate_create_table(create)?))
+        }
+        NodeEnum::IndexStmt(index) => Ok(StatementSpec::CreateIndex(validate_create_index(index)?)),
+        NodeEnum::AlterTableStmt(alter) => {
+            Ok(StatementSpec::AlterTable(validate_alter_table(alter)?))
+        }
         NodeEnum::CreateFunctionStmt(_) => Err("function or procedure definition"),
         NodeEnum::DoStmt(_) => Err("DO block"),
         _ => Err("unimplemented PostgreSQL statement family"),
     }
+}
+
+fn validate_values_select(select: &SelectStmt) -> Result<(), &'static str> {
+    if !is_values_select_shape(select) || select.values_lists.is_empty() {
+        return Err("invalid VALUES statement");
+    }
+    validate_select_fields(select, true)?;
+    for row in &select.values_lists {
+        let row = match row.node.as_ref() {
+            Some(NodeEnum::List(row)) => row,
+            _ => return Err("unrecognized VALUES row"),
+        };
+        if row.items.is_empty() {
+            return Err("empty VALUES row");
+        }
+        for value in &row.items {
+            validate_ddl_expression(value)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'static str> {
+    if create.relation.is_none() {
+        return Err("CREATE TABLE without a relation");
+    }
+    if !create.inh_relations.is_empty() {
+        return Err("CREATE TABLE INHERITS clause");
+    }
+    if create.partbound.is_some() || create.partspec.is_some() {
+        return Err("partitioned CREATE TABLE");
+    }
+    if create.of_typename.is_some() {
+        return Err("CREATE TABLE OF type");
+    }
+    if !create.constraints.is_empty() {
+        return Err("transformed CREATE TABLE constraints");
+    }
+    if !create.options.is_empty() {
+        return Err("CREATE TABLE storage parameters");
+    }
+    if OnCommitAction::try_from(create.oncommit).unwrap_or(OnCommitAction::Undefined)
+        != OnCommitAction::OncommitNoop
+    {
+        return Err("CREATE TABLE ON COMMIT clause");
+    }
+    if !create.tablespacename.is_empty() || !create.access_method.is_empty() {
+        return Err("CREATE TABLE access method or tablespace");
+    }
+    if create.table_elts.is_empty() {
+        return Err("CREATE TABLE without columns or constraints");
+    }
+
+    let mut elements = Vec::with_capacity(create.table_elts.len());
+    for element in &create.table_elts {
+        match element.node.as_ref() {
+            Some(NodeEnum::ColumnDef(column)) => {
+                validate_column_def(column)?;
+                elements.push(CreateTableElementSpec::Column);
+            }
+            Some(NodeEnum::Constraint(constraint)) => {
+                validate_constraint(constraint)?;
+                elements.push(CreateTableElementSpec::Constraint);
+            }
+            Some(NodeEnum::TableLikeClause(_)) => return Err("CREATE TABLE LIKE clause"),
+            _ => return Err("unrecognized CREATE TABLE element"),
+        }
+    }
+
+    Ok(CreateTableSpec {
+        if_not_exists: create.if_not_exists,
+        elements,
+    })
+}
+
+fn validate_create_index(index: &IndexStmt) -> Result<CreateIndexSpec, &'static str> {
+    if index.relation.is_none() {
+        return Err("CREATE INDEX without a relation");
+    }
+    if index.index_params.is_empty() {
+        return Err("CREATE INDEX without key expressions");
+    }
+    if index.primary
+        || index.isconstraint
+        || index.deferrable
+        || index.initdeferred
+        || index.transformed
+        || !index.exclude_op_names.is_empty()
+    {
+        return Err("internal or constraint-backed CREATE INDEX");
+    }
+
+    for parameter in &index.index_params {
+        validate_index_element(parameter, false)?;
+    }
+    for parameter in &index.index_including_params {
+        validate_index_element(parameter, true)?;
+    }
+    for option in &index.options {
+        match option.node.as_ref() {
+            Some(NodeEnum::DefElem(option)) => {
+                if let Some(value) = option.arg.as_deref() {
+                    validate_ddl_expression(value)?;
+                }
+            }
+            _ => return Err("unrecognized CREATE INDEX storage parameter"),
+        }
+    }
+    if let Some(predicate) = index.where_clause.as_deref() {
+        validate_ddl_expression(predicate)?;
+    }
+
+    Ok(CreateIndexSpec {
+        unique: index.unique,
+        concurrent: index.concurrent,
+        if_not_exists: index.if_not_exists,
+        key_items: index.index_params.len(),
+        include_items: index.index_including_params.len(),
+        options: index.options.len(),
+        has_tablespace: !index.table_space.is_empty(),
+        has_where: index.where_clause.is_some(),
+    })
+}
+
+fn validate_index_element(element: &Node, include: bool) -> Result<(), &'static str> {
+    let element = match element.node.as_ref() {
+        Some(NodeEnum::IndexElem(element)) => element,
+        _ => return Err("unrecognized CREATE INDEX element"),
+    };
+    if include {
+        if element.name.is_empty()
+            || element.expr.is_some()
+            || !element.collation.is_empty()
+            || !element.opclass.is_empty()
+            || !element.opclassopts.is_empty()
+        {
+            return Err("complex CREATE INDEX INCLUDE element");
+        }
+    } else if element.name.is_empty() && element.expr.is_none() {
+        return Err("empty CREATE INDEX key element");
+    }
+    if let Some(expression) = element.expr.as_deref() {
+        validate_ddl_expression(expression)?;
+    }
+    for option in &element.opclassopts {
+        validate_ddl_expression(option)?;
+    }
+    Ok(())
+}
+
+fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'static str> {
+    if alter.relation.is_none() {
+        return Err("ALTER TABLE without a relation");
+    }
+    if ObjectType::try_from(alter.objtype).unwrap_or(ObjectType::Undefined)
+        != ObjectType::ObjectTable
+    {
+        return Err("non-table ALTER statement");
+    }
+    if alter.cmds.is_empty() {
+        return Err("ALTER TABLE without actions");
+    }
+
+    let mut action_groups = Vec::with_capacity(alter.cmds.len());
+    for command in &alter.cmds {
+        let command = match command.node.as_ref() {
+            Some(NodeEnum::AlterTableCmd(command)) => command,
+            _ => return Err("unrecognized ALTER TABLE action"),
+        };
+        let subtype =
+            AlterTableType::try_from(command.subtype).unwrap_or(AlterTableType::Undefined);
+        let group = alter_action_group(subtype)?;
+        if let Some(definition) = command.def.as_deref() {
+            match definition.node.as_ref() {
+                Some(NodeEnum::ColumnDef(column)) => validate_column_def(column)?,
+                Some(NodeEnum::Constraint(constraint)) => validate_constraint(constraint)?,
+                Some(_) => validate_ddl_expression(definition)?,
+                None => return Err("empty ALTER TABLE action definition"),
+            }
+        }
+        action_groups.push(group);
+    }
+
+    Ok(AlterTableSpec {
+        if_exists: alter.missing_ok,
+        action_groups,
+    })
+}
+
+fn alter_action_group(subtype: AlterTableType) -> Result<AlterTableActionGroup, &'static str> {
+    use AlterTableActionGroup::{Add, Alter, Drop, Other, Set};
+    use AlterTableType::*;
+
+    match subtype {
+        AtAddColumn | AtAddConstraint | AtAddIndexConstraint | AtAddInherit | AtAddOf
+        | AtAttachPartition | AtAddIdentity => Ok(Add),
+        AtColumnDefault
+        | AtDropNotNull
+        | AtSetNotNull
+        | AtSetExpression
+        | AtDropExpression
+        | AtCheckNotNull
+        | AtAlterConstraint
+        | AtValidateConstraint
+        | AtAlterColumnType
+        | AtAlterColumnGenericOptions
+        | AtSetIdentity
+        | AtGenericOptions => Ok(Alter),
+        AtDropColumn
+        | AtDropConstraint
+        | AtDropCluster
+        | AtDropInherit
+        | AtDropOf
+        | AtDropIdentity
+        | AtDetachPartition
+        | AtDetachPartitionFinalize => Ok(Drop),
+        AtSetStatistics | AtSetOptions | AtResetOptions | AtSetStorage | AtSetCompression
+        | AtChangeOwner | AtClusterOn | AtSetLogged | AtSetUnLogged | AtSetAccessMethod
+        | AtSetTableSpace | AtSetRelOptions | AtResetRelOptions | AtReplaceRelOptions
+        | AtEnableTrig | AtEnableAlwaysTrig | AtEnableReplicaTrig | AtDisableTrig
+        | AtEnableTrigAll | AtDisableTrigAll | AtEnableTrigUser | AtDisableTrigUser
+        | AtEnableRule | AtEnableAlwaysRule | AtEnableReplicaRule | AtDisableRule
+        | AtReplicaIdentity | AtEnableRowSecurity | AtDisableRowSecurity | AtForceRowSecurity
+        | AtNoForceRowSecurity => Ok(Set),
+        AtDropOids => Ok(Other),
+        Undefined
+        | AtAddColumnToView
+        | AtCookedColumnDefault
+        | AtAddIndex
+        | AtReAddIndex
+        | AtReAddConstraint
+        | AtReAddDomainConstraint
+        | AtReAddComment
+        | AtReAddStatistics => Err("internal or unreviewed ALTER TABLE action"),
+    }
+}
+
+fn validate_column_def(column: &ColumnDef) -> Result<(), &'static str> {
+    if column.colname.is_empty() || column.type_name.is_none() {
+        return Err("CREATE/ALTER column without a name or type");
+    }
+    if !column.fdwoptions.is_empty() {
+        return Err("foreign-table column options");
+    }
+    if let Some(default) = column.raw_default.as_deref() {
+        validate_ddl_expression(default)?;
+    }
+    if column.cooked_default.is_some() {
+        return Err("transformed column default");
+    }
+    for constraint in &column.constraints {
+        let constraint = match constraint.node.as_ref() {
+            Some(NodeEnum::Constraint(constraint)) => constraint,
+            _ => return Err("unrecognized column constraint"),
+        };
+        validate_constraint(constraint)?;
+    }
+    Ok(())
+}
+
+fn validate_constraint(constraint: &Constraint) -> Result<(), &'static str> {
+    if ConstrType::try_from(constraint.contype).unwrap_or(ConstrType::Undefined)
+        == ConstrType::Undefined
+    {
+        return Err("unknown table constraint");
+    }
+    if let Some(expression) = constraint.raw_expr.as_deref() {
+        validate_ddl_expression(expression)?;
+    }
+    if let Some(predicate) = constraint.where_clause.as_deref() {
+        validate_ddl_expression(predicate)?;
+    }
+    for exclusion in &constraint.exclusions {
+        validate_ddl_expression(exclusion)?;
+    }
+    Ok(())
+}
+
+fn validate_ddl_expression(expression: &Node) -> Result<(), &'static str> {
+    let root = expression.node.as_ref().ok_or("empty DDL expression")?;
+    for (node, _, context, _) in root.nodes() {
+        if matches!(node, NodeRef::SubLink(_)) {
+            return Err("subquery in DDL expression");
+        }
+        validate_nested_node(node, context)?;
+    }
+    Ok(())
 }
 
 fn validate_merge(merge: &MergeStmt) -> Result<MergeSpec, &'static str> {
@@ -523,15 +819,13 @@ fn validate_select(
     Ok(SelectSpec {
         has_with: select.with_clause.is_some(),
         set_operations,
+        named_windows: select.window_clause.len(),
     })
 }
 
 fn validate_select_fields(select: &SelectStmt, allow_values: bool) -> Result<(), &'static str> {
     if select.into_clause.is_some() {
         return Err("SELECT INTO clause");
-    }
-    if !select.window_clause.is_empty() {
-        return Err("WINDOW clause");
     }
     if !allow_values && !select.values_lists.is_empty() {
         return Err("VALUES statement");
@@ -548,17 +842,6 @@ fn validate_nested_node(node: NodeRef<'_>, context: Context) -> Result<(), &'sta
         NodeRef::SubLink(_) if context == Context::DML => {
             Err("subquery in data-modifying statement")
         }
-        NodeRef::FuncCall(call)
-            if !call.agg_order.is_empty()
-                || call.agg_filter.is_some()
-                || call.over.is_some()
-                || call.agg_within_group =>
-        {
-            Err("ordered, filtered, or window function call")
-        }
-        NodeRef::RangeSubselect(range) if range.lateral => Err("LATERAL subquery"),
-        NodeRef::RangeFunction(range) if range.lateral => Err("LATERAL function"),
-        NodeRef::RangeTableFunc(range) if range.lateral => Err("LATERAL table function"),
         NodeRef::JsonTable(_) => Err("JSON_TABLE expression"),
         _ => Ok(()),
     }
@@ -566,9 +849,15 @@ fn validate_nested_node(node: NodeRef<'_>, context: Context) -> Result<(), &'sta
 
 fn validate_nested_select(select: &SelectStmt) -> Result<(), &'static str> {
     let values_shape = is_values_select_shape(select);
-    validate_select_fields(select, values_shape)?;
-    if !select.values_lists.is_empty() && !values_shape {
+    if values_shape {
+        return validate_values_select(select);
+    }
+    validate_select_fields(select, false)?;
+    if !select.values_lists.is_empty() {
         return Err("invalid VALUES expression");
+    }
+    if let Some(with_clause) = &select.with_clause {
+        validate_with_clause(with_clause)?;
     }
 
     match SetOperation::try_from(select.op).unwrap_or(SetOperation::Undefined) {

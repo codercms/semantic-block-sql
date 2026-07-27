@@ -1,17 +1,20 @@
 use pg_query::protobuf::Token;
 
 use super::FormatDiagnostic;
-use super::ownership::{StatementSpec, SupportedDocument, bind_token_statements};
+use super::ownership::{
+    AlterTableActionGroup, CreateTableElementSpec, StatementSpec, SupportedDocument, TokenRange,
+    bind_token_statements,
+};
 use super::structure::TokenStructure;
 use super::tokens::SqlToken;
 
 mod query;
 mod statement;
 
-use self::query::{bind_predicates, bind_queries, bind_set_operations};
+use self::query::{bind_predicates, bind_queries, bind_set_operations, bind_window_blocks};
 use self::statement::{
-    bind_body_start, bind_delete, bind_insert, bind_merge, bind_select, bind_update,
-    bind_with_block,
+    bind_alter_table, bind_body_start, bind_create_index, bind_create_table, bind_delete,
+    bind_insert, bind_merge, bind_select, bind_update, bind_values, bind_with_block,
 };
 
 /// Generic token span owned by one PostgreSQL construct.
@@ -75,6 +78,7 @@ pub(super) struct QueryBlock {
     pub list_start: usize,
     pub end: usize,
     pub base_depth: usize,
+    pub wrapper: Option<(usize, usize)>,
     pub clauses: QueryClauses,
 }
 
@@ -83,6 +87,17 @@ pub(super) struct QueryBlock {
 pub(super) struct SetOperationBlock {
     pub operator: usize,
     pub next_branch: usize,
+    pub base_depth: usize,
+}
+
+/// Parenthesized window or ordered-aggregate specification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct WindowBlock {
+    pub open: usize,
+    pub close: usize,
+    pub partition_by: Option<usize>,
+    pub order_by: Option<usize>,
+    pub frame: Option<usize>,
     pub base_depth: usize,
 }
 
@@ -104,6 +119,7 @@ pub(super) enum PredicateKind {
     ConflictAction,
     MergeOn,
     MergeWhen,
+    IndexWhere,
 }
 
 /// Predicate content owned by a clause introducer.
@@ -211,14 +227,63 @@ pub(super) struct MergeBlock {
     pub returning: Option<usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ValuesBlock {
+    pub span: TokenSpan,
+    pub keyword: usize,
+    pub rows: Vec<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CreateTableItem {
+    pub range: TokenRange,
+    pub kind: CreateTableElementSpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CreateTableBlock {
+    pub span: TokenSpan,
+    pub open: usize,
+    pub close: usize,
+    pub items: Vec<CreateTableItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CreateIndexBlock {
+    pub span: TokenSpan,
+    pub key_open: usize,
+    pub key_close: usize,
+    pub key_items: Vec<TokenRange>,
+    pub include: Option<(usize, usize, usize, Vec<TokenRange>)>,
+    pub with_options: Option<(usize, usize, usize, Vec<TokenRange>)>,
+    pub tablespace: Option<usize>,
+    pub where_clause: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct AlterTableAction {
+    pub range: TokenRange,
+    pub group: AlterTableActionGroup,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AlterTableBlock {
+    pub span: TokenSpan,
+    pub actions: Vec<AlterTableAction>,
+}
+
 /// Exhaustive top-level layout dispatcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum StatementLayout {
     Select(TokenSpan),
+    Values(ValuesBlock),
     Insert(InsertBlock),
     Update(UpdateBlock),
     Delete(DeleteBlock),
     Merge(MergeBlock),
+    CreateTable(CreateTableBlock),
+    CreateIndex(CreateIndexBlock),
+    AlterTable(AlterTableBlock),
 }
 
 /// Token-bound ownership IR consumed by all layout planners.
@@ -229,6 +294,7 @@ pub(super) struct LayoutDocument {
     with_blocks: Vec<WithBlock>,
     predicates: Vec<PredicateBlock>,
     set_operations: Vec<SetOperationBlock>,
+    window_blocks: Vec<WindowBlock>,
 }
 
 impl LayoutDocument {
@@ -261,6 +327,9 @@ impl LayoutDocument {
                     body_start,
                     spec,
                 )?),
+                StatementSpec::Values(spec) => StatementLayout::Values(bind_values(
+                    tokens, structure, statement, body_start, spec,
+                )?),
                 StatementSpec::Insert(spec) => StatementLayout::Insert(bind_insert(
                     tokens, structure, statement, body_start, spec,
                 )?),
@@ -281,12 +350,26 @@ impl LayoutDocument {
                 StatementSpec::Merge(spec) => StatementLayout::Merge(bind_merge(
                     tokens, structure, statement, body_start, spec,
                 )?),
+                StatementSpec::CreateTable(spec) => StatementLayout::CreateTable(
+                    bind_create_table(tokens, structure, statement, body_start, spec)?,
+                ),
+                StatementSpec::CreateIndex(spec) => StatementLayout::CreateIndex(
+                    bind_create_index(tokens, structure, statement, body_start, spec)?,
+                ),
+                StatementSpec::AlterTable(spec) => StatementLayout::AlterTable(bind_alter_table(
+                    tokens,
+                    structure.depths(),
+                    statement,
+                    body_start,
+                    spec,
+                )?),
             });
         }
 
         let queries = bind_queries(tokens, structure, &token_statements);
         let predicates = bind_predicates(tokens, structure.depths(), &queries, &statements);
         let set_operations = bind_set_operations(tokens, structure.depths(), &token_statements);
+        let window_blocks = bind_window_blocks(tokens, structure, &queries);
 
         Ok(Self {
             statements,
@@ -294,6 +377,7 @@ impl LayoutDocument {
             with_blocks,
             predicates,
             set_operations,
+            window_blocks,
         })
     }
 
@@ -311,6 +395,24 @@ impl LayoutDocument {
 
     pub fn set_operations(&self) -> &[SetOperationBlock] {
         &self.set_operations
+    }
+
+    pub fn window_blocks(&self) -> &[WindowBlock] {
+        &self.window_blocks
+    }
+
+    pub fn statement_spans(&self) -> impl Iterator<Item = TokenSpan> + '_ {
+        self.statements.iter().map(|statement| match statement {
+            StatementLayout::Select(span) => *span,
+            StatementLayout::Values(block) => block.span,
+            StatementLayout::Insert(block) => block.span,
+            StatementLayout::Update(block) => block.span,
+            StatementLayout::Delete(block) => block.span,
+            StatementLayout::Merge(block) => block.span,
+            StatementLayout::CreateTable(block) => block.span,
+            StatementLayout::CreateIndex(block) => block.span,
+            StatementLayout::AlterTable(block) => block.span,
+        })
     }
 
     pub fn inserts(&self) -> impl Iterator<Item = &InsertBlock> {
@@ -345,6 +447,42 @@ impl LayoutDocument {
             .iter()
             .filter_map(|statement| match statement {
                 StatementLayout::Merge(block) => Some(block),
+                _ => None,
+            })
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &ValuesBlock> {
+        self.statements
+            .iter()
+            .filter_map(|statement| match statement {
+                StatementLayout::Values(block) => Some(block),
+                _ => None,
+            })
+    }
+
+    pub fn create_tables(&self) -> impl Iterator<Item = &CreateTableBlock> {
+        self.statements
+            .iter()
+            .filter_map(|statement| match statement {
+                StatementLayout::CreateTable(block) => Some(block),
+                _ => None,
+            })
+    }
+
+    pub fn create_indexes(&self) -> impl Iterator<Item = &CreateIndexBlock> {
+        self.statements
+            .iter()
+            .filter_map(|statement| match statement {
+                StatementLayout::CreateIndex(block) => Some(block),
+                _ => None,
+            })
+    }
+
+    pub fn alter_tables(&self) -> impl Iterator<Item = &AlterTableBlock> {
+        self.statements
+            .iter()
+            .filter_map(|statement| match statement {
+                StatementLayout::AlterTable(block) => Some(block),
                 _ => None,
             })
     }
