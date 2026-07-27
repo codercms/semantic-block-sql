@@ -27,10 +27,10 @@ jobs:
 
           path = Path('.github/workflows/release-artifacts.yml')
           text = path.read_text()
-          suffix = '              --title "$TAG"\n'
-          if not text.endswith(suffix):
+          suffix = '              --title "$TAG"'
+          if not text.rstrip().endswith(suffix):
               raise SystemExit('unexpected release workflow ending')
-          path.write_text(text + '          fi\n')
+          path.write_text(text.rstrip() + '\n          fi\n')
           PY
 
           rm .github/workflows/_apply-release-publish-fix.yml
