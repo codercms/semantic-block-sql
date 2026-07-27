@@ -4,23 +4,19 @@
     "should_trigger": true
   },
   {
-    "query": "Can you clean up the indentation and line breaks in this SQL migration?",
+    "query": "Reformat this INSERT ON CONFLICT statement to our SQL style.",
     "should_trigger": true
   },
   {
-    "query": "Reformat this INSERT ON CONFLICT statement to our PostgreSQL house style.",
+    "query": "Clean up the formatting of this PL/pgSQL function.",
     "should_trigger": true
   },
   {
-    "query": "Make this CTE and window-function query readable, but do not optimize it.",
+    "query": "Format the SQL literals in this Go file without changing the Go code.",
     "should_trigger": true
   },
   {
-    "query": "Standardize the formatting of this PL/pgSQL DO block.",
-    "should_trigger": true
-  },
-  {
-    "query": "Please format these CREATE TABLE and CREATE INDEX statements.",
+    "query": "Format these CREATE TABLE and CREATE INDEX statements.",
     "should_trigger": true
   },
   {
@@ -28,19 +24,15 @@
     "should_trigger": false
   },
   {
-    "query": "Rewrite this correlated subquery as a join.",
+    "query": "Rewrite this subquery as a join.",
     "should_trigger": false
   },
   {
-    "query": "Design a database schema for a marketplace.",
+    "query": "Fix the syntax error in this SQL.",
     "should_trigger": false
   },
   {
-    "query": "Explain the difference between MERGE and ON CONFLICT.",
-    "should_trigger": false
-  },
-  {
-    "query": "Fix the SQL syntax error in this query.",
+    "query": "Design a schema for a marketplace.",
     "should_trigger": false
   },
   {

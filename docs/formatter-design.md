@@ -1,8 +1,8 @@
 # Formatter design
 
-Status: **Batch 2 formatter-core MVP complete**
+Status: **Runnable CLI and raw-Go MVP complete**
 
-Last updated: **2026-07-25**
+Last updated: **2026-07-26**
 
 ## Purpose
 
@@ -16,8 +16,39 @@ business-semantic grouping engine.
 
 ## Requirement precedence
 
-The initial technical handoff remains the detailed source of truth. The current
-project request clarifies or overrides it in these places:
+`docs/semantic-block-sql-fmt-check-core-spec.md` is the authoritative contract
+for formatter and style-checker behavior. The older handoff and style guide are
+historical design inputs where they do not conflict with that specification.
+The repository agent skill guides human/agent formatting but does not define a
+second machine contract.
+
+The current core specification supersedes earlier project decisions in these
+places:
+
+- terminal semicolons are controlled by `preserve` (default), `require`, or
+  `omit`;
+- `<>` is preserved by default and may become `!=` only under
+  `not_equal_policy = prefer_bang`;
+- the exact uppercase built-in whitelist includes `COUNT`, `SUM`, `AVG`,
+  `MIN`, `MAX`, `COALESCE`, `NULLIF`, `GREATEST`, `LEAST`, `NOW`, and
+  `EXTRACT`; all other unquoted functions remain lowercase;
+- four-space indentation, authored-group preservation, and blank-line/comment
+  boundaries are mandatory core behavior rather than optional style switches;
+- `check` must return rule-level diagnostics with ranges and fix metadata;
+- parse or unsupported-format failures return the original source unchanged
+  with diagnostics instead of partial output.
+
+The runnable CLI and raw-Go MVP predate this contract and are being reconciled
+batch by batch. Exact built-in casing, contextual `INTERVAL`, terminal-semicolon
+policy, default `<>` preservation, and final-newline preservation are now
+implemented. Rule-level diagnostics, fail-safe formatting results, mandatory
+four-space
+indentation, and mandatory authored boundaries are also available. Complete
+alternative-layout preservation remains to be reconciled. Explicit support
+classification now prevents unimplemented syntax from falling through to generic
+token normalization.
+
+Earlier project requests also clarified these application-level points:
 
 - Go interpreted strings are **disabled for MVP**. Raw backtick strings come
   first; interpreted strings require a separately proven
@@ -32,15 +63,45 @@ project request clarifies or overrides it in these places:
   interpreted_strings = false
   ```
 
-- Function names and type names are lowercase. Parser-recognized SQL constructs
-  such as `COALESCE`, `NULLIF`, `FILTER`, `OVER`, and `ARRAY` remain uppercase
-  as keyword-like constructs; ordinary calls such as `count`, `now`, and
-  `jsonb_build_object` are lowercase.
 - The original ZIP is retained as immutable provenance. The unpacked
   `.agent-skills/postgresql-sql-format/` directory is the active canonical
   skill.
 
 Any future ambiguity is recorded here before implementation.
+
+## Architecture hardening decisions
+
+The formatter uses a closed, compiler-checked ownership model rather than a
+runtime statement registry. `StatementSpec` carries the exact AST-validated
+capabilities for each supported top-level statement. Token binders must verify
+those capabilities before producing `StatementLayout` records.
+
+This resolves four earlier architecture risks:
+
+- validation and layout can no longer independently claim different clause
+  shapes without producing an ownership safety failure;
+- statement token ranges are always half-open, with the terminal semicolon
+  stored separately;
+- nested SELECT/VALUES validation uses deterministic protobuf shape checks
+  rather than in-memory pointer identity;
+- layout binding, statement planning, list planning, rendering, and semantic
+  equivalence now live in focused modules instead of two growing monoliths.
+
+Individual clause positions remain indices into the one immutable scanner-token
+slice. Only ranges are wrapped because boundary semantics are the realistic
+source of index bugs; capability/cardinality verification protects clause
+positions without introducing pervasive conversion wrappers.
+
+The implemented architecture and extension workflow are documented in
+[`formatter-architecture.md`](formatter-architecture.md) and
+[`formatter-extension-guide.md`](formatter-extension-guide.md).
+
+Relation-bearing DML and MERGE statements now share one recursive source
+capability model. Validation records ordinary relations, SELECT-derived tables,
+simple set-returning functions, and join trees; token binding must reproduce the
+same top-level source kinds and join predicate cardinalities. `CREATE VIEW` and
+`CREATE MATERIALIZED VIEW` use separate capability records so view suffixes and
+materialized-view population clauses cannot leak into SELECT ownership.
 
 ## Non-negotiable invariants
 
@@ -51,7 +112,7 @@ Formatting may change:
 - whitespace and indentation;
 - line breaks;
 - SQL keyword and special-value casing;
-- PostgreSQL lexical preference `<>` to `!=`;
+- PostgreSQL `<>` to `!=` only under the configured `prefer_bang` policy;
 - comment position only when attachment to the same syntax node is preserved.
 
 Formatting must not:
@@ -101,12 +162,12 @@ Default widths:
 
 ```toml
 [layout]
-indent_width = 4
 soft_line_width = 120
 hard_line_width = 160
-preserve_list_groups = true
-preserve_blank_lines = true
 ```
+
+Indentation is fixed at four spaces. Authored list groups, blank lines, and
+comment boundaries are mandatory formatter invariants rather than options.
 
 ### Width semantics
 
@@ -137,9 +198,9 @@ a primary backend-selection criterion.
 
 Batch 2 implements this model for `SELECT` result lists and parenthesized
 function-argument lists. Scanner gap metadata records authored line and blank
-line boundaries without adding another parser. Completely one-line lists are
-packed deterministically to soft width; authored groups are retained through
-soft width and split only at comma boundaries when hard width requires it.
+line boundaries without adding another parser. Completely one-line lists that must expand are rendered one item per line;
+authored groups are retained through soft width and split only at comma
+boundaries when hard width requires it.
 
 Comments remain in the scanner token order. Line comments always retain a
 physical line ending so they cannot consume a following token. Blank lines and
@@ -159,13 +220,19 @@ necessarily exceeds hard width, formatting succeeds and returns
 ```rust
 FormatOptions {
     style,
-    indent_width,
     soft_line_width,
     hard_line_width,
-    preserve_list_groups,
-    preserve_blank_lines,
+    semicolon_policy,
+    not_equal_policy,
+    syntax_diagnostics,
 }
 ```
+
+The core-policy defaults are `semicolon_policy = preserve`,
+`not_equal_policy = preserve`, and `syntax_diagnostics = parser_available`.
+Formatting policies are applied by the token-preserving renderer, while parser,
+scanner, safety-gate, and hard-width failures are exposed through the shared
+diagnostic result model without returning partial output.
 
 ### Connectors do not own empty levels
 
@@ -224,10 +291,10 @@ src/
 ├── config.rs
 ├── discover.rs
 ├── directives.rs
-├── diagnostics.rs
 ├── diff.rs
 ├── rewrite.rs
 ├── formatter/
+│   ├── diagnostics.rs
 │   ├── mod.rs
 │   ├── semantic_block.rs
 │   └── validation.rs
@@ -248,18 +315,44 @@ directions may not:
 
 ## Formatter facade
 
-The canonical API should evolve around:
+The specification-facing APIs are fail-safe value results:
 
 ```rust
-format_sql(
+format_sql_result(
     source: &str,
     options: &FormatOptions,
-) -> Result<FormattedSql, FormatDiagnostic>
+) -> FormatResult
+
+check_sql(
+    source: &str,
+    options: &FormatOptions,
+) -> CheckResult
 ```
 
-`FormattedSql` should retain enough information for diagnostics and callers,
-for example changed/not-changed state and normalized output. It must not write
-files.
+`FormatResult` contains `output`, `changed`, and rule-level diagnostics. Parse,
+scan, equivalence, idempotence, and hard-width failures retain the original
+source and return a non-fixable diagnostic. `CheckResult` uses the same analysis
+and is compliant only when no formatting change or error diagnostic exists.
+
+The older strict `format_sql(...) -> Result<FormattedSql, FormatDiagnostic>`
+entry point remains for internal application layers that must abort a complete
+file or Go host rewrite. Its successful result now carries the same diagnostics
+plus the legacy width-warning field. It must not write files.
+
+Each diagnostic carries:
+
+```text
+rule_id
+severity
+message
+source_range   # UTF-8 byte range in the original source
+fix_available
+```
+
+SQL directive ranges are shifted to document offsets, CRLF normalization is
+mapped back to original byte offsets, and Go-host diagnostics are conservatively
+attributed to the complete owning raw literal until exact envelope mapping is
+implemented.
 
 The API must serve:
 
@@ -269,8 +362,17 @@ The API must serve:
 - tests;
 - future VS Code and IDEA adapters.
 
-Batch 2 keeps this facade pure and adds non-fatal width warnings to
-`FormattedSql`; it still performs no filesystem writes.
+The facade remains pure and performs no filesystem writes. The CLI renders
+successful style diagnostics as `path:start-end: severity[rule_id]: message`;
+`fmt` and `diff` suppress fixed style errors but still surface warnings.
+
+## Code architecture
+
+The implemented parser, ownership IR, token model, layout planner, writer,
+extension protocol, and forward-compatibility behavior are documented in
+[`formatter-architecture.md`](formatter-architecture.md). The architecture
+document describes code structure; this design document remains the record of
+behavioral decisions.
 
 ## PostgreSQL backend strategy
 
@@ -286,8 +388,52 @@ Semantic Block layout is the only project-specific formatting layer.
 
 The formatter validates canonical PostgreSQL parse-tree equality after removing
 only source-location fields. It separately compares protected token text and
-order, then requires a byte-identical second formatting pass. See
-`docs/batch-1-backend-spike.md` for evidence and the dependency update policy.
+order, then requires a byte-identical second formatting pass.
+
+Before layout, the same PostgreSQL AST is classified against the fixture-backed
+support boundary. Unsupported statement families, unowned clauses, advanced
+aggregate/window forms, lateral or derived sources, and unknown future protobuf
+shapes return `syntax.unsupported` over the original statement range. General
+set operations and the recursive CTE `UNION ALL` shape are now supported through
+owned branch records. The classifier is extended in the same batch that
+introduces each new statement planner; generic token normalization is never the
+fallback for unsupported syntax.
+
+The INSERT planner owns VALUES, source SELECT, DEFAULT VALUES, OVERRIDING,
+RETURNING, and fixture-backed ON CONFLICT. Column lists, individual VALUES rows,
+RETURNING expressions, conflict targets, and `DO UPDATE SET` assignments share
+the source-aware list planner: short forms stay compact, authored groups remain
+stable, width-driven ungrouped lists expand one item per line, and complex rows
+may expand independently. `ON CONFLICT DO NOTHING` may remain compact; `DO
+UPDATE` separates the conflict target, action, `SET`, and action `WHERE`. A
+conflict-target predicate remains owned by ON CONFLICT, while the later
+predicate remains owned by the update action. SELECT-backed WITH clauses reuse
+the same `WithBlock` for SELECT, INSERT, UPDATE, DELETE, and MERGE.
+
+The UPDATE planner supports a target relation, simple named assignments,
+optional one-relation `FROM`, `WHERE`, and `RETURNING`. A short single-assignment
+statement remains compact. Once authored layout, width, `FROM`, or a complex
+predicate expands the statement, `SET` owns one assignment per line and the
+remaining clauses start at statement scope. `WITH`, `ONLY`, multi-column or
+subscripted assignment targets, multiple or joined FROM sources, and subqueries
+remain fail-safe unsupported shapes.
+
+The MERGE planner is a separate exhaustive statement variant because its branch
+ownership is grammar-specific. `MergeBlock` owns USING/ON, ordered WHEN
+branches, and RETURNING; each `MergeBranch` owns its optional condition and a
+closed `MergeAction` variant for DELETE, UPDATE SET, INSERT VALUES, or DO
+NOTHING. Blank lines separate branches, action introducers stay on the owner
+line, and existing list/predicate planners format nested assignments and values.
+The current safe subset accepts plain target/source relations and preserves
+derived or joined sources unchanged with `syntax.unsupported`.
+
+The DELETE planner supports a target relation, an optional single plain `USING`
+relation, `WHERE`, and `RETURNING`. Compact DELETE statements remain inline;
+`USING`, authored layout, width, or a complex predicate expands subsequent
+clauses at statement scope. `WITH`, `ONLY`, multiple or joined USING sources,
+derived sources, and subqueries remain fail-safe unsupported shapes.
+
+See `docs/batch-1-backend-spike.md` for evidence and the dependency update policy.
 
 See `docs/upstream-baseline.md`.
 
@@ -343,8 +489,10 @@ Rules:
 - SQL block-off regions remain byte-identical.
 - Nested, unmatched, or misplaced control directives are errors with spans.
 
-The detailed state machine and attachment rules are a Batch 4/5 deliverable
-before implementation.
+The CLI MVP implements the state machine above. SQL control directives must
+occupy their own lines. Go declaration directives are attached to supported
+CST owners through adjacent comment nodes. Unmatched, nested, conflicting, or
+misplaced directives fail the complete source without a write.
 
 ## CLI contract
 
@@ -368,7 +516,7 @@ Required options:
 --quiet
 ```
 
-Provisional exit codes:
+Stable CLI exit codes:
 
 | Code | Meaning |
 | --- | --- |
@@ -378,8 +526,8 @@ Provisional exit codes:
 | `3` | SQL or host-language parse/validation failure. |
 | `4` | Discovery, filesystem, or atomic rewrite failure. |
 
-Exit codes become stable when Batch 4 integration tests and CLI documentation
-land. Until then, changing them requires updating this table and the checklist.
+Changing these codes requires an explicit compatibility decision and updated
+integration tests.
 
 ## Discovery and ignore behavior
 
@@ -387,10 +535,12 @@ The default is recursive discovery of `.sql` and enabled host-language files
 while respecting `.gitignore`. `.semblockignore` adds gitignore-compatible
 project rules.
 
-Nested ignore semantics and precedence will follow the selected traversal
-library only after they are explicitly documented and tested. Hidden-file
-behavior must be configured deliberately because the `ignore` crate skips
-hidden paths by default.
+Discovery uses `ignore 0.4.31`. Custom `.semblockignore` files have higher
+precedence than ordinary ignore files; more deeply nested custom files win
+within that level. `.gitignore` is enabled by default for every traversed
+directory tree, including trees that are not Git repositories. Hidden paths and
+symlink traversal are disabled. An explicit file argument bypasses directory
+ignore matching and is processed.
 
 ## Rewrite validation
 
@@ -423,12 +573,14 @@ explicit integration tests.
 ```toml
 dialect = "postgresql"
 
+[format]
+semicolon_policy = "preserve"
+not_equal_policy = "preserve"
+syntax_diagnostics = "parser_available"
+
 [layout]
-indent_width = 4
 soft_line_width = 120
 hard_line_width = 160
-preserve_list_groups = true
-preserve_blank_lines = true
 
 [discovery]
 respect_gitignore = true
@@ -441,8 +593,15 @@ raw_strings = true
 interpreted_strings = false
 ```
 
-Configuration discovery, precedence, validation, and unknown-key behavior must
-be specified and tested in Batch 4.
+Four-space indentation and authored group, blank-line, and comment-boundary
+preservation are fixed core behavior. Obsolete configuration keys for those
+rules are rejected by strict TOML parsing.
+
+Configuration starts with built-in defaults, then applies the first
+`semblock.toml` found from the current directory upward. `--config` replaces
+that search with an explicit path. Unknown keys, invalid widths, unsupported
+dialects, path-like ignore filenames, and enabled interpreted Go strings are
+configuration errors.
 
 ## MVP non-goals
 
@@ -459,12 +618,12 @@ be specified and tested in Batch 4.
 
 ## Open decisions
 
-- Upstream contribution vs pinned fork vs vendoring of `libpgfmt`.
-- Strict validation policy for parse trees containing error nodes.
-- Structural equivalence checks beyond reparsing and lexical invariants.
-- Exact representation of authored group hints in the layout engine.
-- Cross-platform atomic replace behavior.
-- Nested `.semblockignore` behavior and precedence.
-- Diagnostic output format for editor integration.
+- broader Batch 3 statement layout coverage;
+- Windows/macOS atomic replacement verification beyond the Unix integration
+  gate;
+- machine-readable diagnostic output for editor integration;
+- a proven interpreted-Go-string decode/format/re-encode round trip;
+- formatting-worker parallelism after measurement (project discovery is
+  already bounded by `--jobs`).
 
 No open decision authorizes bypassing the safety invariants.

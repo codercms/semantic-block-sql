@@ -34,7 +34,7 @@ fn preserves_authored_list_groups_blank_lines_and_comment_boundaries() {
 }
 
 #[test]
-fn packs_one_line_lists_to_soft_width_and_never_exceeds_hard_width() {
+fn expands_one_line_lists_to_one_item_per_line_and_obeys_hard_width() {
     let options = FormatOptions {
         soft_line_width: 52,
         hard_line_width: 68,
@@ -49,6 +49,7 @@ fn packs_one_line_lists_to_soft_width_and_never_exceeds_hard_width() {
         output.lines().all(|line| line.chars().count() <= 68),
         "all breakable lines stay within the hard limit"
     );
+    assert!(output.contains("    item.id,\n    item.kp_identifier,"));
 }
 
 #[test]
@@ -123,7 +124,7 @@ fn separates_recursive_cte_anchor_and_recursive_terms() {
 }
 
 #[test]
-fn list_hint_preservation_can_be_disabled_without_disabling_safety() {
+fn authored_list_groups_are_mandatory() {
     let source = "\
 SELECT
     item.id,
@@ -131,27 +132,19 @@ SELECT
     item.imdb_id
 FROM public.items item;
 ";
-    let options = FormatOptions {
-        preserve_list_groups: false,
-        ..FormatOptions::default()
-    };
-    let output = format_sql(source, &options)
+    let output = format_sql(source, &FormatOptions::default())
         .expect("format succeeds")
         .output;
 
-    assert!(output.contains("    item.id, item.kp_id, item.imdb_id"));
+    assert_eq!(output, source);
 }
 
 #[test]
-fn blank_line_preservation_can_be_disabled() {
-    let options = FormatOptions {
-        preserve_blank_lines: false,
-        ..FormatOptions::default()
-    };
-    let output = format_fixture("authored-groups", &options);
+fn blank_lines_and_comment_boundaries_are_mandatory() {
+    let output = format_fixture("authored-groups", &FormatOptions::default());
 
-    assert!(!output.contains("item.title_orig,\n\n"));
-    assert!(output.contains("item.title_orig,\n    -- audit fields"));
+    assert!(output.contains("item.title_orig,\n\n"));
+    assert!(output.contains("item.title_orig,\n\n    -- audit fields"));
 }
 
 #[test]
@@ -165,8 +158,7 @@ fn expands_a_join_predicate_when_width_hides_its_structure() {
 SELECT item.id
 FROM public.items item
 LEFT JOIN match_new.source_links link ON
-    link.very_long_external_identifier = item.very_long_external_identifier;
-";
+    link.very_long_external_identifier = item.very_long_external_identifier;";
 
     assert_eq!(
         format_sql(source, &options)
@@ -198,27 +190,24 @@ fn reports_indivisible_tokens_that_make_a_line_exceed_the_hard_width() {
     };
 
     let formatted = format_sql(source, &options).expect("indivisible token is allowed");
+    assert_eq!(formatted.output, source);
     assert_eq!(
         formatted.warnings,
-        vec![FormatWarning::IndivisibleTokenExceedsHardWidth { line: 2, width: 79 }]
+        vec![FormatWarning::IndivisibleTokenExceedsHardWidth { line: 1, width: 82 }]
     );
 }
 
 #[test]
-fn custom_indentation_is_used_for_real_syntax_nesting() {
-    let options = FormatOptions {
-        indent_width: 2,
-        ..FormatOptions::default()
-    };
+fn four_space_indentation_is_mandatory_for_real_syntax_nesting() {
     let output = format_sql(
         "select item.id from public.items item where item.deleted_at is null and (item.title_rus is not null or item.title_orig is not null);",
-        &options,
+        &FormatOptions::default(),
     )
     .expect("format succeeds")
     .output;
 
-    assert!(output.contains("\n  item.deleted_at IS NULL"));
-    assert!(output.contains("\n    item.title_rus IS NOT NULL"));
+    assert!(output.contains("\n    item.deleted_at IS NULL"));
+    assert!(output.contains("\n        item.title_rus IS NOT NULL"));
 }
 
 #[test]
@@ -230,4 +219,18 @@ fn quoted_function_and_type_identifiers_are_never_case_normalized() {
 
     assert!(output.contains("\"MyFunc\"(item.id)"));
     assert!(output.contains("item.value::\"MyType\""));
+}
+
+#[test]
+fn inline_block_comment_keeps_a_lexical_separator() {
+    let source = "/* injected */ select item.id from public.items item;";
+    let output = format_sql(source, &FormatOptions::default())
+        .expect("format succeeds")
+        .output;
+
+    assert_eq!(
+        output,
+        "/* injected */ SELECT item.id FROM public.items item;"
+    );
+    validate_equivalent(source, &output).expect("comment attachment remains equivalent");
 }

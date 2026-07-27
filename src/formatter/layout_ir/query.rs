@@ -1,0 +1,543 @@
+use std::collections::HashSet;
+
+use pg_query::protobuf::Token;
+
+use super::*;
+use crate::formatter::ownership::{StatementSpec, StatementTokens, ViewCheckSpec};
+
+pub(super) fn bind_queries(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statements: &[StatementTokens],
+) -> Vec<QueryBlock> {
+    let depths = structure.depths();
+    let mut queries = Vec::new();
+    for statement in statements {
+        for select in statement.range.start..statement.range.end {
+            if tokens[select].kind != Token::Select {
+                continue;
+            }
+            let base_depth = depths[select];
+            let structural_end = (select + 1..statement.range.end)
+                .find(|index| {
+                    depths[*index] < base_depth
+                        || (depths[*index] == base_depth
+                            && (matches!(
+                                tokens[*index].kind,
+                                Token::Ascii59
+                                    | Token::Union
+                                    | Token::Intersect
+                                    | Token::Except
+                                    | Token::Returning
+                            ) || (tokens[*index].kind == Token::On
+                                && tokens
+                                    .get(*index + 1)
+                                    .is_some_and(|next| next.kind == Token::Conflict))))
+                })
+                .unwrap_or(statement.range.end);
+            let end = statement_query_suffix(tokens, depths, statement, select, base_depth)
+                .map_or(structural_end, |suffix| structural_end.min(suffix));
+            let list_start = select_list_start(tokens, structure, select, end);
+            let wrapper = (statement.range.start..select)
+                .rev()
+                .find(|open| {
+                    tokens[*open].kind == Token::Ascii40
+                        && structure
+                            .matching_parenthesis(*open)
+                            .is_some_and(|close| close >= end && close < statement.range.end)
+                })
+                .and_then(|open| {
+                    structure
+                        .matching_parenthesis(open)
+                        .map(|close| (open, close))
+                });
+            queries.push(QueryBlock {
+                select,
+                list_start,
+                end,
+                base_depth,
+                wrapper,
+                clauses: bind_query_clauses(tokens, depths, select, end, base_depth),
+            });
+        }
+    }
+    queries.sort_by_key(|query| query.select);
+    queries.dedup_by_key(|query| query.select);
+    queries
+}
+
+fn statement_query_suffix(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    statement: &StatementTokens,
+    select: usize,
+    base_depth: usize,
+) -> Option<usize> {
+    if base_depth != statement.base_depth {
+        return None;
+    }
+    match &statement.spec {
+        StatementSpec::View(spec) if spec.check != ViewCheckSpec::None => {
+            (select + 1..statement.range.end).rev().find(|index| {
+                depths[*index] == base_depth
+                    && tokens[*index].kind == Token::With
+                    && tokens.get(*index + 1).is_some_and(|next| {
+                        matches!(next.kind, Token::Local | Token::Cascaded | Token::Check)
+                    })
+            })
+        }
+        StatementSpec::MaterializedView(_) => {
+            (select + 1..statement.range.end).rev().find(|index| {
+                depths[*index] == base_depth
+                    && tokens[*index].kind == Token::With
+                    && tokens
+                        .get(*index + 1)
+                        .is_some_and(|next| matches!(next.kind, Token::No | Token::DataP))
+            })
+        }
+        _ => None,
+    }
+}
+
+fn select_list_start(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    select: usize,
+    end: usize,
+) -> usize {
+    let mut start = select + 1;
+    if start >= end {
+        return start;
+    }
+    if matches!(tokens[start].kind, Token::Distinct | Token::All) {
+        start += 1;
+        if tokens[start - 1].kind == Token::Distinct
+            && tokens
+                .get(start)
+                .is_some_and(|token| token.kind == Token::On)
+            && tokens
+                .get(start + 1)
+                .is_some_and(|token| token.kind == Token::Ascii40)
+        {
+            if let Some(close) = structure.matching_parenthesis(start + 1) {
+                start = close + 1;
+            }
+        }
+    }
+    start.min(end)
+}
+
+pub(super) fn bind_set_operations(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    statements: &[StatementTokens],
+) -> Vec<SetOperationBlock> {
+    let mut result = Vec::new();
+    for statement in statements {
+        for operator in statement.range.start..statement.range.end {
+            if !matches!(
+                tokens[operator].kind,
+                Token::Union | Token::Intersect | Token::Except
+            ) {
+                continue;
+            }
+            let base_depth = depths[operator];
+            let next_branch = (operator + 1..statement.range.end)
+                .find(|index| depths[*index] == base_depth && tokens[*index].kind == Token::Select);
+            if let Some(next_branch) = next_branch {
+                result.push(SetOperationBlock {
+                    operator,
+                    next_branch,
+                    base_depth,
+                });
+            }
+        }
+    }
+    result
+}
+
+pub(super) fn bind_window_blocks(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    queries: &[QueryBlock],
+) -> Vec<WindowBlock> {
+    let depths = structure.depths();
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+
+    for query in queries {
+        for index in query.select..query.end {
+            let candidate = match tokens[index].kind {
+                Token::Over => tokens
+                    .get(index + 1)
+                    .and_then(|next| (next.kind == Token::Ascii40).then_some(index + 1)),
+                Token::GroupP
+                    if index > query.select && tokens[index - 1].kind == Token::Within =>
+                {
+                    tokens
+                        .get(index + 1)
+                        .and_then(|next| (next.kind == Token::Ascii40).then_some(index + 1))
+                }
+                Token::As
+                    if depths[index] == query.base_depth
+                        && query.clauses.window.is_some_and(|window| index > window) =>
+                {
+                    tokens
+                        .get(index + 1)
+                        .and_then(|next| (next.kind == Token::Ascii40).then_some(index + 1))
+                }
+                _ => None,
+            };
+            let Some(open) = candidate else {
+                continue;
+            };
+            if !seen.insert(open) {
+                continue;
+            }
+            let Some(close) = structure.matching_parenthesis(open) else {
+                continue;
+            };
+            if close >= query.end {
+                continue;
+            }
+            let inner_depth = depths[open] + 1;
+            let mut partition_by = None;
+            let mut order_by = None;
+            let mut frame = None;
+            for token_index in open + 1..close {
+                if depths[token_index] != inner_depth {
+                    continue;
+                }
+                match tokens[token_index].kind {
+                    Token::Partition
+                        if tokens
+                            .get(token_index + 1)
+                            .is_some_and(|next| next.kind == Token::By) =>
+                    {
+                        partition_by.get_or_insert(token_index);
+                    }
+                    Token::Order
+                        if tokens
+                            .get(token_index + 1)
+                            .is_some_and(|next| next.kind == Token::By) =>
+                    {
+                        order_by.get_or_insert(token_index);
+                    }
+                    Token::Rows | Token::Range | Token::Groups => {
+                        frame.get_or_insert(token_index);
+                    }
+                    _ => {}
+                }
+            }
+            result.push(WindowBlock {
+                open,
+                close,
+                partition_by,
+                order_by,
+                frame,
+                base_depth: depths[open],
+            });
+        }
+    }
+    result.sort_by_key(|block| block.open);
+    result
+}
+
+fn bind_query_clauses(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    select: usize,
+    end: usize,
+    base_depth: usize,
+) -> QueryClauses {
+    let mut clauses = QueryClauses::default();
+    for index in select + 1..end {
+        if depths[index] != base_depth {
+            continue;
+        }
+        match tokens[index].kind {
+            Token::From => {
+                clauses.from.get_or_insert(index);
+            }
+            Token::Where => {
+                clauses.where_clause.get_or_insert(index);
+            }
+            Token::Having => {
+                clauses.having.get_or_insert(index);
+            }
+            Token::Window => {
+                clauses.window.get_or_insert(index);
+            }
+            Token::Limit => {
+                clauses.limit.get_or_insert(index);
+            }
+            Token::Offset => {
+                clauses.offset.get_or_insert(index);
+            }
+            Token::Fetch => {
+                clauses.fetch.get_or_insert(index);
+            }
+            Token::For => {
+                clauses.locking.get_or_insert(index);
+            }
+            Token::GroupP
+                if tokens
+                    .get(index + 1)
+                    .is_some_and(|next| next.kind == Token::By) =>
+            {
+                clauses.group_by.get_or_insert(index);
+            }
+            Token::Order
+                if tokens
+                    .get(index + 1)
+                    .is_some_and(|next| next.kind == Token::By) =>
+            {
+                clauses.order_by.get_or_insert(index);
+            }
+            _ => {}
+        }
+    }
+    clauses
+}
+
+pub(super) fn bind_predicates(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    queries: &[QueryBlock],
+    statements: &[StatementLayout],
+) -> Vec<PredicateBlock> {
+    let mut result = Vec::new();
+    let mut seen = HashSet::new();
+
+    for query in queries {
+        if let Some(index) = query.clauses.where_clause {
+            push_predicate(
+                &mut result,
+                &mut seen,
+                PredicateKind::Where,
+                index,
+                query.clauses.next_after(index, query.end),
+                query.base_depth,
+            );
+        }
+        if let Some(index) = query.clauses.having {
+            push_predicate(
+                &mut result,
+                &mut seen,
+                PredicateKind::Having,
+                index,
+                query.clauses.next_after(index, query.end),
+                query.base_depth,
+            );
+        }
+        for index in query.select + 1..query.end {
+            if depths[index] != query.base_depth
+                || tokens[index].kind != Token::On
+                || tokens
+                    .get(index + 1)
+                    .is_some_and(|next| next.kind == Token::Conflict)
+            {
+                continue;
+            }
+            let end = (index + 1..query.end)
+                .find(|candidate| {
+                    depths[*candidate] < query.base_depth
+                        || (depths[*candidate] == query.base_depth
+                            && (is_query_clause_start(tokens, *candidate)
+                                || is_join_start(tokens, *candidate)))
+                })
+                .unwrap_or(query.end);
+            push_predicate(
+                &mut result,
+                &mut seen,
+                PredicateKind::JoinOn,
+                index,
+                end,
+                query.base_depth,
+            );
+        }
+    }
+
+    for statement in statements {
+        match statement {
+            StatementLayout::Insert(insert) => {
+                if let Some(conflict) = insert.on_conflict {
+                    if let Some(index) = conflict.target_where {
+                        push_predicate(
+                            &mut result,
+                            &mut seen,
+                            PredicateKind::ConflictTarget,
+                            index,
+                            conflict.action,
+                            insert.span.base_depth,
+                        );
+                    }
+                    if let Some(index) = conflict.action_where {
+                        push_predicate(
+                            &mut result,
+                            &mut seen,
+                            PredicateKind::ConflictAction,
+                            index,
+                            insert.returning.unwrap_or(insert.span.end),
+                            insert.span.base_depth,
+                        );
+                    }
+                }
+            }
+            StatementLayout::Update(update) => {
+                if let Some(source) = &update.from {
+                    push_relation_join_predicates(&mut result, &mut seen, source);
+                }
+                if let Some(index) = update.where_clause {
+                    push_predicate(
+                        &mut result,
+                        &mut seen,
+                        PredicateKind::Where,
+                        index,
+                        update.returning.unwrap_or(update.span.end),
+                        update.span.base_depth,
+                    );
+                }
+            }
+            StatementLayout::Delete(delete) => {
+                if let Some(source) = &delete.using {
+                    push_relation_join_predicates(&mut result, &mut seen, source);
+                }
+                if let Some(index) = delete.where_clause {
+                    push_predicate(
+                        &mut result,
+                        &mut seen,
+                        PredicateKind::Where,
+                        index,
+                        delete.returning.unwrap_or(delete.span.end),
+                        delete.span.base_depth,
+                    );
+                }
+            }
+            StatementLayout::Merge(merge) => {
+                push_relation_join_predicates(&mut result, &mut seen, &merge.source);
+                push_predicate(
+                    &mut result,
+                    &mut seen,
+                    PredicateKind::MergeOn,
+                    merge.on,
+                    merge.branches[0].start,
+                    merge.span.base_depth,
+                );
+                for branch in &merge.branches {
+                    if let Some(condition) = branch.condition {
+                        push_predicate(
+                            &mut result,
+                            &mut seen,
+                            PredicateKind::MergeWhen,
+                            condition,
+                            branch.then,
+                            merge.span.base_depth,
+                        );
+                    }
+                }
+            }
+            StatementLayout::CreateIndex(index) => {
+                if let Some(where_clause) = index.where_clause {
+                    push_predicate(
+                        &mut result,
+                        &mut seen,
+                        PredicateKind::IndexWhere,
+                        where_clause,
+                        index.span.end,
+                        index.span.base_depth,
+                    );
+                }
+            }
+            StatementLayout::Select(_)
+            | StatementLayout::Values(_)
+            | StatementLayout::View(_)
+            | StatementLayout::MaterializedView(_)
+            | StatementLayout::CreateTable(_)
+            | StatementLayout::AlterTable(_) => {}
+        }
+    }
+
+    result.sort_by_key(|predicate| predicate.introducer);
+    result
+}
+
+fn push_relation_join_predicates(
+    result: &mut Vec<PredicateBlock>,
+    seen: &mut HashSet<usize>,
+    source: &RelationSourceBlock,
+) {
+    for join in &source.joins {
+        if let Some((introducer, end)) = join.predicate {
+            push_predicate(
+                result,
+                seen,
+                PredicateKind::JoinOn,
+                introducer,
+                end,
+                source.base_depth,
+            );
+        }
+    }
+}
+
+fn push_predicate(
+    result: &mut Vec<PredicateBlock>,
+    seen: &mut HashSet<usize>,
+    kind: PredicateKind,
+    introducer: usize,
+    end: usize,
+    base_depth: usize,
+) {
+    if introducer + 1 >= end || !seen.insert(introducer) {
+        return;
+    }
+    result.push(PredicateBlock {
+        kind,
+        introducer,
+        start: introducer + 1,
+        end,
+        base_depth,
+    });
+}
+
+fn is_query_clause_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    match tokens[index].kind {
+        Token::From
+        | Token::Where
+        | Token::Having
+        | Token::Window
+        | Token::Limit
+        | Token::Offset
+        | Token::Fetch
+        | Token::For => true,
+        Token::GroupP | Token::Order => tokens
+            .get(index + 1)
+            .is_some_and(|next| next.kind == Token::By),
+        _ => false,
+    }
+}
+
+fn is_join_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    let kind = tokens[index].kind;
+    if kind == Token::Join {
+        return index == 0
+            || !matches!(
+                tokens[index - 1].kind,
+                Token::Left
+                    | Token::Right
+                    | Token::Full
+                    | Token::InnerP
+                    | Token::Cross
+                    | Token::Natural
+                    | Token::OuterP
+            );
+    }
+    matches!(
+        kind,
+        Token::Left | Token::Right | Token::Full | Token::InnerP | Token::Cross | Token::Natural
+    ) && tokens[index + 1..]
+        .iter()
+        .take(2)
+        .any(|next| next.kind == Token::Join)
+}

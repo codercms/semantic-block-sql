@@ -6,14 +6,19 @@ These instructions apply to the whole repository.
 
 Read these files before changing behavior:
 
-1. `docs/formatter-design.md`
-2. `docs/semantic-block-sql-work-handoff.md`
-3. `docs/semantic-block-sql-style-guide-ru.md`
-4. `.agent-skills/postgresql-sql-format/SKILL.md` and its referenced material
-5. `docs/implementation-checklist.md`
+1. `docs/semantic-block-sql-fmt-check-core-spec.md`
+2. `docs/formatter-design.md`
+3. `docs/formatter-architecture.md`
+4. `docs/formatter-extension-guide.md`
+5. `docs/semantic-block-sql-work-handoff.md`
+6. `docs/semantic-block-sql-style-guide-ru.md`
+7. `.agent-skills/postgresql-sql-format/SKILL.md` and its referenced material
+8. `docs/implementation-checklist.md`
 
-When documents conflict, the latest explicit project requirement wins. Record
-the resolution in `docs/formatter-design.md` instead of silently choosing.
+The core specification is authoritative for machine `fmt` / `check` behavior.
+The agent skill is human-formatting guidance and must not silently broaden the
+core contract. When other documents conflict, the latest explicit project
+requirement wins. Record the resolution in `docs/formatter-design.md`.
 
 ## Batch gate
 
@@ -41,7 +46,7 @@ the resolution in `docs/formatter-design.md` instead of silently choosing.
 ## Semantic and rewrite safety
 
 - Formatting may change whitespace, indentation, line breaks, keyword casing,
-  and PostgreSQL `<>` to `!=`.
+  and PostgreSQL `<>` to `!=` only when `not_equal_policy = prefer_bang`.
 - Do not reorder or add syntax, rename aliases, add casts, remove meaningful
   parentheses, alter literals, optimize queries, or change comment attachment.
 - Preserve authored list line boundaries as soft group hints.
