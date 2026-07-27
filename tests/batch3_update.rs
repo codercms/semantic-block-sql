@@ -61,9 +61,8 @@ fn unsupported_update_variants_remain_unchanged() {
         "UPDATE ONLY items SET title = 'x';",
         "UPDATE items SET (title, updated_at) = ('x', NOW());",
         "UPDATE items SET payload['title'] = 'x';",
-        "UPDATE items SET title = source.title FROM (SELECT title FROM staging.items) source;",
-        "UPDATE items SET title = source.title FROM staging.items source JOIN tenants tenant ON tenant.id = source.tenant_id;",
-        "UPDATE items SET title = source.title FROM staging.items source, staging.other other;",
+        "UPDATE items SET title = source.title FROM ROWS FROM (jsonb_each_text(payload)) source;",
+        "UPDATE items SET title = source.title FROM staging.items source TABLESAMPLE SYSTEM (10);",
         "UPDATE items SET title = (SELECT title FROM staging.items LIMIT 1);",
     ] {
         let result = format_sql_result(source, &FormatOptions::default());

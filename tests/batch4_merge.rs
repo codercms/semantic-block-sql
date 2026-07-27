@@ -71,7 +71,7 @@ fn preserves_merge_comments_and_authored_branch_groups() {
 #[test]
 fn unsupported_merge_sources_remain_unchanged() {
     for source in [
-        "MERGE INTO items target USING (SELECT id FROM incoming) source ON source.id = target.id WHEN MATCHED THEN DELETE;",
+        "MERGE INTO items target USING LATERAL jsonb_each_text(target.payload) AS source(key, value) ON TRUE WHEN MATCHED THEN DELETE;",
         "WITH changed AS (DELETE FROM incoming RETURNING id) MERGE INTO items target USING changed source ON source.id = target.id WHEN MATCHED THEN DELETE;",
     ] {
         let formatted = format_sql_result(source, &FormatOptions::default());

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use pg_query::protobuf::Token;
 
 use super::*;
-use crate::formatter::ownership::StatementTokens;
+use crate::formatter::ownership::{StatementSpec, StatementTokens, ViewCheckSpec};
 
 pub(super) fn bind_queries(
     tokens: &[SqlToken<'_>],
@@ -18,7 +18,7 @@ pub(super) fn bind_queries(
                 continue;
             }
             let base_depth = depths[select];
-            let end = (select + 1..statement.range.end)
+            let structural_end = (select + 1..statement.range.end)
                 .find(|index| {
                     depths[*index] < base_depth
                         || (depths[*index] == base_depth
@@ -35,6 +35,8 @@ pub(super) fn bind_queries(
                                     .is_some_and(|next| next.kind == Token::Conflict))))
                 })
                 .unwrap_or(statement.range.end);
+            let end = statement_query_suffix(tokens, depths, statement, select, base_depth)
+                .map_or(structural_end, |suffix| structural_end.min(suffix));
             let list_start = select_list_start(tokens, structure, select, end);
             let wrapper = (statement.range.start..select)
                 .rev()
@@ -62,6 +64,39 @@ pub(super) fn bind_queries(
     queries.sort_by_key(|query| query.select);
     queries.dedup_by_key(|query| query.select);
     queries
+}
+
+fn statement_query_suffix(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    statement: &StatementTokens,
+    select: usize,
+    base_depth: usize,
+) -> Option<usize> {
+    if base_depth != statement.base_depth {
+        return None;
+    }
+    match &statement.spec {
+        StatementSpec::View(spec) if spec.check != ViewCheckSpec::None => {
+            (select + 1..statement.range.end).rev().find(|index| {
+                depths[*index] == base_depth
+                    && tokens[*index].kind == Token::With
+                    && tokens.get(*index + 1).is_some_and(|next| {
+                        matches!(next.kind, Token::Local | Token::Cascaded | Token::Check)
+                    })
+            })
+        }
+        StatementSpec::MaterializedView(_) => {
+            (select + 1..statement.range.end).rev().find(|index| {
+                depths[*index] == base_depth
+                    && tokens[*index].kind == Token::With
+                    && tokens
+                        .get(*index + 1)
+                        .is_some_and(|next| matches!(next.kind, Token::No | Token::DataP))
+            })
+        }
+        _ => None,
+    }
 }
 
 fn select_list_start(
@@ -350,6 +385,9 @@ pub(super) fn bind_predicates(
                 }
             }
             StatementLayout::Update(update) => {
+                if let Some(source) = &update.from {
+                    push_relation_join_predicates(&mut result, &mut seen, source);
+                }
                 if let Some(index) = update.where_clause {
                     push_predicate(
                         &mut result,
@@ -362,6 +400,9 @@ pub(super) fn bind_predicates(
                 }
             }
             StatementLayout::Delete(delete) => {
+                if let Some(source) = &delete.using {
+                    push_relation_join_predicates(&mut result, &mut seen, source);
+                }
                 if let Some(index) = delete.where_clause {
                     push_predicate(
                         &mut result,
@@ -374,6 +415,7 @@ pub(super) fn bind_predicates(
                 }
             }
             StatementLayout::Merge(merge) => {
+                push_relation_join_predicates(&mut result, &mut seen, &merge.source);
                 push_predicate(
                     &mut result,
                     &mut seen,
@@ -409,6 +451,8 @@ pub(super) fn bind_predicates(
             }
             StatementLayout::Select(_)
             | StatementLayout::Values(_)
+            | StatementLayout::View(_)
+            | StatementLayout::MaterializedView(_)
             | StatementLayout::CreateTable(_)
             | StatementLayout::AlterTable(_) => {}
         }
@@ -416,6 +460,25 @@ pub(super) fn bind_predicates(
 
     result.sort_by_key(|predicate| predicate.introducer);
     result
+}
+
+fn push_relation_join_predicates(
+    result: &mut Vec<PredicateBlock>,
+    seen: &mut HashSet<usize>,
+    source: &RelationSourceBlock,
+) {
+    for join in &source.joins {
+        if let Some((introducer, end)) = join.predicate {
+            push_predicate(
+                result,
+                seen,
+                PredicateKind::JoinOn,
+                introducer,
+                end,
+                source.base_depth,
+            );
+        }
+    }
 }
 
 fn push_predicate(

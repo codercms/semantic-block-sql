@@ -1,6 +1,6 @@
 use super::lists::plan_keyword_list;
 use super::*;
-use crate::formatter::layout_ir::{DeleteBlock, InsertSource, UpdateBlock};
+use crate::formatter::layout_ir::{DeleteBlock, InsertSource, RelationSourceBlock, UpdateBlock};
 
 pub(super) fn plan_update_statements(
     context: &PlanningContext<'_, '_>,
@@ -30,6 +30,8 @@ pub(super) fn plan_update_statements(
         plan.break_before(update.set, 1, update.span.base_depth);
         let set_end = update
             .from
+            .as_ref()
+            .map(|source| source.introducer)
             .or(update.where_clause)
             .or(update.returning)
             .unwrap_or(update.span.end);
@@ -42,8 +44,9 @@ pub(super) fn plan_update_statements(
             plan,
         );
 
-        if let Some(from) = update.from {
-            plan.break_before(from, 1, update.span.base_depth);
+        if let Some(from) = &update.from {
+            plan.break_before(from.introducer, 1, update.span.base_depth);
+            plan_relation_source(from, plan);
         }
         if let Some(where_clause) = update.where_clause {
             plan.break_before(where_clause, 1, update.span.base_depth);
@@ -87,8 +90,9 @@ pub(super) fn plan_delete_statements(
             continue;
         }
 
-        if let Some(using) = delete.using {
-            plan.break_before(using, 1, delete.span.base_depth);
+        if let Some(using) = &delete.using {
+            plan.break_before(using.introducer, 1, delete.span.base_depth);
+            plan_relation_source(using, plan);
         }
         if let Some(where_clause) = delete.where_clause {
             plan.break_before(where_clause, 1, delete.span.base_depth);
@@ -138,7 +142,17 @@ pub(super) fn plan_merge_statements(
     let tokens = context.tokens;
     let lists = context.lists;
     for merge in merges {
-        plan.break_before(merge.using, 1, merge.span.base_depth);
+        plan.break_before(merge.source.introducer, 1, merge.span.base_depth);
+        plan_relation_source(&merge.source, plan);
+        if !merge.source.joins.is_empty()
+            || merge
+                .source
+                .item_kinds
+                .iter()
+                .any(|kind| *kind != crate::formatter::ownership::RelationItemSpec::Relation)
+        {
+            plan.break_before(merge.on, 1, merge.span.base_depth);
+        }
         for branch in &merge.branches {
             let branch_lines = if branch
                 .start
@@ -182,6 +196,30 @@ pub(super) fn plan_merge_statements(
                 plan,
             );
         }
+    }
+}
+
+fn plan_relation_source(source: &RelationSourceBlock, plan: &mut LayoutPlan) {
+    let item_indent = source.base_depth + 1;
+    if source.items.len() > 1 {
+        for item in &source.items {
+            plan.break_before(item.start, 1, item_indent);
+            plan.set_indent(item.start..item.end, item_indent);
+        }
+    }
+
+    let minimum_join_indent = if source.items.len() > 1 {
+        item_indent
+    } else {
+        source.base_depth
+    };
+    for join in &source.joins {
+        plan.break_before(join.start, 1, join.depth.max(minimum_join_indent));
+    }
+    for &(open, close, inner_depth) in &source.wrappers {
+        plan.break_before(open + 1, 1, inner_depth);
+        plan.set_indent(open + 1..close, inner_depth);
+        plan.break_before(close, 1, inner_depth.saturating_sub(1));
     }
 }
 

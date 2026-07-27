@@ -18,7 +18,10 @@ mod lists;
 mod render;
 mod statements;
 
-use ddl::{plan_alter_tables, plan_create_indexes, plan_create_tables, plan_values_statements};
+use ddl::{
+    plan_alter_tables, plan_create_indexes, plan_create_tables, plan_materialized_views,
+    plan_values_statements, plan_views,
+};
 use lists::{parenthesized_lists, plan_keyword_list, plan_parenthesized_lists, plan_select_lists};
 use render::needs_space;
 pub(super) use render::{
@@ -138,9 +141,11 @@ pub(super) fn format(
     let layout = LayoutDocument::bind(document, &tokens, &structure)?;
     let cases = case_ranges(&tokens, options);
     let inserts = layout.inserts().cloned().collect::<Vec<_>>();
-    let updates = layout.updates().copied().collect::<Vec<_>>();
-    let deletes = layout.deletes().copied().collect::<Vec<_>>();
+    let updates = layout.updates().cloned().collect::<Vec<_>>();
+    let deletes = layout.deletes().cloned().collect::<Vec<_>>();
     let merges = layout.merges().cloned().collect::<Vec<_>>();
+    let views = layout.views().cloned().collect::<Vec<_>>();
+    let materialized_views = layout.materialized_views().cloned().collect::<Vec<_>>();
     let values = layout.values().cloned().collect::<Vec<_>>();
     let create_tables = layout.create_tables().cloned().collect::<Vec<_>>();
     let create_indexes = layout.create_indexes().cloned().collect::<Vec<_>>();
@@ -173,11 +178,28 @@ pub(super) fn format(
         options,
         &mut plan,
     );
+    for update in &updates {
+        if let Some(source) = &update.from {
+            extend_relation_query_starts(&mut expanded_selects, &tokens, source);
+        }
+    }
+    for delete in &deletes {
+        if let Some(source) = &delete.using {
+            extend_relation_query_starts(&mut expanded_selects, &tokens, source);
+        }
+    }
+    for merge in &merges {
+        extend_relation_query_starts(&mut expanded_selects, &tokens, &merge.source);
+    }
+    expanded_selects.extend(views.iter().map(|view| view.query_start));
+    expanded_selects.extend(materialized_views.iter().map(|view| view.query_start));
     let insert_query_starts = plan_insert_statements(&context, &inserts, &mut plan);
     expanded_selects.extend(insert_query_starts);
     plan_update_statements(&context, &boolean_ranges, &updates, &mut plan);
     plan_delete_statements(&context, &boolean_ranges, &deletes, &mut plan);
     plan_merge_statements(&context, &merges, &mut plan);
+    plan_views(&context, &views, &mut plan);
+    plan_materialized_views(&context, &materialized_views, &mut plan);
     plan_values_statements(&context, &values, &mut plan);
     plan_create_tables(&context, &create_tables, &mut plan);
     plan_create_indexes(&context, &create_indexes, &mut plan);
@@ -250,6 +272,17 @@ pub(super) fn format(
     }
 
     Ok(writer.finish(source.ends_with('\n')))
+}
+
+fn extend_relation_query_starts(
+    expanded: &mut HashSet<usize>,
+    tokens: &[SqlToken<'_>],
+    source: &super::layout_ir::RelationSourceBlock,
+) {
+    for range in &source.items {
+        expanded
+            .extend((range.start..range.end).filter(|index| tokens[*index].kind == Token::Select));
+    }
 }
 
 fn plan_window_blocks(

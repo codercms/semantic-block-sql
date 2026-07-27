@@ -1,6 +1,6 @@
 # Durable implementation checklist
 
-Status: **Runnable CLI MVP complete; Batch 3 statement coverage in progress**
+Status: **Runnable CLI PoC complete; PostgreSQL statement coverage expanding**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
@@ -167,8 +167,8 @@ Batch 2 evidence:
 - [x] Simple and independently complex `VALUES` rows.
 - [x] `ON CONFLICT` target predicate.
 - [x] `ON CONFLICT DO UPDATE` action predicate.
-- [x] `UPDATE ... FROM` (single source relation subset).
-- [x] `DELETE ... USING` (single source relation subset).
+- [x] `UPDATE ... FROM` with multiple, joined, derived, and function sources.
+- [x] `DELETE ... USING` with multiple, joined, derived, and function sources.
 - [x] `RETURNING` for fixture-backed `INSERT`.
 - [x] Compact and expanded bounded `MERGE` branches.
 - [x] `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT`.
@@ -182,6 +182,8 @@ Batch 2 evidence:
 - [x] Simple one-line partial index.
 - [x] Complex multiline `CREATE INDEX`.
 - [x] Multi-action `ALTER TABLE` with syntactic action groups.
+- [x] `CREATE VIEW` and `CREATE MATERIALIZED VIEW` bounded subsets.
+- [x] MERGE with multiple, joined, derived, and function sources.
 - [ ] PL/pgSQL blocks.
 - [ ] Dollar quoting.
 - [x] Comments for every currently claimed Batch 3 statement family.
@@ -201,6 +203,26 @@ Values, windows, lateral, and DDL tranche evidence:
   output, semantic equivalence, idempotence, clean check output, exact comment
   preservation, and fail-safe neighboring variants.
 - authored blank lines between complete top-level statements are preserved.
+
+
+
+Relation sources and views tranche evidence:
+
+- UPDATE, DELETE, and MERGE share `RelationListSpec` AST capabilities and
+  `RelationSourceBlock` token ownership;
+- ordinary relations, multiple comma items, bounded joins, SELECT-derived
+  tables, and simple set-returning functions are covered;
+- source JOIN types and ON/USING/NATURAL/CROSS modes are capability-checked;
+- parenthesized join trees are owned at their actual delimiter depth;
+- source JOIN predicates remain distinct from UPDATE/DELETE WHERE and MERGE ON;
+- CREATE VIEW owns aliases, options, SELECT body, and check mode;
+- CREATE MATERIALIZED VIEW owns aliases, access method, options, tablespace,
+  SELECT body, and explicit or omitted population mode;
+- unsupported ROWS FROM, TABLESAMPLE, alias column lists, derived WITH queries,
+  and CREATE TABLE AS remain byte-identical;
+- `tests/batch6_sources_views.rs` requires golden output, AST equivalence,
+  idempotence, clean check output, comment preservation, and fail-safe neighbors;
+- the complete gate passes 117 tests.
 
 
 ## Batch 4 — Project CLI
@@ -550,7 +572,7 @@ Architecture-hardening evidence:
 - The complete gate passes formatting, Clippy with warnings denied, all 98
   tests, Rustdoc, and `git diff --check` in the packaged offline environment.
 
-## Batch 6 — Performance and release polish
+## Batch 7 — Performance and release polish
 
 - [ ] Establish correctness-preserving benchmarks.
 - [ ] Benchmark large project traversal.
@@ -566,7 +588,7 @@ Architecture-hardening evidence:
 - [ ] Document installation.
 - [ ] Document shell and CI integration.
 - [ ] Document stdin/editor integration.
-- [ ] Batch 6 full tests, benchmarks, and self-review.
+- [ ] Batch 7 full tests, benchmarks, and self-review.
 - [ ] Dead-code removal, docs, checklist, and commit.
 
 ## Batch 7 — Thin IDE adapters

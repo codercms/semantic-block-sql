@@ -96,6 +96,13 @@ The implemented architecture and extension workflow are documented in
 [`formatter-architecture.md`](formatter-architecture.md) and
 [`formatter-extension-guide.md`](formatter-extension-guide.md).
 
+Relation-bearing DML and MERGE statements now share one recursive source
+capability model. Validation records ordinary relations, SELECT-derived tables,
+simple set-returning functions, and join trees; token binding must reproduce the
+same top-level source kinds and join predicate cardinalities. `CREATE VIEW` and
+`CREATE MATERIALIZED VIEW` use separate capability records so view suffixes and
+materialized-view population clauses cannot leak into SELECT ownership.
+
 ## Non-negotiable invariants
 
 ### Semantic safety

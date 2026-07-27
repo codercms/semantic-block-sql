@@ -50,9 +50,8 @@ fn unsupported_delete_variants_remain_unchanged() {
     for source in [
         "DELETE FROM ONLY items WHERE id = 1;",
         "DELETE FROM items USING ONLY staging.items source WHERE items.id = source.id;",
-        "DELETE FROM items USING staging.items source, staging.other other WHERE items.id = source.id;",
-        "DELETE FROM items USING staging.items source JOIN tenants tenant ON tenant.id = source.tenant_id;",
-        "DELETE FROM items USING (SELECT id FROM staging.items) source WHERE items.id = source.id;",
+        "DELETE FROM items USING staging.items source TABLESAMPLE SYSTEM (10) WHERE items.id = source.id;",
+        "DELETE FROM items USING ROWS FROM (jsonb_each_text(payload)) source;",
         "DELETE FROM items WHERE id IN (SELECT id FROM staging.items);",
         "DELETE FROM items RETURNING (SELECT 1);",
     ] {

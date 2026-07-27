@@ -100,6 +100,8 @@ pub(super) enum StatementSpec {
     CreateTable(CreateTableSpec),
     CreateIndex(CreateIndexSpec),
     AlterTable(AlterTableSpec),
+    View(ViewSpec),
+    MaterializedView(MaterializedViewSpec),
 }
 ```
 
@@ -190,12 +192,16 @@ Examples of verified properties include:
 - INSERT source kind and VALUES row count;
 - OVERRIDING USER versus SYSTEM;
 - ON CONFLICT target/action shape and assignment count;
-- UPDATE/DELETE source, predicate, and RETURNING presence;
-- MERGE branch count, action kind, assignment/value cardinality, and conditions;
+- UPDATE/DELETE source shape, per-join type/constraint ownership, predicate,
+  and RETURNING presence;
+- MERGE source shape plus per-join type/constraint ownership, branch count,
+  action kind, assignment/value cardinality, and conditions;
 - top-level VALUES row count;
 - CREATE TABLE element kind and count;
 - CREATE INDEX modifiers, key/include/option counts, and secondary clauses;
-- ALTER TABLE action count and syntactic action groups.
+- ALTER TABLE action count and syntactic action groups;
+- CREATE VIEW aliases, options, query shape, and check mode;
+- CREATE MATERIALIZED VIEW aliases, storage clauses, query shape, and population mode.
 
 A unit test deliberately constructs a contradictory `StatementSpec` and proves
 that layout binding returns an ownership safety failure.
@@ -225,13 +231,17 @@ match node {
     NodeEnum::CreateStmt(table) => ...,
     NodeEnum::IndexStmt(index) => ...,
     NodeEnum::AlterTableStmt(alter) => ...,
+    NodeEnum::ViewStmt(view) => ...,
+    NodeEnum::CreateTableAsStmt(matview) => ...,
     _ => Err("unimplemented PostgreSQL statement family"),
 }
 ```
 
 Family-specific validators check the currently owned AST shape. For example,
-UPDATE currently rejects multi-column assignment targets and complex FROM
-sources because no planner owns them yet.
+UPDATE still rejects multi-column assignment targets, while its FROM source
+uses the shared recursive relation-source validator also consumed by DELETE and
+MERGE. Each accepted source kind and join predicate is reproduced by the token
+binder before planning.
 
 ### Nested-node validation
 
@@ -460,7 +470,7 @@ capability records and binders without altering older family planners.
 The next syntax extensions are:
 
 1. richer joined, function, and multi-relation DML/MERGE sources;
-2. richer CREATE TABLE variants, views, and additional ALTER ownership;
+2. richer CREATE TABLE variants and additional ALTER ownership;
 3. routine and PL/pgSQL body ownership;
 4. PostgreSQL arrays, JSON expressions, and additional expression families;
 5. protected template ranges, property tests, and fuzzing.

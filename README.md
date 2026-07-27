@@ -16,10 +16,12 @@ recursive and general set operations, grouping/sorting/pagination clauses,
 `WITH`, a bounded PostgreSQL 17 `MERGE` planner covering DELETE, UPDATE,
 INSERT, and DO NOTHING branches, top-level `VALUES`, window and filtered
 aggregate forms, lateral derived/function sources, basic `CREATE TABLE`,
-feature-rich `CREATE INDEX`, and multi-action `ALTER TABLE`.
+feature-rich `CREATE INDEX`, multi-action `ALTER TABLE`, multiple/joined/
+derived/function relation sources for DML and MERGE, `CREATE VIEW`, and
+`CREATE MATERIALIZED VIEW`.
 Unimplemented statement families and unowned statement variants return the
-original source with `syntax.unsupported`; routines, PL/pgSQL, richer DDL,
-and richer relation/subquery ownership remain later batches.
+original source with `syntax.unsupported`; routines, PL/pgSQL, richer DDL, and
+unreviewed relation-source shapes remain later batches.
 
 The formatter uses the existing `pg_query` crate for the real PostgreSQL
 parser, scanner, token ranges, comments, and AST. Project code implements the
@@ -36,6 +38,7 @@ Semantic Block layout policy, not another SQL parser.
 - [Batch 2 formatter-core MVP](docs/batch-2-core-mvp.md)
 - [Batch 3 query and MERGE coverage](docs/batch-3-query-merge.md)
 - [Batch 5 values, windows, lateral sources, and DDL](docs/batch-5-values-windows-ddl.md)
+- [Batch 6 relation sources and views](docs/batch-6-sources-views.md)
 - [Runnable CLI and Go MVP](docs/batch-4-5-cli-mvp.md)
 - [Technical handoff](docs/semantic-block-sql-work-handoff.md)
 - [Russian style guide](docs/semantic-block-sql-style-guide-ru.md)

@@ -1,5 +1,6 @@
 use crate::formatter::layout_ir::{
-    AlterTableBlock, CreateIndexBlock, CreateTableBlock, CreateTableItem, ValuesBlock,
+    AlterTableBlock, CreateIndexBlock, CreateTableBlock, CreateTableItem, MaterializedViewBlock,
+    ValuesBlock, ViewBlock,
 };
 use crate::formatter::ownership::TokenRange;
 
@@ -29,6 +30,41 @@ pub(super) fn plan_values_statements(
         for &(open, close) in &values.rows {
             plan.set_indent(open..close + 1, indent);
             plan.break_before(open, 1, indent);
+        }
+    }
+}
+
+pub(super) fn plan_views(
+    _context: &PlanningContext<'_, '_>,
+    statements: &[ViewBlock],
+    plan: &mut LayoutPlan,
+) {
+    for view in statements {
+        plan.break_before(view.as_index, 1, view.span.base_depth);
+        plan.break_before(view.query_start, 1, view.span.base_depth);
+        if let Some(check) = view.check_option {
+            plan.break_before(check, 1, view.span.base_depth);
+        }
+    }
+}
+
+pub(super) fn plan_materialized_views(
+    _context: &PlanningContext<'_, '_>,
+    statements: &[MaterializedViewBlock],
+    plan: &mut LayoutPlan,
+) {
+    for view in statements {
+        for clause in [view.using, view.tablespace].into_iter().flatten() {
+            plan.break_before(clause, 1, view.span.base_depth);
+        }
+        if let Some((open, _)) = view.options {
+            let with = open.saturating_sub(1);
+            plan.break_before(with, 1, view.span.base_depth);
+        }
+        plan.break_before(view.as_index, 1, view.span.base_depth);
+        plan.break_before(view.query_start, 1, view.span.base_depth);
+        if let Some(data_clause) = view.data_clause {
+            plan.break_before(data_clause, 1, view.span.base_depth);
         }
     }
 }

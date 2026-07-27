@@ -59,21 +59,63 @@ pub(super) struct InsertSpec {
     pub returning_items: usize,
 }
 
-/// Exact top-level UPDATE capabilities proven by PostgreSQL AST validation.
+/// One top-level relation-source item accepted in FROM, USING, or MERGE USING.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RelationItemSpec {
+    Relation,
+    Subquery,
+    Function,
+    Join,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum RelationJoinTypeSpec {
+    Inner,
+    Left,
+    Right,
+    Full,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum RelationJoinConstraintSpec {
+    On,
+    Using { columns: usize },
+    Natural,
+    Cross,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct RelationJoinSpec {
+    pub kind: RelationJoinTypeSpec,
+    pub constraint: RelationJoinConstraintSpec,
+}
+
+/// Exact relation-list capabilities proven by PostgreSQL AST validation.
+///
+/// Top-level item kinds preserve authored order. Join specifications preserve
+/// recursive source order plus the exact join type and constraint mode, so a
+/// token binder cannot satisfy the contract with only aggregate counters.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(super) struct RelationListSpec {
+    pub items: Vec<RelationItemSpec>,
+    pub joins: Vec<RelationJoinSpec>,
+}
+
+/// Exact top-level UPDATE capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UpdateSpec {
     pub has_with: bool,
     pub assignments: usize,
-    pub from_relations: usize,
+    pub from: RelationListSpec,
     pub has_where: bool,
     pub returning_items: usize,
 }
 
 /// Exact top-level DELETE capabilities proven by PostgreSQL AST validation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct DeleteSpec {
     pub has_with: bool,
-    pub using_relations: usize,
+    pub using: RelationListSpec,
     pub has_where: bool,
     pub returning_items: usize,
 }
@@ -104,8 +146,40 @@ pub(super) struct MergeBranchSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct MergeSpec {
     pub has_with: bool,
+    pub source: RelationListSpec,
     pub branches: Vec<MergeBranchSpec>,
     pub returning_items: usize,
+}
+
+/// CREATE VIEW check-option mode accepted by the validator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ViewCheckSpec {
+    None,
+    Local,
+    Cascaded,
+}
+
+/// Exact CREATE VIEW capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ViewSpec {
+    pub replace: bool,
+    pub aliases: usize,
+    pub options: usize,
+    pub check: ViewCheckSpec,
+    pub query: SelectSpec,
+}
+
+/// Exact CREATE MATERIALIZED VIEW capabilities proven by PostgreSQL AST
+/// validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MaterializedViewSpec {
+    pub if_not_exists: bool,
+    pub aliases: usize,
+    pub options: usize,
+    pub has_access_method: bool,
+    pub has_tablespace: bool,
+    pub skip_data: bool,
+    pub query: SelectSpec,
 }
 
 /// CREATE TABLE element kind used to preserve the authored order while still
@@ -168,6 +242,8 @@ pub(super) enum StatementSpec {
     Update(UpdateSpec),
     Delete(DeleteSpec),
     Merge(MergeSpec),
+    View(ViewSpec),
+    MaterializedView(MaterializedViewSpec),
     CreateTable(CreateTableSpec),
     CreateIndex(CreateIndexSpec),
     AlterTable(AlterTableSpec),
@@ -182,7 +258,10 @@ impl StatementSpec {
             Self::Update(_) => Token::Update,
             Self::Delete(_) => Token::DeleteP,
             Self::Merge(_) => Token::Merge,
-            Self::CreateTable(_) | Self::CreateIndex(_) => Token::Create,
+            Self::View(_)
+            | Self::MaterializedView(_)
+            | Self::CreateTable(_)
+            | Self::CreateIndex(_) => Token::Create,
             Self::AlterTable(_) => Token::Alter,
         }
     }
@@ -195,6 +274,8 @@ impl StatementSpec {
             Self::Update(_) => "UPDATE",
             Self::Delete(_) => "DELETE",
             Self::Merge(_) => "MERGE",
+            Self::View(_) => "CREATE VIEW",
+            Self::MaterializedView(_) => "CREATE MATERIALIZED VIEW",
             Self::CreateTable(_) => "CREATE TABLE",
             Self::CreateIndex(_) => "CREATE INDEX",
             Self::AlterTable(_) => "ALTER TABLE",
@@ -209,7 +290,11 @@ impl StatementSpec {
             Self::Update(spec) => spec.has_with,
             Self::Delete(spec) => spec.has_with,
             Self::Merge(spec) => spec.has_with,
-            Self::CreateTable(_) | Self::CreateIndex(_) | Self::AlterTable(_) => false,
+            Self::View(_)
+            | Self::MaterializedView(_)
+            | Self::CreateTable(_)
+            | Self::CreateIndex(_)
+            | Self::AlterTable(_) => false,
         }
     }
 }
@@ -375,7 +460,7 @@ mod tests {
                 spec: StatementSpec::Update(UpdateSpec {
                     has_with: false,
                     assignments: 1,
-                    from_relations: 0,
+                    from: RelationListSpec::default(),
                     has_where: false,
                     returning_items: 0,
                 }),

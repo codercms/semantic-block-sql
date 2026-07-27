@@ -242,6 +242,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Between
             | Token::By
             | Token::Cascade
+            | Token::Cascaded
             | Token::Case
             | Token::Check
             | Token::Coalesce
@@ -294,9 +295,11 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::LastP
             | Token::Left
             | Token::Limit
+            | Token::Local
             | Token::Localtime
             | Token::Localtimestamp
             | Token::Matched
+            | Token::Materialized
             | Token::Merge
             | Token::MinuteP
             | Token::MonthP
@@ -308,6 +311,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Nullif
             | Token::NullsP
             | Token::Offset
+            | Token::Option
             | Token::Others
             | Token::On
             | Token::Only
@@ -320,6 +324,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Preceding
             | Token::Primary
             | Token::Recursive
+            | Token::Replace
             | Token::References
             | Token::Restrict
             | Token::Returning
@@ -342,11 +347,13 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::User
             | Token::Validate
             | Token::Values
+            | Token::View
             | Token::When
             | Token::Where
             | Token::Window
             | Token::Within
             | Token::With
+            | Token::DataP
             | Token::YearP
     )
 }
@@ -427,6 +434,9 @@ pub(super) fn needs_space(
     if current.kind == Token::Ascii40 && is_ddl_list_open(tokens, current_index) {
         return true;
     }
+    if current.kind == Token::Ascii40 && is_view_alias_list_open(tokens, current_index) {
+        return true;
+    }
     if current.kind == Token::Ascii40
         && (is_function_call_syntax(tokens, previous_index)
             || is_type_modifier_syntax(tokens, previous_index)
@@ -440,6 +450,33 @@ pub(super) fn needs_space(
         return false;
     }
     true
+}
+
+fn is_view_alias_list_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
+    if tokens
+        .get(open)
+        .is_none_or(|token| token.kind != Token::Ascii40)
+    {
+        return false;
+    }
+    let statement_start = tokens[..open]
+        .iter()
+        .rposition(|token| token.kind == Token::Ascii59)
+        .map_or(0, |semicolon| semicolon + 1);
+    let mut depth = 0usize;
+    let mut create = false;
+    let mut view = false;
+    for token in &tokens[statement_start..open] {
+        match token.kind {
+            Token::Ascii40 | Token::Ascii91 => depth += 1,
+            Token::Ascii41 | Token::Ascii93 => depth = depth.saturating_sub(1),
+            Token::Create if depth == 0 => create = true,
+            Token::View if depth == 0 => view = true,
+            Token::As if depth == 0 => return false,
+            _ => {}
+        }
+    }
+    depth == 0 && create && view
 }
 
 fn is_ddl_list_open(tokens: &[SqlToken<'_>], open: usize) -> bool {

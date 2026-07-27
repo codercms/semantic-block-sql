@@ -2,8 +2,9 @@ use super::FormatDiagnostic;
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     AlterTableStmt, AlterTableType, CmdType, ColumnDef, ConstrType, Constraint, CreateStmt,
-    DeleteStmt, IndexStmt, InsertStmt, MergeMatchKind, MergeStmt, Node, ObjectType, OnCommitAction,
-    OnConflictAction, OverridingKind, RawStmt, SelectStmt, SetOperation, UpdateStmt,
+    CreateTableAsStmt, DeleteStmt, IndexStmt, InsertStmt, JoinExpr, JoinType, MergeMatchKind,
+    MergeStmt, Node, ObjectType, OnCommitAction, OnConflictAction, OverridingKind, RawStmt,
+    SelectStmt, SetOperation, UpdateStmt, ViewCheckOption, ViewStmt,
 };
 use pg_query::{Context, NodeRef};
 mod equivalence;
@@ -13,8 +14,10 @@ pub use equivalence::validate_equivalent;
 use super::ownership::{
     AlterTableActionGroup, AlterTableSpec, ConflictActionSpec, ConflictSpec, CreateIndexSpec,
     CreateTableElementSpec, CreateTableSpec, DeleteSpec, InsertSourceSpec, InsertSpec,
-    MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, SelectSpec, StatementSpec,
-    SupportedDocument, UpdateSpec, ValuesSpec, source_statement,
+    MaterializedViewSpec, MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec,
+    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
+    RelationListSpec, SelectSpec, StatementSpec, SupportedDocument, UpdateSpec, ValuesSpec,
+    ViewCheckSpec, ViewSpec, source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -88,6 +91,15 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
             let spec = validate_merge(merge)?;
             Ok(StatementSpec::Merge(spec))
         }
+        NodeEnum::ViewStmt(view) => Ok(StatementSpec::View(validate_view(view)?)),
+        NodeEnum::CreateTableAsStmt(create)
+            if ObjectType::try_from(create.objtype).unwrap_or(ObjectType::Undefined)
+                == ObjectType::ObjectMatview =>
+        {
+            Ok(StatementSpec::MaterializedView(validate_materialized_view(
+                create,
+            )?))
+        }
         NodeEnum::CreateStmt(create) => {
             Ok(StatementSpec::CreateTable(validate_create_table(create)?))
         }
@@ -99,6 +111,107 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
         NodeEnum::DoStmt(_) => Err("DO block"),
         _ => Err("unimplemented PostgreSQL statement family"),
     }
+}
+
+fn validate_view(view: &ViewStmt) -> Result<ViewSpec, &'static str> {
+    let relation = view.view.as_ref().ok_or("CREATE VIEW without a relation")?;
+    if !relation.inh {
+        return Err("CREATE VIEW ONLY relation");
+    }
+    for alias in &view.aliases {
+        if !matches!(alias.node.as_ref(), Some(NodeEnum::String(_))) {
+            return Err("unrecognized CREATE VIEW column alias");
+        }
+    }
+    validate_def_elements(&view.options, "CREATE VIEW option")?;
+    let query = match view.query.as_deref().and_then(|query| query.node.as_ref()) {
+        Some(NodeEnum::SelectStmt(query)) => validate_select(query, false)?,
+        _ => return Err("CREATE VIEW without a SELECT query"),
+    };
+    if query.has_with {
+        return Err("CREATE VIEW query with WITH clause");
+    }
+    let check = match ViewCheckOption::try_from(view.with_check_option)
+        .unwrap_or(ViewCheckOption::Undefined)
+    {
+        ViewCheckOption::NoCheckOption => ViewCheckSpec::None,
+        ViewCheckOption::LocalCheckOption => ViewCheckSpec::Local,
+        ViewCheckOption::CascadedCheckOption => ViewCheckSpec::Cascaded,
+        ViewCheckOption::Undefined => return Err("unknown CREATE VIEW check option"),
+    };
+    Ok(ViewSpec {
+        replace: view.replace,
+        aliases: view.aliases.len(),
+        options: view.options.len(),
+        check,
+        query,
+    })
+}
+
+fn validate_materialized_view(
+    create: &CreateTableAsStmt,
+) -> Result<MaterializedViewSpec, &'static str> {
+    if create.is_select_into {
+        return Err("SELECT INTO statement");
+    }
+    let into = create
+        .into
+        .as_deref()
+        .ok_or("CREATE MATERIALIZED VIEW without INTO ownership")?;
+    let relation = into
+        .rel
+        .as_ref()
+        .ok_or("CREATE MATERIALIZED VIEW without a relation")?;
+    if !relation.inh {
+        return Err("CREATE MATERIALIZED VIEW ONLY relation");
+    }
+    for alias in &into.col_names {
+        if !matches!(alias.node.as_ref(), Some(NodeEnum::String(_))) {
+            return Err("unrecognized materialized-view column alias");
+        }
+    }
+    validate_def_elements(&into.options, "materialized-view option")?;
+    if OnCommitAction::try_from(into.on_commit).unwrap_or(OnCommitAction::Undefined)
+        != OnCommitAction::OncommitNoop
+    {
+        return Err("materialized-view ON COMMIT clause");
+    }
+    if into.view_query.is_some() {
+        return Err("transformed materialized-view query");
+    }
+    let query = match create
+        .query
+        .as_deref()
+        .and_then(|query| query.node.as_ref())
+    {
+        Some(NodeEnum::SelectStmt(query)) => validate_select(query, false)?,
+        _ => return Err("CREATE MATERIALIZED VIEW without a SELECT query"),
+    };
+    if query.has_with {
+        return Err("materialized-view query with WITH clause");
+    }
+    Ok(MaterializedViewSpec {
+        if_not_exists: create.if_not_exists,
+        aliases: into.col_names.len(),
+        options: into.options.len(),
+        has_access_method: !into.access_method.is_empty(),
+        has_tablespace: !into.table_space_name.is_empty(),
+        skip_data: into.skip_data,
+        query,
+    })
+}
+
+fn validate_def_elements(nodes: &[Node], feature: &'static str) -> Result<(), &'static str> {
+    for node in nodes {
+        let option = match node.node.as_ref() {
+            Some(NodeEnum::DefElem(option)) => option,
+            _ => return Err(feature),
+        };
+        if let Some(argument) = option.arg.as_deref() {
+            validate_ddl_expression(argument)?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_values_select(select: &SelectStmt) -> Result<(), &'static str> {
@@ -396,15 +509,11 @@ fn validate_merge(merge: &MergeStmt) -> Result<MergeSpec, &'static str> {
     if !relation.inh {
         return Err("MERGE INTO ONLY target");
     }
-    match merge
+    let source = merge
         .source_relation
         .as_deref()
-        .and_then(|source| source.node.as_ref())
-    {
-        Some(NodeEnum::RangeVar(range)) if range.inh => {}
-        Some(NodeEnum::RangeVar(_)) => return Err("MERGE USING ONLY relation"),
-        _ => return Err("complex MERGE source"),
-    }
+        .ok_or("MERGE without a source relation")?;
+    let source = validate_relation_list(std::slice::from_ref(source), "MERGE USING source")?;
     if let Some(with_clause) = &merge.with_clause {
         validate_with_clause(with_clause)?;
     }
@@ -525,6 +634,7 @@ fn validate_merge(merge: &MergeStmt) -> Result<MergeSpec, &'static str> {
 
     Ok(MergeSpec {
         has_with: merge.with_clause.is_some(),
+        source,
         branches,
         returning_items: merge.returning_list.len(),
     })
@@ -624,16 +734,7 @@ fn validate_update(update: &UpdateStmt) -> Result<UpdateSpec, &'static str> {
         validate_dml_expression(value)?;
     }
 
-    if update.from_clause.len() > 1 {
-        return Err("multiple UPDATE FROM relations");
-    }
-    if let Some(source) = update.from_clause.first() {
-        match source.node.as_ref() {
-            Some(NodeEnum::RangeVar(range)) if range.inh => {}
-            Some(NodeEnum::RangeVar(_)) => return Err("UPDATE FROM ONLY relation"),
-            _ => return Err("complex UPDATE FROM source"),
-        }
-    }
+    let from = validate_relation_list(&update.from_clause, "UPDATE FROM source")?;
 
     if let Some(predicate) = update.where_clause.as_deref() {
         validate_dml_expression(predicate)?;
@@ -653,7 +754,7 @@ fn validate_update(update: &UpdateStmt) -> Result<UpdateSpec, &'static str> {
     Ok(UpdateSpec {
         has_with: update.with_clause.is_some(),
         assignments: update.target_list.len(),
-        from_relations: update.from_clause.len(),
+        from,
         has_where: update.where_clause.is_some(),
         returning_items: update.returning_list.len(),
     })
@@ -670,16 +771,7 @@ fn validate_delete(delete: &DeleteStmt) -> Result<DeleteSpec, &'static str> {
     if let Some(with_clause) = &delete.with_clause {
         validate_with_clause(with_clause)?;
     }
-    if delete.using_clause.len() > 1 {
-        return Err("multiple DELETE USING relations");
-    }
-    if let Some(source) = delete.using_clause.first() {
-        match source.node.as_ref() {
-            Some(NodeEnum::RangeVar(range)) if range.inh => {}
-            Some(NodeEnum::RangeVar(_)) => return Err("DELETE USING ONLY relation"),
-            _ => return Err("complex DELETE USING source"),
-        }
-    }
+    let using = validate_relation_list(&delete.using_clause, "DELETE USING source")?;
     if let Some(predicate) = delete.where_clause.as_deref() {
         validate_dml_expression(predicate)?;
     }
@@ -696,10 +788,147 @@ fn validate_delete(delete: &DeleteStmt) -> Result<DeleteSpec, &'static str> {
     }
     Ok(DeleteSpec {
         has_with: delete.with_clause.is_some(),
-        using_relations: delete.using_clause.len(),
+        using,
         has_where: delete.where_clause.is_some(),
         returning_items: delete.returning_list.len(),
     })
+}
+
+fn validate_relation_list(
+    sources: &[Node],
+    feature: &'static str,
+) -> Result<RelationListSpec, &'static str> {
+    let mut result = RelationListSpec::default();
+    for source in sources {
+        let item = validate_relation_source(source, &mut result, feature)?;
+        result.items.push(item);
+    }
+    result.joins.sort_unstable();
+    Ok(result)
+}
+
+fn validate_relation_source(
+    source: &Node,
+    result: &mut RelationListSpec,
+    feature: &'static str,
+) -> Result<RelationItemSpec, &'static str> {
+    match source.node.as_ref() {
+        Some(NodeEnum::RangeVar(range)) if range.inh => {
+            if range
+                .alias
+                .as_ref()
+                .is_some_and(|alias| !alias.colnames.is_empty())
+            {
+                return Err("relation alias column list");
+            }
+            Ok(RelationItemSpec::Relation)
+        }
+        Some(NodeEnum::RangeVar(_)) => Err("ONLY relation source"),
+        Some(NodeEnum::RangeSubselect(source)) => {
+            if source
+                .alias
+                .as_ref()
+                .is_some_and(|alias| !alias.colnames.is_empty())
+            {
+                return Err("subquery alias column list");
+            }
+            let query = match source
+                .subquery
+                .as_deref()
+                .and_then(|query| query.node.as_ref())
+            {
+                Some(NodeEnum::SelectStmt(query)) => query,
+                _ => return Err(feature),
+            };
+            let query = validate_select(query, false)?;
+            if query.has_with {
+                return Err("relation subquery with WITH clause");
+            }
+            Ok(RelationItemSpec::Subquery)
+        }
+        Some(NodeEnum::RangeFunction(source)) => {
+            if source.is_rowsfrom
+                || !source.coldeflist.is_empty()
+                || source.functions.len() != 1
+                || source
+                    .alias
+                    .as_ref()
+                    .is_some_and(|alias| !alias.colnames.is_empty())
+            {
+                return Err("complex relation function source");
+            }
+            let function = match source.functions[0].node.as_ref() {
+                Some(NodeEnum::List(list)) if list.items.len() == 2 => &list.items[0],
+                _ => return Err("unrecognized relation function source"),
+            };
+            validate_dml_expression(function)?;
+            Ok(RelationItemSpec::Function)
+        }
+        Some(NodeEnum::JoinExpr(join)) => {
+            validate_join_source(join, result, feature)?;
+            Ok(RelationItemSpec::Join)
+        }
+        _ => Err(feature),
+    }
+}
+
+fn validate_join_source(
+    join: &JoinExpr,
+    result: &mut RelationListSpec,
+    feature: &'static str,
+) -> Result<(), &'static str> {
+    if join.rtindex != 0 {
+        return Err("transformed join source");
+    }
+    if join.join_using_alias.is_some() {
+        return Err("JOIN USING alias");
+    }
+    if join
+        .alias
+        .as_ref()
+        .is_some_and(|alias| !alias.colnames.is_empty())
+    {
+        return Err("join alias column list");
+    }
+    let kind = match JoinType::try_from(join.jointype).unwrap_or(JoinType::Undefined) {
+        JoinType::JoinInner => RelationJoinTypeSpec::Inner,
+        JoinType::JoinLeft => RelationJoinTypeSpec::Left,
+        JoinType::JoinRight => RelationJoinTypeSpec::Right,
+        JoinType::JoinFull => RelationJoinTypeSpec::Full,
+        _ => return Err("internal or unknown join type"),
+    };
+    let left = join.larg.as_deref().ok_or("join without a left source")?;
+    let right = join.rarg.as_deref().ok_or("join without a right source")?;
+    validate_relation_source(left, result, feature)?;
+    validate_relation_source(right, result, feature)?;
+
+    if join.quals.is_some() && !join.using_clause.is_empty() {
+        return Err("join with both ON and USING");
+    }
+    let constraint = if join.is_natural {
+        if join.quals.is_some() || !join.using_clause.is_empty() {
+            return Err("NATURAL JOIN with an explicit constraint");
+        }
+        RelationJoinConstraintSpec::Natural
+    } else if let Some(predicate) = join.quals.as_deref() {
+        validate_dml_expression(predicate)?;
+        RelationJoinConstraintSpec::On
+    } else if !join.using_clause.is_empty() {
+        for column in &join.using_clause {
+            if !matches!(column.node.as_ref(), Some(NodeEnum::String(_))) {
+                return Err("unrecognized JOIN USING column");
+            }
+        }
+        RelationJoinConstraintSpec::Using {
+            columns: join.using_clause.len(),
+        }
+    } else if kind == RelationJoinTypeSpec::Inner {
+        RelationJoinConstraintSpec::Cross
+    } else {
+        return Err("qualified outer join without ON, USING, or NATURAL");
+    };
+    result.joins.push(RelationJoinSpec { kind, constraint });
+    Ok(())
 }
 
 fn validate_dml_expression(expression: &Node) -> Result<(), &'static str> {

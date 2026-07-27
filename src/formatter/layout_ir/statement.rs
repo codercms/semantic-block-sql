@@ -3,8 +3,9 @@ use pg_query::protobuf::Token;
 use super::*;
 use crate::formatter::ownership::{
     AlterTableSpec, ConflictActionSpec, CreateIndexSpec, CreateTableSpec, DeleteSpec,
-    InsertSourceSpec, InsertSpec, MergeActionSpec, MergeSpec, OverrideSpec, SelectSpec,
-    StatementTokens, UpdateSpec, ValuesSpec,
+    InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeSpec, OverrideSpec,
+    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
+    RelationListSpec, SelectSpec, StatementTokens, UpdateSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
 };
 
 pub(super) fn bind_body_start(
@@ -31,50 +32,340 @@ pub(super) fn bind_select(
     body_start: usize,
     spec: &SelectSpec,
 ) -> Result<TokenSpan, FormatDiagnostic> {
-    require_count(
+    verify_select_shape(
+        tokens,
+        depths,
+        body_start,
+        statement.range.end,
+        statement.base_depth,
+        spec,
         "SELECT",
+    )?;
+    Ok(TokenSpan {
+        start: statement.range.start,
+        end: statement.range.end,
+        base_depth: statement.base_depth,
+    })
+}
+
+fn verify_select_shape(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    body_start: usize,
+    end: usize,
+    base_depth: usize,
+    spec: &SelectSpec,
+    owner: &str,
+) -> Result<(), FormatDiagnostic> {
+    require_count(
+        owner,
         "set-operation count",
-        set_operation_count(
-            tokens,
-            depths,
-            body_start,
-            statement.range.end,
-            statement.base_depth,
-        ),
+        set_operation_count(tokens, depths, body_start, end, base_depth),
         spec.set_operations,
     )?;
     let window = find_kind(
         tokens,
         depths,
         body_start + 1,
-        statement.range.end,
-        statement.base_depth,
+        end,
+        base_depth,
         Token::Window,
     );
     let named_windows = window
         .map(|window| {
-            let end = (window + 1..statement.range.end)
+            let list_end = (window + 1..end)
                 .find(|index| {
-                    depths[*index] == statement.base_depth
+                    depths[*index] == base_depth
                         && matches!(
                             tokens[*index].kind,
                             Token::Order | Token::Limit | Token::Offset | Token::Fetch | Token::For
                         )
                 })
-                .unwrap_or(statement.range.end);
-            item_count(tokens, depths, window + 1, end, statement.base_depth)
+                .unwrap_or(end);
+            item_count(tokens, depths, window + 1, list_end, base_depth)
         })
         .unwrap_or(0);
     require_count(
-        "SELECT",
+        owner,
         "WINDOW definition count",
         named_windows,
         spec.named_windows,
     )?;
-    Ok(TokenSpan {
-        start: statement.range.start,
-        end: statement.range.end,
-        base_depth: statement.base_depth,
+    Ok(())
+}
+
+pub(super) fn bind_view(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: &StatementTokens,
+    body_start: usize,
+    spec: &ViewSpec,
+) -> Result<ViewBlock, FormatDiagnostic> {
+    let depths = structure.depths();
+    let base_depth = statement.base_depth;
+    let end = statement.range.end;
+    let view = find_kind(tokens, depths, body_start + 1, end, base_depth, Token::View)
+        .ok_or_else(|| FormatDiagnostic::Ownership("CREATE VIEW has no VIEW token".into()))?;
+    require_presence(
+        "CREATE VIEW",
+        "OR REPLACE clause",
+        has_sequence(
+            tokens,
+            depths,
+            body_start + 1,
+            view,
+            base_depth,
+            &[Token::Or, Token::Replace],
+        ),
+        spec.replace,
+    )?;
+    let as_index = find_kind(tokens, depths, view + 1, end, base_depth, Token::As)
+        .ok_or_else(|| FormatDiagnostic::Ownership("CREATE VIEW has no AS clause".into()))?;
+    let query_start = find_kind(tokens, depths, as_index + 1, end, base_depth, Token::Select)
+        .ok_or_else(|| FormatDiagnostic::Ownership("CREATE VIEW has no SELECT query".into()))?;
+    let check_option = (query_start + 1..end).rev().find(|index| {
+        depths[*index] == base_depth
+            && tokens[*index].kind == Token::With
+            && tokens.get(*index + 1).is_some_and(|next| {
+                matches!(next.kind, Token::Local | Token::Cascaded | Token::Check)
+            })
+    });
+    let query_end = check_option.unwrap_or(end);
+    verify_select_shape(
+        tokens,
+        depths,
+        query_start,
+        query_end,
+        base_depth,
+        &spec.query,
+        "CREATE VIEW query",
+    )?;
+
+    let options_keyword = find_kind(tokens, depths, view + 1, as_index, base_depth, Token::With);
+    let aliases = (view + 1..options_keyword.unwrap_or(as_index))
+        .find(|index| depths[*index] == base_depth && tokens[*index].kind == Token::Ascii40)
+        .map(|open| {
+            structure
+                .matching_parenthesis(open)
+                .map(|close| (open, close))
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("CREATE VIEW alias list is unclosed".into())
+                })
+        })
+        .transpose()?;
+    require_count(
+        "CREATE VIEW",
+        "column alias count",
+        aliases
+            .map(|(open, _)| parenthesized_item_count(tokens, structure, open))
+            .transpose()?
+            .unwrap_or(0),
+        spec.aliases,
+    )?;
+    let options = options_keyword
+        .map(|with| bind_owned_list(tokens, structure, with, as_index, base_depth))
+        .transpose()?
+        .map(|(_, open, close, items)| (open, close, items.len()));
+    require_count(
+        "CREATE VIEW",
+        "option count",
+        options.map_or(0, |(_, _, count)| count),
+        spec.options,
+    )?;
+    let actual_check = match check_option {
+        None => ViewCheckSpec::None,
+        Some(with)
+            if tokens
+                .get(with + 1)
+                .is_some_and(|token| token.kind == Token::Local) =>
+        {
+            ViewCheckSpec::Local
+        }
+        Some(with)
+            if tokens
+                .get(with + 1)
+                .is_some_and(|token| token.kind == Token::Cascaded) =>
+        {
+            ViewCheckSpec::Cascaded
+        }
+        Some(_) => ViewCheckSpec::Cascaded,
+    };
+    if actual_check != spec.check {
+        return Err(FormatDiagnostic::Ownership(format!(
+            "CREATE VIEW check-option ownership disagrees with the validated AST shape: expected {:?}, found {:?}",
+            spec.check, actual_check
+        )));
+    }
+    Ok(ViewBlock {
+        span: TokenSpan {
+            start: statement.range.start,
+            end,
+            base_depth,
+        },
+        aliases,
+        options: options.map(|(open, close, _)| (open, close)),
+        as_index,
+        query_start,
+        check_option,
+    })
+}
+
+pub(super) fn bind_materialized_view(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: &StatementTokens,
+    body_start: usize,
+    spec: &MaterializedViewSpec,
+) -> Result<MaterializedViewBlock, FormatDiagnostic> {
+    let depths = structure.depths();
+    let base_depth = statement.base_depth;
+    let end = statement.range.end;
+    let materialized = find_kind(
+        tokens,
+        depths,
+        body_start + 1,
+        end,
+        base_depth,
+        Token::Materialized,
+    )
+    .ok_or_else(|| {
+        FormatDiagnostic::Ownership("CREATE MATERIALIZED VIEW has no MATERIALIZED token".into())
+    })?;
+    let view = find_kind(
+        tokens,
+        depths,
+        materialized + 1,
+        end,
+        base_depth,
+        Token::View,
+    )
+    .ok_or_else(|| {
+        FormatDiagnostic::Ownership("CREATE MATERIALIZED VIEW has no VIEW token".into())
+    })?;
+    require_presence(
+        "CREATE MATERIALIZED VIEW",
+        "IF NOT EXISTS clause",
+        has_sequence(
+            tokens,
+            depths,
+            view + 1,
+            end,
+            base_depth,
+            &[Token::IfP, Token::Not, Token::Exists],
+        ),
+        spec.if_not_exists,
+    )?;
+    let as_index =
+        find_kind(tokens, depths, view + 1, end, base_depth, Token::As).ok_or_else(|| {
+            FormatDiagnostic::Ownership("CREATE MATERIALIZED VIEW has no AS clause".into())
+        })?;
+    let query_start = find_kind(tokens, depths, as_index + 1, end, base_depth, Token::Select)
+        .ok_or_else(|| {
+            FormatDiagnostic::Ownership("CREATE MATERIALIZED VIEW has no SELECT query".into())
+        })?;
+    let data_clause = (query_start + 1..end).rev().find(|index| {
+        depths[*index] == base_depth
+            && tokens[*index].kind == Token::With
+            && tokens
+                .get(*index + 1)
+                .is_some_and(|next| matches!(next.kind, Token::No | Token::DataP))
+    });
+    verify_select_shape(
+        tokens,
+        depths,
+        query_start,
+        data_clause.unwrap_or(end),
+        base_depth,
+        &spec.query,
+        "materialized-view query",
+    )?;
+
+    let using = find_kind(tokens, depths, view + 1, as_index, base_depth, Token::Using);
+    require_presence(
+        "CREATE MATERIALIZED VIEW",
+        "USING clause",
+        using.is_some(),
+        spec.has_access_method,
+    )?;
+    let tablespace = find_kind(
+        tokens,
+        depths,
+        view + 1,
+        as_index,
+        base_depth,
+        Token::Tablespace,
+    );
+    require_presence(
+        "CREATE MATERIALIZED VIEW",
+        "TABLESPACE clause",
+        tablespace.is_some(),
+        spec.has_tablespace,
+    )?;
+    let options_keyword = find_kind(tokens, depths, view + 1, as_index, base_depth, Token::With);
+    let alias_end = [using, options_keyword, tablespace, Some(as_index)]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(as_index);
+    let aliases = (view + 1..alias_end)
+        .find(|index| depths[*index] == base_depth && tokens[*index].kind == Token::Ascii40)
+        .map(|open| {
+            structure
+                .matching_parenthesis(open)
+                .map(|close| (open, close))
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("materialized-view alias list is unclosed".into())
+                })
+        })
+        .transpose()?;
+    require_count(
+        "CREATE MATERIALIZED VIEW",
+        "column alias count",
+        aliases
+            .map(|(open, _)| parenthesized_item_count(tokens, structure, open))
+            .transpose()?
+            .unwrap_or(0),
+        spec.aliases,
+    )?;
+    let options = options_keyword
+        .map(|with| bind_owned_list(tokens, structure, with, as_index, base_depth))
+        .transpose()?
+        .map(|(_, open, close, items)| (open, close, items.len()));
+    require_count(
+        "CREATE MATERIALIZED VIEW",
+        "option count",
+        options.map_or(0, |(_, _, count)| count),
+        spec.options,
+    )?;
+    let actual_skip = data_clause.is_some_and(|with| {
+        tokens
+            .get(with + 1)
+            .is_some_and(|token| token.kind == Token::No)
+    });
+    if spec.skip_data && !actual_skip {
+        return Err(FormatDiagnostic::Ownership(
+            "CREATE MATERIALIZED VIEW NO DATA ownership disagrees with the validated AST shape"
+                .into(),
+        ));
+    }
+    if !spec.skip_data && actual_skip {
+        return Err(FormatDiagnostic::Ownership(
+            "CREATE MATERIALIZED VIEW DATA ownership disagrees with the validated AST shape".into(),
+        ));
+    }
+    Ok(MaterializedViewBlock {
+        span: TokenSpan {
+            start: statement.range.start,
+            end,
+            base_depth,
+        },
+        aliases,
+        using,
+        options: options.map(|(open, close, _)| (open, close)),
+        tablespace,
+        as_index,
+        query_start,
+        data_clause,
     })
 }
 
@@ -708,19 +999,20 @@ fn bind_on_conflict(
 
 pub(super) fn bind_update(
     tokens: &[SqlToken<'_>],
-    depths: &[usize],
+    structure: &TokenStructure,
     statement: &StatementTokens,
     body_start: usize,
     spec: &UpdateSpec,
 ) -> Result<UpdateBlock, FormatDiagnostic> {
+    let depths = structure.depths();
     let base_depth = statement.base_depth;
     let end = statement.range.end;
     let set = find_kind(tokens, depths, body_start + 1, end, base_depth, Token::Set)
         .ok_or_else(|| FormatDiagnostic::Ownership("supported UPDATE has no SET clause".into()))?;
-    let from = find_kind(tokens, depths, set + 1, end, base_depth, Token::From);
+    let from_index = find_kind(tokens, depths, set + 1, end, base_depth, Token::From);
     let where_clause = find_kind(tokens, depths, set + 1, end, base_depth, Token::Where);
     let returning = find_kind(tokens, depths, set + 1, end, base_depth, Token::Returning);
-    let assignment_end = [from, where_clause, returning]
+    let assignment_end = [from_index, where_clause, returning]
         .into_iter()
         .flatten()
         .min()
@@ -732,12 +1024,23 @@ pub(super) fn bind_update(
         item_count(tokens, depths, set + 1, assignment_end, base_depth),
         spec.assignments,
     )?;
-    require_count(
-        "UPDATE",
-        "FROM relation count",
-        usize::from(from.is_some()),
-        spec.from_relations,
-    )?;
+    let from = match from_index {
+        Some(from) => Some(bind_relation_source(
+            tokens,
+            structure,
+            from,
+            where_clause.or(returning).unwrap_or(end),
+            base_depth,
+            &spec.from,
+            "UPDATE FROM",
+        )?),
+        None if spec.from.items.is_empty() => None,
+        None => {
+            return Err(FormatDiagnostic::Ownership(
+                "UPDATE FROM ownership disagrees with the validated AST shape".into(),
+            ));
+        }
+    };
     require_presence(
         "UPDATE",
         "WHERE clause",
@@ -769,14 +1072,15 @@ pub(super) fn bind_update(
 
 pub(super) fn bind_delete(
     tokens: &[SqlToken<'_>],
-    depths: &[usize],
+    structure: &TokenStructure,
     statement: &StatementTokens,
     body_start: usize,
     spec: &DeleteSpec,
 ) -> Result<DeleteBlock, FormatDiagnostic> {
+    let depths = structure.depths();
     let base_depth = statement.base_depth;
     let end = statement.range.end;
-    let using = find_kind(
+    let using_index = find_kind(
         tokens,
         depths,
         body_start + 1,
@@ -801,12 +1105,23 @@ pub(super) fn bind_delete(
         Token::Returning,
     );
 
-    require_count(
-        "DELETE",
-        "USING relation count",
-        usize::from(using.is_some()),
-        spec.using_relations,
-    )?;
+    let using = match using_index {
+        Some(using) => Some(bind_relation_source(
+            tokens,
+            structure,
+            using,
+            where_clause.or(returning).unwrap_or(end),
+            base_depth,
+            &spec.using,
+            "DELETE USING",
+        )?),
+        None if spec.using.items.is_empty() => None,
+        None => {
+            return Err(FormatDiagnostic::Ownership(
+                "DELETE USING ownership disagrees with the validated AST shape".into(),
+            ));
+        }
+    };
     require_presence(
         "DELETE",
         "WHERE clause",
@@ -865,8 +1180,19 @@ pub(super) fn bind_merge(
     .ok_or_else(|| FormatDiagnostic::Ownership("supported MERGE has no USING clause".into()))?;
     let first_when = find_kind(tokens, depths, using + 1, boundary, base_depth, Token::When)
         .ok_or_else(|| FormatDiagnostic::Ownership("supported MERGE has no WHEN branch".into()))?;
-    let on = find_kind(tokens, depths, using + 1, first_when, base_depth, Token::On)
+    let on = (using + 1..first_when)
+        .rev()
+        .find(|index| depths[*index] == base_depth && tokens[*index].kind == Token::On)
         .ok_or_else(|| FormatDiagnostic::Ownership("supported MERGE has no ON clause".into()))?;
+    let source = bind_relation_source(
+        tokens,
+        structure,
+        using,
+        on,
+        base_depth,
+        &spec.source,
+        "MERGE USING",
+    )?;
 
     let branch_starts = (first_when..boundary)
         .filter(|index| depths[*index] == base_depth && tokens[*index].kind == Token::When)
@@ -1042,13 +1368,164 @@ pub(super) fn bind_merge(
             base_depth,
         },
         body_start,
-        using,
+        source,
         on,
         branches,
         returning,
     })
 }
 
+fn bind_relation_source(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    introducer: usize,
+    end: usize,
+    base_depth: usize,
+    spec: &RelationListSpec,
+    owner: &str,
+) -> Result<RelationSourceBlock, FormatDiagnostic> {
+    let depths = structure.depths();
+    let range = TokenRange::new(introducer + 1, end)?;
+    let items = split_item_ranges(tokens, depths, range.start, range.end, base_depth)?;
+    require_count(owner, "relation item count", items.len(), spec.items.len())?;
+
+    // Relation JOINs are shallower than JOINs nested in a SELECT-derived
+    // source. Select exactly the AST-proven number of shallowest introducers,
+    // then restore source order for predicate ownership and layout.
+    let mut join_candidates = (range.start..range.end)
+        .filter(|index| is_join_start(tokens, *index))
+        .collect::<Vec<_>>();
+    join_candidates.sort_by_key(|index| (depths[*index], *index));
+    if join_candidates.len() < spec.joins.len() {
+        return Err(FormatDiagnostic::Ownership(format!(
+            "{owner} join ownership disagrees with the validated AST shape: expected {}, found {}",
+            spec.joins.len(),
+            join_candidates.len()
+        )));
+    }
+    let mut join_starts = join_candidates
+        .into_iter()
+        .take(spec.joins.len())
+        .collect::<Vec<_>>();
+    join_starts.sort_unstable();
+
+    let mut item_kinds = Vec::with_capacity(items.len());
+    for (item, expected) in items.iter().zip(&spec.items) {
+        let contains_join = join_starts
+            .iter()
+            .any(|start| item.start <= *start && *start < item.end);
+        let contains_select =
+            (item.start..item.end).any(|index| tokens[index].kind == Token::Select);
+        let contains_call = (item.start..item.end)
+            .any(|index| tokens[index].kind == Token::Ascii40 && !contains_select);
+        let agrees = match expected {
+            RelationItemSpec::Join => contains_join,
+            RelationItemSpec::Subquery => contains_select && !contains_join,
+            RelationItemSpec::Function => contains_call && !contains_join,
+            RelationItemSpec::Relation => !contains_select && !contains_call && !contains_join,
+        };
+        if !agrees {
+            return Err(FormatDiagnostic::Ownership(format!(
+                "{owner} relation item ownership disagrees with the validated AST shape: expected {expected:?} for token range {item:?}"
+            )));
+        }
+        item_kinds.push(*expected);
+    }
+
+    let mut actual_specs = Vec::with_capacity(join_starts.len());
+    let mut joins = Vec::with_capacity(join_starts.len());
+    for start in join_starts.iter().copied() {
+        let join_depth = depths[start];
+        let next_boundary = (start + 1..range.end)
+            .find(|index| {
+                (tokens[*index].kind == Token::Ascii44 && depths[*index] == base_depth)
+                    || (join_starts.binary_search(index).is_ok() && depths[*index] <= join_depth)
+            })
+            .unwrap_or(range.end);
+        let join_keyword = (start..next_boundary)
+            .find(|index| depths[*index] == join_depth && tokens[*index].kind == Token::Join)
+            .ok_or_else(|| {
+                FormatDiagnostic::Ownership(format!("{owner} JOIN introducer has no JOIN keyword"))
+            })?;
+        let header = &tokens[start..=join_keyword];
+        let kind = if header.iter().any(|token| token.kind == Token::Left) {
+            RelationJoinTypeSpec::Left
+        } else if header.iter().any(|token| token.kind == Token::Right) {
+            RelationJoinTypeSpec::Right
+        } else if header.iter().any(|token| token.kind == Token::Full) {
+            RelationJoinTypeSpec::Full
+        } else {
+            RelationJoinTypeSpec::Inner
+        };
+        let on = (join_keyword + 1..next_boundary)
+            .find(|index| depths[*index] == join_depth && tokens[*index].kind == Token::On);
+        let using = (join_keyword + 1..next_boundary)
+            .find(|index| depths[*index] == join_depth && tokens[*index].kind == Token::Using);
+        let natural = header.iter().any(|token| token.kind == Token::Natural);
+        let cross = header.iter().any(|token| token.kind == Token::Cross);
+        let constraint = match (natural, cross, on, using) {
+            (true, false, None, None) => RelationJoinConstraintSpec::Natural,
+            (false, true, None, None) => RelationJoinConstraintSpec::Cross,
+            (false, false, Some(_), None) => RelationJoinConstraintSpec::On,
+            (false, false, None, Some(using)) => {
+                let open = (using + 1..next_boundary)
+                    .find(|index| {
+                        depths[*index] == join_depth && tokens[*index].kind == Token::Ascii40
+                    })
+                    .ok_or_else(|| {
+                        FormatDiagnostic::Ownership(format!(
+                            "{owner} JOIN USING has no column list"
+                        ))
+                    })?;
+                RelationJoinConstraintSpec::Using {
+                    columns: parenthesized_item_count(tokens, structure, open)?,
+                }
+            }
+            _ => {
+                return Err(FormatDiagnostic::Ownership(format!(
+                    "{owner} JOIN constraint ownership is ambiguous"
+                )));
+            }
+        };
+        actual_specs.push(RelationJoinSpec { kind, constraint });
+        joins.push(RelationJoinBlock {
+            start,
+            depth: join_depth,
+            predicate: on.map(|on| (on, next_boundary)),
+        });
+    }
+    actual_specs.sort_unstable();
+    if actual_specs != spec.joins {
+        return Err(FormatDiagnostic::Ownership(format!(
+            "{owner} JOIN ownership disagrees with the validated AST shape: expected {:?}, found {:?}",
+            spec.joins, actual_specs
+        )));
+    }
+
+    let wrappers = items
+        .iter()
+        .zip(&spec.items)
+        .filter_map(|(item, kind)| {
+            if *kind != RelationItemSpec::Join || tokens[item.start].kind != Token::Ascii40 {
+                return None;
+            }
+            structure
+                .matching_parenthesis(item.start)
+                .filter(|close| *close < item.end)
+                .map(|close| (item.start, close, depths[item.start] + 1))
+        })
+        .collect();
+
+    Ok(RelationSourceBlock {
+        introducer,
+        range,
+        items,
+        item_kinds,
+        joins,
+        wrappers,
+        base_depth,
+    })
+}
 fn set_operation_count(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
@@ -1231,6 +1708,30 @@ fn is_alter_action_start(kind: Token) -> bool {
             | Token::Detach
             | Token::Validate
     )
+}
+
+fn is_join_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    let kind = tokens[index].kind;
+    if kind == Token::Join {
+        return index == 0
+            || !matches!(
+                tokens[index - 1].kind,
+                Token::Left
+                    | Token::Right
+                    | Token::Full
+                    | Token::InnerP
+                    | Token::Cross
+                    | Token::Natural
+                    | Token::OuterP
+            );
+    }
+    matches!(
+        kind,
+        Token::Left | Token::Right | Token::Full | Token::InnerP | Token::Cross | Token::Natural
+    ) && tokens[index + 1..]
+        .iter()
+        .take(2)
+        .any(|next| next.kind == Token::Join)
 }
 
 fn bound_override(

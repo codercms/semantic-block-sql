@@ -2,8 +2,8 @@ use pg_query::protobuf::Token;
 
 use super::FormatDiagnostic;
 use super::ownership::{
-    AlterTableActionGroup, CreateTableElementSpec, StatementSpec, SupportedDocument, TokenRange,
-    bind_token_statements,
+    AlterTableActionGroup, CreateTableElementSpec, RelationItemSpec, StatementSpec,
+    SupportedDocument, TokenRange, bind_token_statements,
 };
 use super::structure::TokenStructure;
 use super::tokens::SqlToken;
@@ -14,7 +14,8 @@ mod statement;
 use self::query::{bind_predicates, bind_queries, bind_set_operations, bind_window_blocks};
 use self::statement::{
     bind_alter_table, bind_body_start, bind_create_index, bind_create_table, bind_delete,
-    bind_insert, bind_merge, bind_select, bind_update, bind_values, bind_with_block,
+    bind_insert, bind_materialized_view, bind_merge, bind_select, bind_update, bind_values,
+    bind_view, bind_with_block,
 };
 
 /// Generic token span owned by one PostgreSQL construct.
@@ -133,6 +134,25 @@ pub(super) struct PredicateBlock {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RelationJoinBlock {
+    pub start: usize,
+    pub depth: usize,
+    pub predicate: Option<(usize, usize)>,
+}
+
+/// FROM/USING relation-list ownership shared by UPDATE, DELETE, and MERGE.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RelationSourceBlock {
+    pub introducer: usize,
+    pub range: TokenRange,
+    pub items: Vec<TokenRange>,
+    pub item_kinds: Vec<RelationItemSpec>,
+    pub joins: Vec<RelationJoinBlock>,
+    pub wrappers: Vec<(usize, usize, usize)>,
+    pub base_depth: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct OnConflictBlock {
     pub start: usize,
     pub target_open: Option<usize>,
@@ -174,21 +194,21 @@ impl InsertBlock {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UpdateBlock {
     pub span: TokenSpan,
     pub body_start: usize,
     pub set: usize,
-    pub from: Option<usize>,
+    pub from: Option<RelationSourceBlock>,
     pub where_clause: Option<usize>,
     pub returning: Option<usize>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct DeleteBlock {
     pub span: TokenSpan,
     pub body_start: usize,
-    pub using: Option<usize>,
+    pub using: Option<RelationSourceBlock>,
     pub where_clause: Option<usize>,
     pub returning: Option<usize>,
 }
@@ -221,10 +241,32 @@ pub(super) struct MergeBranch {
 pub(super) struct MergeBlock {
     pub span: TokenSpan,
     pub body_start: usize,
-    pub using: usize,
+    pub source: RelationSourceBlock,
     pub on: usize,
     pub branches: Vec<MergeBranch>,
     pub returning: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ViewBlock {
+    pub span: TokenSpan,
+    pub aliases: Option<(usize, usize)>,
+    pub options: Option<(usize, usize)>,
+    pub as_index: usize,
+    pub query_start: usize,
+    pub check_option: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MaterializedViewBlock {
+    pub span: TokenSpan,
+    pub aliases: Option<(usize, usize)>,
+    pub using: Option<usize>,
+    pub options: Option<(usize, usize)>,
+    pub tablespace: Option<usize>,
+    pub as_index: usize,
+    pub query_start: usize,
+    pub data_clause: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,6 +323,8 @@ pub(super) enum StatementLayout {
     Update(UpdateBlock),
     Delete(DeleteBlock),
     Merge(MergeBlock),
+    View(ViewBlock),
+    MaterializedView(MaterializedViewBlock),
     CreateTable(CreateTableBlock),
     CreateIndex(CreateIndexBlock),
     AlterTable(AlterTableBlock),
@@ -334,22 +378,20 @@ impl LayoutDocument {
                     tokens, structure, statement, body_start, spec,
                 )?),
                 StatementSpec::Update(spec) => StatementLayout::Update(bind_update(
-                    tokens,
-                    structure.depths(),
-                    statement,
-                    body_start,
-                    spec,
+                    tokens, structure, statement, body_start, spec,
                 )?),
                 StatementSpec::Delete(spec) => StatementLayout::Delete(bind_delete(
-                    tokens,
-                    structure.depths(),
-                    statement,
-                    body_start,
-                    spec,
+                    tokens, structure, statement, body_start, spec,
                 )?),
                 StatementSpec::Merge(spec) => StatementLayout::Merge(bind_merge(
                     tokens, structure, statement, body_start, spec,
                 )?),
+                StatementSpec::View(spec) => StatementLayout::View(bind_view(
+                    tokens, structure, statement, body_start, spec,
+                )?),
+                StatementSpec::MaterializedView(spec) => StatementLayout::MaterializedView(
+                    bind_materialized_view(tokens, structure, statement, body_start, spec)?,
+                ),
                 StatementSpec::CreateTable(spec) => StatementLayout::CreateTable(
                     bind_create_table(tokens, structure, statement, body_start, spec)?,
                 ),
@@ -409,6 +451,8 @@ impl LayoutDocument {
             StatementLayout::Update(block) => block.span,
             StatementLayout::Delete(block) => block.span,
             StatementLayout::Merge(block) => block.span,
+            StatementLayout::View(block) => block.span,
+            StatementLayout::MaterializedView(block) => block.span,
             StatementLayout::CreateTable(block) => block.span,
             StatementLayout::CreateIndex(block) => block.span,
             StatementLayout::AlterTable(block) => block.span,
@@ -438,6 +482,24 @@ impl LayoutDocument {
             .iter()
             .filter_map(|statement| match statement {
                 StatementLayout::Delete(block) => Some(block),
+                _ => None,
+            })
+    }
+
+    pub fn views(&self) -> impl Iterator<Item = &ViewBlock> {
+        self.statements
+            .iter()
+            .filter_map(|statement| match statement {
+                StatementLayout::View(block) => Some(block),
+                _ => None,
+            })
+    }
+
+    pub fn materialized_views(&self) -> impl Iterator<Item = &MaterializedViewBlock> {
+        self.statements
+            .iter()
+            .filter_map(|statement| match statement {
+                StatementLayout::MaterializedView(block) => Some(block),
                 _ => None,
             })
     }
