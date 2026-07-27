@@ -1,0 +1,65 @@
+name: Prepare v0.1.1
+
+on:
+  push:
+    branches:
+      - agent/release-v0.1.1
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/release-v0.1.1
+          fetch-depth: 0
+
+      - name: Update manifest and lockfile
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          manifest = Path('Cargo.toml')
+          text = manifest.read_text()
+          updated, count = re.subn(
+              r'(?m)^(version\s*=\s*)"0\.1\.0"$',
+              r'\1"0.1.1"',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit('expected exactly one Cargo.toml package version 0.1.0')
+          manifest.write_text(updated)
+
+          lockfile = Path('Cargo.lock')
+          text = lockfile.read_text()
+          pattern = re.compile(
+              r'(?ms)(\[\[package\]\]\nname = "semblock"\nversion = )"0\.1\.0"'
+          )
+          updated, count = pattern.subn(r'\1"0.1.1"', text, count=1)
+          if count != 1:
+              raise SystemExit('expected exactly one semblock 0.1.0 package entry in Cargo.lock')
+          lockfile.write_text(updated)
+
+      - name: Verify exact version changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -n '^version = "0.1.1"$' Cargo.toml
+          awk '/^name = "semblock"$/{found=1; next} found && /^version = /{print; exit}' Cargo.lock | grep '^version = "0.1.1"$'
+
+      - name: Remove temporary workflow and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/prepare-v0.1.1.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Cargo.toml Cargo.lock .github/workflows/prepare-v0.1.1.yml
+          git commit -m "Release semblock 0.1.1"
+          git push origin HEAD:agent/release-v0.1.1
