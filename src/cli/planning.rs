@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
 use semblock::config::Config;
 use semblock::source::{FormattedSource, Language, format_source, infer_language};
 
@@ -24,19 +24,25 @@ pub(super) fn build_plans(
         return Ok(Vec::new());
     }
 
+    let worker_count = jobs.min(files.len()).max(1);
     let pool = ThreadPoolBuilder::new()
-        .num_threads(jobs.min(files.len()).max(1))
+        .num_threads(worker_count)
+        .thread_name(|index| format!("semblock-plan-{index}"))
         .build()
         .map_err(|error| {
-            RunError::filesystem(format!("failed to initialize formatting workers: {error}"))
+            RunError::filesystem(format!("failed to create formatting thread pool: {error}"))
         })?;
 
-    pool.install(|| {
+    let results = pool.install(|| {
         files
-            .par_iter()
-            .map(|path| plan_file(path.clone(), requested_language, config))
-            .collect()
-    })
+            .into_par_iter()
+            .map(|path| plan_file(path, requested_language, config))
+            .collect::<Vec<_>>()
+    });
+
+    // Preserve file-order error selection and output ordering regardless of
+    // worker completion order.
+    results.into_iter().collect()
 }
 
 fn plan_file(
