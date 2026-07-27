@@ -33,6 +33,7 @@ Semantic Block layout policy, not another SQL parser.
 - [Formatter design](docs/formatter-design.md)
 - [Formatter architecture](docs/formatter-architecture.md)
 - [Implementation checklist](docs/implementation-checklist.md)
+- [Release builds](docs/release-builds.md)
 - [Upstream baseline](docs/upstream-baseline.md)
 - [Batch 1 backend spike](docs/batch-1-backend-spike.md)
 - [Batch 2 formatter-core MVP](docs/batch-2-core-mvp.md)

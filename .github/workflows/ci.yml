@@ -70,6 +70,41 @@ jobs:
         if: matrix.toolchain == '1.88.0'
         run: cargo doc --locked --no-deps
 
+      - name: Test deterministic release packaging
+        if: matrix.toolchain == '1.88.0'
+        env:
+          SOURCE_DATE_EPOCH: "1700000000"
+        run: |
+          set -euo pipefail
+          output_one="$(mktemp -d)"
+          output_two="$(mktemp -d)"
+
+          python3 -m py_compile .github/scripts/package_release.py
+
+          for format in tar.gz zip; do
+            python3 .github/scripts/package_release.py \
+              --binary /bin/echo \
+              --version 0.0.0-test \
+              --target x86_64-test \
+              --format "$format" \
+              --output-dir "$output_one"
+
+            python3 .github/scripts/package_release.py \
+              --binary /bin/echo \
+              --version 0.0.0-test \
+              --target x86_64-test \
+              --format "$format" \
+              --output-dir "$output_two"
+          done
+
+          cmp "$output_one/semblock-0.0.0-test-x86_64-test.tar.gz" \
+            "$output_two/semblock-0.0.0-test-x86_64-test.tar.gz"
+          cmp "$output_one/semblock-0.0.0-test-x86_64-test.zip" \
+            "$output_two/semblock-0.0.0-test-x86_64-test.zip"
+
+          tar -tzf "$output_one/semblock-0.0.0-test-x86_64-test.tar.gz"
+          python3 -m zipfile -t "$output_one/semblock-0.0.0-test-x86_64-test.zip"
+
       - name: Check patch whitespace
         if: matrix.toolchain == '1.88.0'
         env:

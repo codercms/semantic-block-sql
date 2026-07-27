@@ -1,0 +1,516 @@
+name: Build release artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-artifacts-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  RUST_TOOLCHAIN: "1.88.0"
+
+jobs:
+  metadata:
+    name: Resolve release metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      source_date_epoch: ${{ steps.metadata.outputs.source_date_epoch }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Read package version and commit time
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(python3 - <<'PY'
+          import pathlib
+          import tomllib
+
+          with pathlib.Path("Cargo.toml").open("rb") as manifest:
+              print(tomllib.load(manifest)["package"]["version"])
+          PY
+          )"
+          source_date_epoch="$(git show -s --format=%ct HEAD)"
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo package version v${version}" >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "source_date_epoch=${source_date_epoch}" >> "$GITHUB_OUTPUT"
+
+  linux-x86_64:
+    name: Linux x86_64 (GLIBC 2.34)
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: rockylinux:9
+
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
+
+    steps:
+      - name: Install native build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          dnf install --assumeyes \
+            binutils \
+            ca-certificates \
+            clang \
+            clang-devel \
+            cmake \
+            curl \
+            file \
+            gcc \
+            gcc-c++ \
+            git \
+            gzip \
+            make \
+            pkgconf-pkg-config \
+            python3 \
+            tar \
+            zstd
+
+      - name: Locate libclang
+        shell: bash
+        run: |
+          set -euo pipefail
+          libclang="$(find -L /usr/lib64 /usr/lib \
+            -type f \
+            -name 'libclang.so*' \
+            -print \
+            -quit 2>/dev/null)"
+
+          if [[ -z "$libclang" ]]; then
+            echo "libclang.so was not found after installing clang-devel" >&2
+            exit 1
+          fi
+
+          echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"
+          echo "libclang: $libclang"
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Restore Cargo download cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-linux-x86_64-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-linux-x86_64-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$HOME/.cargo/env"
+          cargo build --locked --release --target x86_64-unknown-linux-gnu
+          strip --strip-unneeded target/x86_64-unknown-linux-gnu/release/semblock
+
+      - name: Verify Linux compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/x86_64-unknown-linux-gnu/release/semblock"
+
+          "$binary" --version
+          file "$binary"
+          ldd "$binary"
+
+          max_glibc="$({
+            readelf --version-info "$binary" \
+              | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)*' \
+              | sort -Vu \
+              | tail -n 1
+          } || true)"
+
+          if [[ -z "$max_glibc" ]]; then
+            echo "could not determine the binary's GLIBC requirement" >&2
+            exit 1
+          fi
+
+          python3 - "$max_glibc" <<'PY'
+          import sys
+
+          actual = tuple(map(int, sys.argv[1].removeprefix("GLIBC_").split(".")))
+          maximum = (2, 34)
+          if actual > maximum:
+              raise SystemExit(
+                  f"binary requires {sys.argv[1]}, newer than supported GLIBC_2.34"
+              )
+          print(f"maximum required GLIBC symbol: {sys.argv[1]}")
+          PY
+
+      - name: Package Linux artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/package_release.py \
+            --binary target/x86_64-unknown-linux-gnu/release/semblock \
+            --version "${{ needs.metadata.outputs.version }}" \
+            --target x86_64-unknown-linux-gnu \
+            --format tar.gz
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: semblock-${{ needs.metadata.outputs.version }}-x86_64-unknown-linux-gnu
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  linux-runtime-smoke:
+    name: Linux runtime smoke (${{ matrix.name }})
+    needs:
+      - metadata
+      - linux-x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Rocky Linux 9
+            image: rockylinux:9
+          - name: Debian 12
+            image: debian:12-slim
+          - name: Ubuntu 24.04
+            image: ubuntu:24.04
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Install archive tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v dnf >/dev/null 2>&1; then
+            dnf install --assumeyes gzip libstdc++ tar zstd
+          else
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+              ca-certificates \
+              gzip \
+              libstdc++6 \
+              tar \
+              zstd
+          fi
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: semblock-${{ needs.metadata.outputs.version }}-x86_64-unknown-linux-gnu
+          path: dist
+
+      - name: Extract and run packaged binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$(find dist -maxdepth 1 -type f -name '*.tar.gz' -print -quit)"
+          if [[ -z "$archive" ]]; then
+            echo "Linux release archive was not downloaded" >&2
+            exit 1
+          fi
+
+          mkdir unpacked
+          tar -xzf "$archive" -C unpacked
+          binary="$(find unpacked -type f -name semblock -print -quit)"
+          if [[ -z "$binary" ]]; then
+            echo "semblock was not found in the Linux release archive" >&2
+            exit 1
+          fi
+
+          "$binary" --version
+
+  windows-x86_64:
+    name: Windows 10+ x86_64
+    needs: metadata
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Restore Cargo download cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-windows-x86_64-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-windows-x86_64-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Locate libclang
+        shell: pwsh
+        run: |
+          $Candidates = @(
+            "$env:ProgramFiles\LLVM\bin\libclang.dll",
+            "$env:ProgramFiles\LLVM\lib\libclang.dll"
+          )
+
+          $LibClang = $Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $LibClang) {
+            throw "libclang.dll was not found in the GitHub Windows runner image"
+          }
+
+          $LibClangDirectory = Split-Path -Parent $LibClang
+          "LIBCLANG_PATH=$LibClangDirectory" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "libclang: $LibClang"
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install $env:RUST_TOOLCHAIN --profile minimal
+          rustup target add x86_64-pc-windows-msvc --toolchain $env:RUST_TOOLCHAIN
+          rustup override set $env:RUST_TOOLCHAIN
+          rustc --version --verbose
+          cargo --version
+
+      - name: Build and verify Windows binary
+        shell: pwsh
+        run: |
+          cargo build --locked --release --target x86_64-pc-windows-msvc
+
+          $Binary = "target\x86_64-pc-windows-msvc\release\semblock.exe"
+          & $Binary --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows binary smoke test failed"
+          }
+
+      - name: Package Windows artifact
+        shell: pwsh
+        run: |
+          python .github/scripts/package_release.py `
+            --binary target/x86_64-pc-windows-msvc/release/semblock.exe `
+            --version "${{ needs.metadata.outputs.version }}" `
+            --target x86_64-pc-windows-msvc `
+            --format zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: semblock-${{ needs.metadata.outputs.version }}-x86_64-pc-windows-msvc
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  macos:
+    name: macOS 14+ ${{ matrix.arch }}
+    needs: metadata
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - arch: arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Restore Cargo download cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-macos-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-macos-${{ matrix.target }}-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Locate libclang
+        shell: bash
+        run: |
+          set -euo pipefail
+          developer_dir="$(xcode-select -p)"
+          libclang="$(find \
+            "$developer_dir/Toolchains/XcodeDefault.xctoolchain/usr/lib" \
+            -name 'libclang.dylib' \
+            -print \
+            -quit)"
+
+          if [[ -z "$libclang" ]]; then
+            echo "libclang.dylib was not found in the active Xcode toolchain" >&2
+            exit 1
+          fi
+
+          echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"
+          echo "libclang: $libclang"
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup target add "${{ matrix.target }}" --toolchain "$RUST_TOOLCHAIN"
+          rustup override set "$RUST_TOOLCHAIN"
+          rustc --version --verbose
+          cargo --version
+
+      - name: Build and verify macOS binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --target "${{ matrix.target }}"
+
+          binary="target/${{ matrix.target }}/release/semblock"
+          strip -x "$binary"
+          "$binary" --version
+          file "$binary"
+
+          actual_arch="$(lipo -archs "$binary")"
+          if [[ "$actual_arch" != "${{ matrix.arch }}" ]]; then
+            echo "expected architecture ${{ matrix.arch }}, got $actual_arch" >&2
+            exit 1
+          fi
+
+          build_info="$(xcrun vtool -show-build "$binary")"
+          printf '%s\n' "$build_info"
+          grep -Eq 'minos[[:space:]]+14\.0' <<< "$build_info"
+
+      - name: Package macOS artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/package_release.py \
+            --binary "target/${{ matrix.target }}/release/semblock" \
+            --version "${{ needs.metadata.outputs.version }}" \
+            --target "${{ matrix.target }}" \
+            --format tar.gz
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: semblock-${{ needs.metadata.outputs.version }}-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  release-bundle:
+    name: Checksums and combined bundle
+    needs:
+      - metadata
+      - linux-x86_64
+      - linux-runtime-smoke
+      - windows-x86_64
+      - macos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+
+          find . \
+            -maxdepth 1 \
+            -type f \
+            ! -name SHA256SUMS \
+            -printf '%f\0' \
+            | sort -z \
+            | xargs -0 sha256sum \
+            > SHA256SUMS
+
+          cat SHA256SUMS
+
+      - name: Upload combined release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: semblock-${{ needs.metadata.outputs.version }}-release-bundle
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  publish-github-release:
+    name: Publish tagged GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - metadata
+      - release-bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download combined release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: semblock-${{ needs.metadata.outputs.version }}-release-bundle
+          path: dist
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --verify-tag \
+              --generate-notes \
+              --title "$TAG"
+          fi
