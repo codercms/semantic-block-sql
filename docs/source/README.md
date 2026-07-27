@@ -18,18 +18,17 @@ The repository copies listed above are byte-identical to their uploads. The
 2026-07-26 core specification is also copied verbatim to
 `docs/semantic-block-sql-fmt-check-core-spec.md` as the active core contract.
 
-The original skill ZIP was unpacked into the canonical directory:
+The original skill archive was unpacked and subsequently revised in the single
+canonical directory:
 
 ```text
 .agent-skills/postgresql-sql-format/
 ```
 
-Client discovery paths do not contain independent copies:
-
-```text
-.agents/skills/postgresql-sql-format -> ../../.agent-skills/postgresql-sql-format
-.claude/skills/postgresql-sql-format -> ../../.agent-skills/postgresql-sql-format
-```
+The repository intentionally does not contain separate `.agents/skills/` or
+`.claude/skills/` copies. Consumers that require one of those discovery paths
+should copy the canonical directory during local setup. This avoids symlink
+portability problems and prevents client-specific copies from drifting.
 
 Both archives are provenance only. The active skill is derived from the latest
 `postgresql-sql-format-1.0.0.zip` upload and is versioned `2.0.0` in the
