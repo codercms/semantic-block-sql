@@ -1,16 +1,26 @@
 use std::collections::BTreeSet;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use thiserror::Error;
 
-use crate::config::GoConfig;
-use crate::source::Language;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitSelection {
     Staged,
     ChangedSince(String),
+}
+
+#[derive(Debug)]
+pub struct SelectedPaths {
+    pub root: PathBuf,
+    pub paths: Vec<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct StagedFile {
+    pub path: PathBuf,
+    pub source: String,
 }
 
 #[derive(Debug, Error)]
@@ -22,13 +32,11 @@ pub enum GitError {
     #[cfg(windows)]
     #[error("Git returned a non-UTF-8 path, which is not supported on Windows")]
     NonUtf8Path,
+    #[error("staged blob is not UTF-8: {0}")]
+    NonUtf8Blob(PathBuf),
 }
 
-pub fn select_files(
-    selection: &GitSelection,
-    language: Language,
-    go: &GoConfig,
-) -> Result<Vec<PathBuf>, GitError> {
+pub fn select_files(selection: &GitSelection) -> Result<SelectedPaths, GitError> {
     let root = repository_root()?;
     let mut paths = BTreeSet::new();
 
@@ -36,57 +44,72 @@ pub fn select_files(
         GitSelection::Staged => {
             paths.extend(run_path_command(
                 &root,
-                &[
+                os_args(&[
                     "diff",
                     "--cached",
                     "--name-only",
                     "--diff-filter=ACMR",
                     "-z",
                     "--",
-                ],
+                ]),
             )?);
         }
         GitSelection::ChangedSince(reference) => {
-            let merge_base = run_text_command(&root, &["merge-base", reference, "HEAD"])?;
+            let merge_base = run_text_command(
+                &root,
+                vec![
+                    OsString::from("merge-base"),
+                    OsString::from(reference),
+                    OsString::from("HEAD"),
+                ],
+            )?;
             let merge_base = merge_base.trim();
             paths.extend(run_path_command(
                 &root,
-                &[
-                    "diff",
-                    "--name-only",
-                    "--diff-filter=ACMR",
-                    "-z",
-                    merge_base,
-                    "--",
+                vec![
+                    OsString::from("diff"),
+                    OsString::from("--name-only"),
+                    OsString::from("--diff-filter=ACMR"),
+                    OsString::from("-z"),
+                    OsString::from(merge_base),
+                    OsString::from("--"),
                 ],
             )?);
             paths.extend(run_path_command(
                 &root,
-                &["ls-files", "--others", "--exclude-standard", "-z", "--"],
+                os_args(&["ls-files", "--others", "--exclude-standard", "-z", "--"]),
             )?);
         }
     }
 
-    Ok(paths
-        .into_iter()
-        .filter(|path| accepts(path, language, go))
-        .map(|path| root.join(path))
-        .collect())
+    Ok(SelectedPaths {
+        root,
+        paths: paths.into_iter().collect(),
+    })
 }
 
-fn accepts(path: &Path, language: Language, go: &GoConfig) -> bool {
-    let extension = path.extension().and_then(|extension| extension.to_str());
-    match language {
-        Language::Sql => extension.is_some_and(|extension| extension.eq_ignore_ascii_case("sql")),
-        Language::Go => {
-            go.enabled && extension.is_some_and(|extension| extension.eq_ignore_ascii_case("go"))
-        }
-        Language::Auto => match extension {
-            Some(extension) if extension.eq_ignore_ascii_case("sql") => true,
-            Some(extension) if extension.eq_ignore_ascii_case("go") => go.enabled,
-            _ => false,
-        },
-    }
+pub fn read_staged_files(root: &Path, paths: &[PathBuf]) -> Result<Vec<StagedFile>, GitError> {
+    paths
+        .iter()
+        .map(|path| {
+            let mut blob_spec = OsString::from(":");
+            blob_spec.push(path.as_os_str());
+            let output = run_git(
+                root,
+                &[
+                    OsString::from("cat-file"),
+                    OsString::from("blob"),
+                    blob_spec,
+                ],
+            )?;
+            let source = String::from_utf8(output.stdout)
+                .map_err(|_| GitError::NonUtf8Blob(path.clone()))?;
+            Ok(StagedFile {
+                path: path.clone(),
+                source,
+            })
+        })
+        .collect()
 }
 
 fn repository_root() -> Result<PathBuf, GitError> {
@@ -94,21 +117,21 @@ fn repository_root() -> Result<PathBuf, GitError> {
         command: "determine current directory".into(),
         message: error.to_string(),
     })?;
-    let output = run_git(&current, &["rev-parse", "--show-toplevel"])?;
+    let output = run_git(&current, &os_args(&["rev-parse", "--show-toplevel"]))?;
     let bytes = trim_line_ending(&output.stdout);
     path_from_bytes(bytes)
 }
 
-fn run_text_command(root: &Path, args: &[&str]) -> Result<String, GitError> {
-    let output = run_git(root, args)?;
+fn run_text_command(root: &Path, args: Vec<OsString>) -> Result<String, GitError> {
+    let output = run_git(root, &args)?;
     String::from_utf8(output.stdout).map_err(|error| GitError::Command {
-        command: format_command(args),
+        command: format_command(&args),
         message: error.to_string(),
     })
 }
 
-fn run_path_command(root: &Path, args: &[&str]) -> Result<Vec<PathBuf>, GitError> {
-    let output = run_git(root, args)?;
+fn run_path_command(root: &Path, args: Vec<OsString>) -> Result<Vec<PathBuf>, GitError> {
+    let output = run_git(root, &args)?;
     output
         .stdout
         .split(|byte| *byte == 0)
@@ -117,7 +140,7 @@ fn run_path_command(root: &Path, args: &[&str]) -> Result<Vec<PathBuf>, GitError
         .collect()
 }
 
-fn run_git(root: &Path, args: &[&str]) -> Result<Output, GitError> {
+fn run_git(root: &Path, args: &[OsString]) -> Result<Output, GitError> {
     let output = Command::new("git")
         .current_dir(root)
         .args(args)
@@ -148,8 +171,17 @@ fn run_git(root: &Path, args: &[&str]) -> Result<Output, GitError> {
     })
 }
 
-fn format_command(args: &[&str]) -> String {
-    format!("git {}", args.join(" "))
+fn os_args(args: &[&str]) -> Vec<OsString> {
+    args.iter().map(OsString::from).collect()
+}
+
+fn format_command(args: &[OsString]) -> String {
+    let mut command = OsString::from("git");
+    for arg in args {
+        command.push(OsStr::new(" "));
+        command.push(arg);
+    }
+    command.to_string_lossy().into_owned()
 }
 
 fn trim_line_ending(bytes: &[u8]) -> &[u8] {
@@ -161,7 +193,6 @@ fn trim_line_ending(bytes: &[u8]) -> &[u8] {
 
 #[cfg(unix)]
 fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf, GitError> {
-    use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
     Ok(PathBuf::from(OsString::from_vec(bytes.to_vec())))

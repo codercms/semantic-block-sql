@@ -9,8 +9,8 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand};
 use semblock::config::{Config, ConfigError};
 use semblock::diff;
-use semblock::discover::{DiscoverError, discover};
-use semblock::git::{GitError, GitSelection, select_files};
+use semblock::discover::{DiscoverError, accepts, discover, filter_candidates};
+use semblock::git::{GitError, GitSelection, read_staged_files, select_files};
 use semblock::rewrite::{RewriteError, atomic_replace};
 use semblock::source::{Language, SourceError, format_source, infer_language};
 
@@ -18,7 +18,7 @@ use output::{
     CheckOutput, display_path, emit_check_path, emit_check_summary, emit_check_summary_refs,
     emit_diagnostics,
 };
-use planning::build_plans;
+use planning::{PlanInput, build_plans};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -312,8 +312,72 @@ impl Cli {
         config: &Config,
         check_output: CheckOutput,
     ) -> Result<ExitCode, RunError> {
-        let files = if let Some(selection) = paths.git_selection() {
-            select_files(&selection, self.language, &config.go).map_err(RunError::git)?
+        let inputs: Vec<PlanInput> = if let Some(selection) = paths.git_selection() {
+            let selected = select_files(&selection).map_err(RunError::git)?;
+            if mode == Mode::Fmt && selection == GitSelection::Staged {
+                for path in selected
+                    .paths
+                    .iter()
+                    .filter(|path| accepts(path, self.language, &config.go))
+                {
+                    let worktree_path = selected.root.join(path);
+                    if !worktree_path.is_file() {
+                        return Err(RunError::filesystem(format!(
+                            "cannot format staged path {} because its worktree file is missing",
+                            path.display()
+                        )));
+                    }
+                }
+            }
+            let filtered = filter_candidates(
+                &selected.root,
+                &selected.paths,
+                self.language,
+                &config.discovery,
+                &config.go,
+                self.jobs,
+            )
+            .map_err(RunError::discovery)?;
+
+            match selection {
+                GitSelection::Staged => {
+                    let staged =
+                        read_staged_files(&selected.root, &filtered).map_err(RunError::git)?;
+                    if mode == Mode::Fmt {
+                        for file in &staged {
+                            let worktree_path = selected.root.join(&file.path);
+                            let worktree = std::fs::read(&worktree_path).map_err(|error| {
+                                RunError::filesystem(format!(
+                                    "cannot format staged path {} because its worktree file is unavailable: {error}",
+                                    file.path.display()
+                                ))
+                            })?;
+                            if worktree != file.source.as_bytes() {
+                                return Err(RunError::filesystem(format!(
+                                    "cannot format staged path {} because the Git index and worktree differ",
+                                    file.path.display()
+                                )));
+                            }
+                        }
+                        staged
+                            .into_iter()
+                            .map(|file| PlanInput::Worktree(selected.root.join(file.path)))
+                            .collect()
+                    } else {
+                        staged
+                            .into_iter()
+                            .map(|file| PlanInput::Provided {
+                                path: selected.root.join(file.path),
+                                source: file.source,
+                            })
+                            .collect()
+                    }
+                }
+                GitSelection::ChangedSince(_) => filtered
+                    .into_iter()
+                    .map(|path| PlanInput::Worktree(selected.root.join(path)))
+                    .collect(),
+            }
         } else {
             let roots = if paths.paths.is_empty() {
                 vec![PathBuf::from(".")]
@@ -328,14 +392,17 @@ impl Cli {
                 self.jobs,
             )
             .map_err(RunError::discovery)?
+            .into_iter()
+            .map(PlanInput::Worktree)
+            .collect()
         };
 
         if self.verbose {
-            for path in &files {
-                eprintln!("Inspecting: {}", path.display());
+            for input in &inputs {
+                eprintln!("Inspecting: {}", input.path().display());
             }
         }
-        let plans = build_plans(files, self.language, config, self.jobs)?;
+        let plans = build_plans(inputs, self.language, config, self.jobs)?;
         let changed = plans.iter().filter(|plan| plan.formatted.changed).count();
 
         match mode {

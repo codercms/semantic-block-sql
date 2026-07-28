@@ -49,6 +49,7 @@ Check formatting without writing:
 
 ```bash
 semblock check .
+semblock check --list-different --summary
 ```
 
 Print unified diffs without writing:
@@ -61,6 +62,7 @@ Read one source from standard input:
 
 ```bash
 semblock fmt --stdin --filename query.sql
+echo 'select 1;' | semblock fmt --stdin --language sql
 ```
 
 Process Go files explicitly:
@@ -70,6 +72,43 @@ semblock fmt --language go ./internal/...
 ```
 
 `check` and `diff` exit with code `1` when formatting changes are required, making both commands suitable for CI.
+
+### Project and Git workflows
+
+Inspect or format only paths staged in the current Git repository:
+
+```bash
+semblock check --staged
+semblock diff --staged
+semblock fmt --staged
+```
+
+Staged `check` and `diff` inspect the stage-0 blobs stored in the Git index, not
+the corresponding worktree files. Staged `fmt` first requires every selected
+index blob to match its worktree file byte-for-byte, so partially staged files
+are rejected before formatting begins. A successful staged `fmt` changes only
+the worktree and never modifies the index or runs `git add`; stage the formatting
+changes manually afterward.
+
+Check every live path changed relative to a reference:
+
+```bash
+semblock check --changed-since origin/main
+```
+
+`--changed-since` uses the merge base with `HEAD` and includes committed,
+staged, unstaged, and untracked files while excluding deleted files. Paths
+selected through Git still follow normal discovery rules, including
+`.gitignore`, nested `.semblockignore` files, hidden-path policy, language
+selection, and Go enablement.
+
+Inspect configuration resolution or create a project configuration:
+
+```bash
+semblock config path
+semblock config show
+semblock init
+```
 
 ## Supported inputs
 

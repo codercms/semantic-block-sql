@@ -579,8 +579,8 @@ Architecture-hardening evidence:
 - [ ] Benchmark large SQL and many Go literals.
 - [ ] Avoid parsing ignored files.
 - [ ] Measure before introducing parallelism.
-- [ ] Add bounded `--jobs` parallel processing only if useful.
-- [ ] Prove deterministic output and diagnostics across job counts.
+- [x] Add bounded `--jobs` parallel processing only if useful.
+- [x] Prove deterministic output and diagnostics across job counts.
 - [ ] Define supported platforms and MSRV.
 - [x] Add CI matrix for Rust 1.88 and current stable on Ubuntu 24.04.
 - [ ] Add release profiles and reproducible release procedure.
@@ -590,6 +590,24 @@ Architecture-hardening evidence:
 - [ ] Document stdin/editor integration.
 - [ ] Batch 7 full tests, benchmarks, and self-review.
 - [ ] Dead-code removal, docs, checklist, and commit.
+
+PR #7 Git-aware CLI hardening evidence:
+
+- staged `check` and `diff` plan from UTF-8 stage-0 index blobs rather than
+  reading worktree files;
+- staged `fmt` compares every selected index blob with the worktree before
+  planning, rejects partial staging with exit class 4, formats only the
+  worktree, and never changes the index;
+- `--changed-since` covers committed, staged, unstaged, and untracked live
+  paths relative to the merge base;
+- ordinary and Git-selected discovery share one configured `ignore::WalkBuilder`
+  and Git candidates remain subject to nested `.semblockignore`, Git ignore,
+  hidden-path, language, and Go rules;
+- invocation-scoped Rayon planning collects in deterministic input order and
+  completes project-wide preflight before writes;
+- `tests/cli_workflows.rs` covers index/worktree divergence, staged-fmt safety,
+  changed-since selection, invalid references, nested ignores, and deterministic
+  parallel error selection.
 
 ## Batch 7 — Thin IDE adapters
 
