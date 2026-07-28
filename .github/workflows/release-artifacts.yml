@@ -271,7 +271,7 @@ jobs:
     timeout-minutes: 45
 
     env:
-      SOURCE_DATE_EPOCH: ${{ neds.metadata.outputs.source_date_epoch }}
+      SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
 
     steps:
       - name: Check out repository
@@ -296,7 +296,9 @@ jobs:
           )
 
           $LibClang = $Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $LibClang){ throw "libclang.dll was not found in the GitHub Windows runner image" }
+          if (-not $LibClang) {
+            throw "libclang.dll was not found in the GitHub Windows runner image"
+          }
 
           $LibClangDirectory = Split-Path -Parent $LibClang
           "LIBCLANG_PATH=$LibClangDirectory" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -415,7 +417,7 @@ jobs:
       - name: Smoke-test macOS binary
         shell: bash
         run: |
-          set -euo pipefil
+          set -euo pipefail
           binary="target/${{ matrix.target }}/release/semblock"
           "$binary" --version
           file "$binary"
@@ -445,6 +447,7 @@ jobs:
             --version "${{ needs.metadata.outputs.version }}" \
             --target "${{ matrix.target }}" \
             --format tar.gz
+
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
@@ -524,6 +527,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
           else
