@@ -156,6 +156,52 @@ fn staged_check_and_diff_read_the_index_blob() {
 }
 
 #[test]
+fn staged_check_and_diff_include_an_index_only_file() {
+    let root = TempDir::new().unwrap();
+    init_git(root.path());
+    write(root.path(), "new.sql", "select 1;\n");
+    git(root.path(), &["add", "new.sql"]);
+    fs::remove_file(root.path().join("new.sql")).unwrap();
+
+    let check = run(
+        root.path(),
+        &["check", "--staged", "--list-different"],
+        None,
+    );
+    assert_eq!(check.status.code(), Some(1), "{check:?}");
+    assert_eq!(String::from_utf8_lossy(&check.stdout), "new.sql\n");
+
+    let diff = run(root.path(), &["diff", "--staged"], None);
+    assert_eq!(diff.status.code(), Some(1), "{diff:?}");
+    let stdout = String::from_utf8_lossy(&diff.stdout);
+    assert!(stdout.contains("-select 1;"), "{stdout}");
+    assert!(stdout.contains("+SELECT 1;"), "{stdout}");
+}
+
+#[test]
+fn ignored_index_only_staged_file_is_skipped_by_all_staged_modes() {
+    let root = TempDir::new().unwrap();
+    init_git(root.path());
+    write(root.path(), ".semblockignore", "ignored.sql\n");
+    write(root.path(), "ignored.sql", "select 1;\n");
+    git(root.path(), &["add", ".semblockignore", "ignored.sql"]);
+    let before_index = index_blob(root.path(), "ignored.sql");
+    fs::remove_file(root.path().join("ignored.sql")).unwrap();
+
+    for args in [
+        &["check", "--staged", "--list-different"][..],
+        &["diff", "--staged"][..],
+        &["fmt", "--staged"][..],
+    ] {
+        let output = run(root.path(), args, None);
+        assert!(output.status.success(), "{output:?}");
+        assert!(output.stdout.is_empty(), "{output:?}");
+    }
+    assert_eq!(index_blob(root.path(), "ignored.sql"), before_index);
+    assert!(!root.path().join("ignored.sql").exists());
+}
+
+#[test]
 fn staged_fmt_rejects_partial_staging_without_modifying_either_copy() {
     let root = TempDir::new().unwrap();
     init_git(root.path());

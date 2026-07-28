@@ -603,6 +603,9 @@ PR #7 Git-aware CLI hardening evidence:
 - ordinary and Git-selected discovery share one configured `ignore::WalkBuilder`
   and Git candidates remain subject to nested `.semblockignore`, Git ignore,
   hidden-path, language, and Go rules;
+- the builder's incremental ignore matcher classifies staged index paths whose
+  worktree leaf is absent, so staged check/diff still inspect their blobs while
+  ignored absent paths remain excluded before staged-fmt preflight;
 - invocation-scoped Rayon planning collects in deterministic input order and
   completes project-wide preflight before writes;
 - `tests/cli_workflows.rs` covers index/worktree divergence, staged-fmt safety,

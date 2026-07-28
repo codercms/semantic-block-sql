@@ -127,6 +127,11 @@ pub fn filter_candidates(
 
     let mut builder = WalkBuilder::new(root);
     configure_builder(&mut builder, discovery, jobs);
+    let mut matcher = builder
+        .build_matchers()
+        .into_iter()
+        .next()
+        .expect("one matcher for one discovery root");
     builder.filter_entry(move |entry| allowed.contains(entry.path()));
 
     let walker = builder.build_parallel();
@@ -161,6 +166,18 @@ pub fn filter_candidates(
                 accepted.insert(path);
             }
             Err(error) => walk_errors.push(error),
+        }
+    }
+    for candidate in candidates {
+        if root.join(candidate).is_file() || !accepts(candidate, language, go) {
+            continue;
+        }
+        let (matched, error) = matcher.matched_with_errors(candidate, false);
+        if let Some(error) = error {
+            walk_errors.push(error.to_string());
+        }
+        if !matched.is_ignore() {
+            accepted.insert(candidate.clone());
         }
     }
     if !walk_errors.is_empty() {

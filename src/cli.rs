@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand};
 use semblock::config::{Config, ConfigError};
 use semblock::diff;
-use semblock::discover::{DiscoverError, accepts, discover, filter_candidates};
+use semblock::discover::{DiscoverError, discover, filter_candidates};
 use semblock::git::{GitError, GitSelection, read_staged_files, select_files};
 use semblock::rewrite::{RewriteError, atomic_replace};
 use semblock::source::{Language, SourceError, format_source, infer_language};
@@ -314,21 +314,6 @@ impl Cli {
     ) -> Result<ExitCode, RunError> {
         let inputs: Vec<PlanInput> = if let Some(selection) = paths.git_selection() {
             let selected = select_files(&selection).map_err(RunError::git)?;
-            if mode == Mode::Fmt && selection == GitSelection::Staged {
-                for path in selected
-                    .paths
-                    .iter()
-                    .filter(|path| accepts(path, self.language, &config.go))
-                {
-                    let worktree_path = selected.root.join(path);
-                    if !worktree_path.is_file() {
-                        return Err(RunError::filesystem(format!(
-                            "cannot format staged path {} because its worktree file is missing",
-                            path.display()
-                        )));
-                    }
-                }
-            }
             let filtered = filter_candidates(
                 &selected.root,
                 &selected.paths,
