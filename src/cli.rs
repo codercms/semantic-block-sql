@@ -1,20 +1,24 @@
-use std::env;
-use std::fs;
-use std::io::{self, Read};
+mod output;
+mod planning;
+
+use std::fs::OpenOptions;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
-use semblock::Severity;
+use clap::{Args, Parser, Subcommand};
 use semblock::config::{Config, ConfigError};
 use semblock::diff;
-use semblock::discover::{DiscoverError, discover};
+use semblock::discover::{DiscoverError, discover, filter_candidates};
+use semblock::git::{GitError, GitSelection, read_staged_files, select_files};
 use semblock::rewrite::{RewriteError, atomic_replace};
-use semblock::source::{FormattedSource, Language, SourceError, format_source, infer_language};
+use semblock::source::{Language, SourceError, format_source, infer_language};
 
-// The CLI flow is adapted from pgfmt 2.2.0 (BSD-3-Clause). See
-// THIRD_PARTY_NOTICES.md. Project discovery and host extraction are semblock
-// modules and do not come from upstream pgfmt.
+use output::{
+    CheckOutput, display_path, emit_check_path, emit_check_summary, emit_check_summary_refs,
+    emit_diagnostics,
+};
+use planning::{PlanInput, build_plans};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -41,7 +45,7 @@ pub struct Cli {
     #[arg(long, value_enum, default_value_t = Language::Auto, global = true)]
     language: Language,
 
-    /// Number of project-discovery workers
+    /// Number of discovery and formatting workers
     #[arg(long, default_value_t = default_jobs(), global = true)]
     jobs: usize,
 
@@ -59,15 +63,79 @@ enum Command {
     /// Format files in place, or print formatted stdin
     Fmt(Paths),
     /// Check formatting without writing
-    Check(Paths),
+    Check(CheckArgs),
     /// Print unified diffs without writing
     Diff(Paths),
+    /// Inspect the resolved configuration
+    Config(ConfigArgs),
+    /// Create a semblock.toml configuration file
+    Init(InitArgs),
 }
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Clone, Args)]
 struct Paths {
     /// Files or directories; defaults to the current directory
+    #[arg(value_name = "PATH", conflicts_with_all = ["staged", "changed_since"])]
     paths: Vec<PathBuf>,
+
+    /// Process files staged in the current Git repository
+    #[arg(long, conflicts_with = "changed_since")]
+    staged: bool,
+
+    /// Process files changed since the merge base with REF, including untracked files
+    #[arg(long, value_name = "REF")]
+    changed_since: Option<String>,
+}
+
+impl Paths {
+    fn git_selection(&self) -> Option<GitSelection> {
+        if self.staged {
+            Some(GitSelection::Staged)
+        } else {
+            self.changed_since
+                .as_ref()
+                .map(|reference| GitSelection::ChangedSince(reference.clone()))
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct CheckArgs {
+    #[command(flatten)]
+    paths: Paths,
+
+    /// Print paths that would be reformatted
+    #[arg(long)]
+    list_different: bool,
+
+    /// Print a deterministic check summary
+    #[arg(long)]
+    summary: bool,
+}
+
+#[derive(Debug, Args)]
+struct ConfigArgs {
+    #[command(subcommand)]
+    command: ConfigCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    /// Print the resolved configuration path or <defaults>
+    Path,
+    /// Print the effective configuration as TOML
+    Show,
+}
+
+#[derive(Debug, Args)]
+struct InitArgs {
+    /// Configuration file to create
+    #[arg(value_name = "PATH", default_value = "semblock.toml")]
+    path: PathBuf,
+
+    /// Replace an existing configuration file
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,33 +150,121 @@ impl Cli {
         if self.jobs == 0 {
             return Err(RunError::usage("--jobs must be greater than zero"));
         }
-        let (mode, paths) = match &self.command {
-            Command::Fmt(paths) => (Mode::Fmt, paths.paths.clone()),
-            Command::Check(paths) => (Mode::Check, paths.paths.clone()),
-            Command::Diff(paths) => (Mode::Diff, paths.paths.clone()),
+
+        match &self.command {
+            Command::Config(args) => return self.run_config(args),
+            Command::Init(args) => return self.run_init(args),
+            _ => {}
+        }
+
+        let (mode, paths, check_output) = match &self.command {
+            Command::Fmt(paths) => (Mode::Fmt, paths.clone(), CheckOutput::default()),
+            Command::Check(args) => (
+                Mode::Check,
+                args.paths.clone(),
+                CheckOutput {
+                    list_different: args.list_different,
+                    summary: args.summary,
+                },
+            ),
+            Command::Diff(paths) => (Mode::Diff, paths.clone(), CheckOutput::default()),
+            Command::Config(_) | Command::Init(_) => unreachable!("handled above"),
         };
         let config = Config::load(self.config.as_deref()).map_err(RunError::config)?;
 
         if self.stdin {
-            if !paths.is_empty() {
+            if !paths.paths.is_empty() || paths.git_selection().is_some() {
                 return Err(RunError::usage(
-                    "--stdin cannot be combined with filesystem paths",
+                    "--stdin cannot be combined with filesystem or Git selection",
                 ));
             }
-            return self.run_stdin(mode, &config);
+            return self.run_stdin(mode, &config, check_output);
         }
         if self.filename.is_some() {
             return Err(RunError::usage("--filename requires --stdin"));
         }
-        self.run_paths(mode, &paths, &config)
+        self.run_paths(mode, &paths, &config, check_output)
     }
 
-    fn run_stdin(self, mode: Mode, config: &Config) -> Result<ExitCode, RunError> {
-        let filename = self
-            .filename
-            .as_deref()
-            .ok_or_else(|| RunError::usage("--stdin requires --filename"))?;
-        let language = infer_language(filename, self.language).map_err(RunError::source)?;
+    fn run_config(&self, args: &ConfigArgs) -> Result<ExitCode, RunError> {
+        self.reject_source_options("config")?;
+        let loaded = Config::load_resolved(self.config.as_deref()).map_err(RunError::config)?;
+        match args.command {
+            ConfigCommand::Path => match loaded.path {
+                Some(path) => println!("{}", path.display()),
+                None => println!("<defaults>"),
+            },
+            ConfigCommand::Show => {
+                match loaded.path {
+                    Some(path) => println!("# source: {}", path.display()),
+                    None => println!("# source: built-in defaults"),
+                }
+                print!("{}", loaded.config.to_toml());
+            }
+        }
+        Ok(ExitCode::SUCCESS)
+    }
+
+    fn run_init(&self, args: &InitArgs) -> Result<ExitCode, RunError> {
+        self.reject_source_options("init")?;
+        if self.config.is_some() {
+            return Err(RunError::usage(
+                "--config cannot be combined with init; pass the target path positionally",
+            ));
+        }
+        let mut options = OpenOptions::new();
+        options.write(true);
+        if args.force {
+            options.create(true).truncate(true);
+        } else {
+            options.create_new(true);
+        }
+        let mut file = options.open(&args.path).map_err(|error| {
+            let message = if error.kind() == std::io::ErrorKind::AlreadyExists {
+                format!(
+                    "{} already exists; pass --force to replace it",
+                    args.path.display()
+                )
+            } else {
+                format!("failed to create {}: {error}", args.path.display())
+            };
+            RunError::filesystem(message)
+        })?;
+        file.write_all(Config::default().to_toml().as_bytes())
+            .map_err(|error| {
+                RunError::filesystem(format!("failed to write {}: {error}", args.path.display()))
+            })?;
+        if !self.quiet {
+            eprintln!("Created: {}", args.path.display());
+        }
+        Ok(ExitCode::SUCCESS)
+    }
+
+    fn reject_source_options(&self, command: &str) -> Result<(), RunError> {
+        if self.stdin || self.filename.is_some() || self.language != Language::Auto {
+            return Err(RunError::usage(format!(
+                "source input options cannot be combined with the {command} command"
+            )));
+        }
+        Ok(())
+    }
+
+    fn run_stdin(
+        self,
+        mode: Mode,
+        config: &Config,
+        check_output: CheckOutput,
+    ) -> Result<ExitCode, RunError> {
+        let filename = match self.filename {
+            Some(path) => path,
+            None if self.language != Language::Auto => PathBuf::from("<stdin>"),
+            None => {
+                return Err(RunError::usage(
+                    "--stdin requires --filename when --language is auto",
+                ));
+            }
+        };
+        let language = infer_language(&filename, self.language).map_err(RunError::source)?;
         let mut source = String::new();
         io::stdin()
             .read_to_string(&mut source)
@@ -118,13 +274,16 @@ impl Cli {
 
         match mode {
             Mode::Fmt => {
-                emit_diagnostics(filename, &formatted, self.quiet, false);
+                emit_diagnostics(&filename, &formatted, self.quiet, false);
                 print!("{}", formatted.output);
                 Ok(ExitCode::SUCCESS)
             }
             Mode::Check => {
-                emit_diagnostics(filename, &formatted, self.quiet, true);
-                emit_fallback_change(filename, &formatted, self.quiet);
+                emit_diagnostics(&filename, &formatted, self.quiet, true);
+                emit_check_path(&filename, &formatted, check_output, self.quiet);
+                if check_output.summary {
+                    emit_check_summary(std::slice::from_ref(&formatted));
+                }
                 Ok(if formatted.changed {
                     ExitCode::from(1)
                 } else {
@@ -132,7 +291,7 @@ impl Cli {
                 })
             }
             Mode::Diff => {
-                emit_diagnostics(filename, &formatted, self.quiet, false);
+                emit_diagnostics(&filename, &formatted, self.quiet, false);
                 if formatted.changed {
                     print!(
                         "{}",
@@ -149,41 +308,88 @@ impl Cli {
     fn run_paths(
         self,
         mode: Mode,
-        paths: &[PathBuf],
+        paths: &Paths,
         config: &Config,
+        check_output: CheckOutput,
     ) -> Result<ExitCode, RunError> {
-        let roots = if paths.is_empty() {
-            vec![PathBuf::from(".")]
-        } else {
-            paths.to_vec()
-        };
-        let files = discover(
-            &roots,
-            self.language,
-            &config.discovery,
-            &config.go,
-            self.jobs,
-        )
-        .map_err(RunError::discovery)?;
+        let inputs: Vec<PlanInput> = if let Some(selection) = paths.git_selection() {
+            let selected = select_files(&selection).map_err(RunError::git)?;
+            let filtered = filter_candidates(
+                &selected.root,
+                &selected.paths,
+                self.language,
+                &config.discovery,
+                &config.go,
+                self.jobs,
+            )
+            .map_err(RunError::discovery)?;
 
-        let mut plans = Vec::with_capacity(files.len());
-        for path in files {
-            if self.verbose {
-                eprintln!("Inspecting: {}", path.display());
+            match selection {
+                GitSelection::Staged => {
+                    let staged =
+                        read_staged_files(&selected.root, &filtered).map_err(RunError::git)?;
+                    if mode == Mode::Fmt {
+                        for file in &staged {
+                            let worktree_path = selected.root.join(&file.path);
+                            let worktree = std::fs::read(&worktree_path).map_err(|error| {
+                                RunError::filesystem(format!(
+                                    "cannot format staged path {} because its worktree file is unavailable: {error}",
+                                    file.path.display()
+                                ))
+                            })?;
+                            if worktree != file.source.as_bytes() {
+                                return Err(RunError::filesystem(format!(
+                                    "cannot format staged path {} because the Git index and worktree differ",
+                                    file.path.display()
+                                )));
+                            }
+                        }
+                        staged
+                            .into_iter()
+                            .map(|file| PlanInput::Worktree(selected.root.join(file.path)))
+                            .collect()
+                    } else {
+                        staged
+                            .into_iter()
+                            .map(|file| PlanInput::Provided {
+                                path: selected.root.join(file.path),
+                                source: file.source,
+                            })
+                            .collect()
+                    }
+                }
+                GitSelection::ChangedSince(_) => filtered
+                    .into_iter()
+                    .map(|path| PlanInput::Worktree(selected.root.join(path)))
+                    .collect(),
             }
-            let language = infer_language(&path, self.language).map_err(RunError::source)?;
-            let source = fs::read_to_string(&path)
-                .map_err(|error| RunError::filesystem(format!("{}: {error}", path.display())))?;
-            let formatted = format_source(&source, language, &config.format, &config.go)
-                .map_err(|error| RunError::source_with_path(&path, error))?;
-            plans.push(Plan {
-                path,
-                source,
-                formatted,
-            });
-        }
+        } else {
+            let roots = if paths.paths.is_empty() {
+                vec![PathBuf::from(".")]
+            } else {
+                paths.paths.clone()
+            };
+            discover(
+                &roots,
+                self.language,
+                &config.discovery,
+                &config.go,
+                self.jobs,
+            )
+            .map_err(RunError::discovery)?
+            .into_iter()
+            .map(PlanInput::Worktree)
+            .collect()
+        };
 
+        if self.verbose {
+            for input in &inputs {
+                eprintln!("Inspecting: {}", input.path().display());
+            }
+        }
+        let plans = build_plans(inputs, self.language, config, self.jobs)?;
         let changed = plans.iter().filter(|plan| plan.formatted.changed).count();
+
         match mode {
             Mode::Fmt => {
                 for plan in &plans {
@@ -201,7 +407,10 @@ impl Cli {
             Mode::Check => {
                 for plan in &plans {
                     emit_diagnostics(&plan.path, &plan.formatted, self.quiet, true);
-                    emit_fallback_change(&plan.path, &plan.formatted, self.quiet);
+                    emit_check_path(&plan.path, &plan.formatted, check_output, self.quiet);
+                }
+                if check_output.summary {
+                    emit_check_summary_refs(plans.iter().map(|plan| &plan.formatted));
                 }
                 Ok(if changed == 0 {
                     ExitCode::SUCCESS
@@ -231,57 +440,6 @@ impl Cli {
             }
         }
     }
-}
-
-struct Plan {
-    path: PathBuf,
-    source: String,
-    formatted: FormattedSource,
-}
-
-fn emit_diagnostics(
-    path: &Path,
-    formatted: &FormattedSource,
-    quiet: bool,
-    include_style_errors: bool,
-) {
-    if quiet {
-        return;
-    }
-    for diagnostic in &formatted.diagnostics {
-        if !include_style_errors && diagnostic.severity == Severity::Error {
-            continue;
-        }
-        let severity = match diagnostic.severity {
-            Severity::Error => "error",
-            Severity::Warning => "warning",
-        };
-        eprintln!(
-            "{}:{}-{}: {severity}[{}]: {}",
-            path.display(),
-            diagnostic.source_range.start,
-            diagnostic.source_range.end,
-            diagnostic.rule_id,
-            diagnostic.message
-        );
-    }
-}
-
-fn emit_fallback_change(path: &Path, formatted: &FormattedSource, quiet: bool) {
-    if !quiet && formatted.changed && formatted.diagnostics.is_empty() {
-        eprintln!("Would reformat: {}", path.display());
-    }
-}
-
-fn display_path(path: &Path) -> String {
-    let current = env::current_dir().ok();
-    current
-        .as_deref()
-        .and_then(|current| path.strip_prefix(current).ok())
-        .unwrap_or(path)
-        .to_string_lossy()
-        .trim_start_matches("./")
-        .to_string()
 }
 
 fn default_jobs() -> usize {
@@ -320,7 +478,7 @@ impl RunError {
         }
     }
 
-    fn source_with_path(path: &Path, error: SourceError) -> Self {
+    pub(super) fn source_with_path(path: &Path, error: SourceError) -> Self {
         match error {
             SourceError::UnknownLanguage(_) | SourceError::GoDisabled => {
                 Self::usage(format!("{}: {error}", path.display()))
@@ -336,11 +494,15 @@ impl RunError {
         Self::filesystem(error.to_string())
     }
 
+    fn git(error: GitError) -> Self {
+        Self::filesystem(error.to_string())
+    }
+
     fn rewrite(error: RewriteError) -> Self {
         Self::filesystem(error.to_string())
     }
 
-    fn filesystem(message: impl Into<String>) -> Self {
+    pub(super) fn filesystem(message: impl Into<String>) -> Self {
         Self {
             code: 4,
             message: message.into(),

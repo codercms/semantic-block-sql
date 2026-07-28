@@ -7,6 +7,7 @@ pub mod config;
 pub mod diff;
 pub mod directives;
 pub mod discover;
+pub mod git;
 pub mod host;
 pub mod rewrite;
 pub mod source;
