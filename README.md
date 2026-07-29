@@ -137,7 +137,7 @@ The formatter has fixture-backed structural support for substantial PostgreSQL s
 - basic `CREATE TABLE`, feature-rich `CREATE INDEX`, and multi-action `ALTER TABLE`;
 - `CREATE VIEW` and `CREATE MATERIALIZED VIEW`.
 
-Important remaining areas include routines, PL/pgSQL, richer table and partition DDL, and several advanced relation-source variants.
+Important remaining areas include richer table and partition DDL, broader procedural node families, and several advanced relation-source variants.
 
 A PostgreSQL statement may be valid while still being unsupported by the formatter. In that case, `semblock` preserves the statement and emits `syntax.unsupported`. This is a deliberate safety boundary, not a parser error.
 

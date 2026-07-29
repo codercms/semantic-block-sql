@@ -1,6 +1,6 @@
 # PL/pgSQL and dollar-quoted coverage — durable checklist
 
-Status: **Batch P3 complete; Batch P4 pending**
+Status: **Implementation complete; publication handoff pending**
 
 This workstream completes the remaining Batch 3 routine-body tranche after the
 PostgreSQL scalar-expression coverage. Update this file before every checkpoint
@@ -56,8 +56,20 @@ in `AGENTS.md`.
 
 ## Batch P4 — Reconciliation and final gate
 
-- [ ] Mark PL/pgSQL blocks and dollar quoting complete in the main checklist.
-- [ ] Document the routine-body support boundary.
-- [ ] Run formatting, Clippy, all tests, Rustdoc, and `git diff --check`.
-- [ ] Perform final architecture, safety, comment, dependency, and dead-code review.
-- [ ] Commit and publish or prepare a verified bundle.
+- [x] Mark PL/pgSQL blocks and dollar quoting complete in the main checklist.
+- [x] Document the routine-body support boundary.
+- [x] Run formatting, Clippy, all tests, Rustdoc, and `git diff --check`.
+- [x] Perform final architecture, safety, comment, dependency, and dead-code review.
+- [x] Commit and prepare a verified complete-history bundle.
+
+Final validation on 2026-07-29:
+
+- Rust formatting passed.
+- Clippy passed for all targets with warnings denied.
+- All 151 Rust tests passed, including CLI and realistic Go compilation coverage.
+- Rust documentation built successfully.
+- `git diff --check` passed.
+- Final review found no dependency additions, ordinary-SQL ownership weakening,
+  protected literal rewriting, or accidental support for unreviewed procedural nodes.
+- Mixed ordinary/routine documents are formatted statement-by-statement and
+  parser-normalized PL/pgSQL expression/query trees are compared for equivalence.

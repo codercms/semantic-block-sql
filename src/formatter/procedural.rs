@@ -2,26 +2,67 @@ use serde_json::Value;
 
 use super::{FormatDiagnostic, FormatOptions, FormattedSql};
 
-pub(super) fn is_routine(source: &str) -> Result<bool, FormatDiagnostic> {
+pub(super) fn contains_routine(source: &str) -> Result<bool, FormatDiagnostic> {
     let parsed = pg_query::parse(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
-    if parsed.protobuf.stmts.len() != 1 {
-        return Ok(false);
-    }
-    let node = parsed.protobuf.stmts[0]
-        .stmt
-        .as_deref()
-        .and_then(|node| node.node.as_ref());
-    Ok(matches!(
-        node,
-        Some(
-            pg_query::protobuf::node::Node::DoStmt(_)
-                | pg_query::protobuf::node::Node::CreateFunctionStmt(_)
+    Ok(parsed.protobuf.stmts.iter().any(|raw| {
+        matches!(
+            raw.stmt.as_deref().and_then(|node| node.node.as_ref()),
+            Some(
+                pg_query::protobuf::node::Node::DoStmt(_)
+                    | pg_query::protobuf::node::Node::CreateFunctionStmt(_)
+            )
         )
-    ))
+    }))
 }
 
-pub(super) fn format_routine(
+pub(super) fn format_routine_document(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<FormattedSql, FormatDiagnostic> {
+    let parsed = pg_query::parse(source)
+        .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
+    let mut output = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+    for raw in &parsed.protobuf.stmts {
+        let start = usize::try_from(raw.stmt_location)
+            .unwrap_or(0)
+            .min(source.len());
+        let length = usize::try_from(raw.stmt_len).unwrap_or(0);
+        let mut end = if length == 0 {
+            source.len()
+        } else {
+            start.saturating_add(length).min(source.len())
+        };
+        if source.as_bytes().get(end) == Some(&b';') {
+            end += 1;
+        }
+        output.push_str(&source[cursor..start]);
+        let statement = &source[start..end];
+        let routine = matches!(
+            raw.stmt.as_deref().and_then(|node| node.node.as_ref()),
+            Some(
+                pg_query::protobuf::node::Node::DoStmt(_)
+                    | pg_query::protobuf::node::Node::CreateFunctionStmt(_)
+            )
+        );
+        if routine {
+            output.push_str(&format_single_routine(statement, options)?.output);
+        } else {
+            output.push_str(&super::format_sql(statement, options)?.output);
+        }
+        cursor = end;
+    }
+    output.push_str(&source[cursor..]);
+    Ok(FormattedSql {
+        changed: output != source,
+        output,
+        warnings: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+}
+
+fn format_single_routine(
     source: &str,
     options: &FormatOptions,
 ) -> Result<FormattedSql, FormatDiagnostic> {
@@ -39,6 +80,7 @@ pub(super) fn format_routine(
     output.push_str(&formatted_body);
     output.push_str(&source[close_start..close_end]);
     output.push_str(&source[close_end..]);
+    let output = normalize_outer_tokens(&output, options)?;
 
     validate_outer(&output)?;
     let reparsed = pg_query::parse_plpgsql(&output)
@@ -237,27 +279,24 @@ fn format_body(body: &str, options: &FormatOptions) -> Result<String, FormatDiag
         }
 
         let rendered = format_body_line(text, options)?;
-        for (part_index, part) in rendered.lines().enumerate() {
-            let part_indent = if part_index == 0 { indent } else { indent + 1 };
-            lines.push(format!("{}{}", " ".repeat(part_indent * 4), part));
+        for part in rendered.lines() {
+            lines.push(format!("{}{}", " ".repeat(indent * 4), part));
         }
 
+        let opens_branch = upper.starts_with("BEGIN")
+            || ((upper.starts_with("IF ") || upper.starts_with("ELSIF "))
+                && upper.ends_with(" THEN"))
+            || upper == "ELSE"
+            || upper == "EXCEPTION"
+            || (upper.starts_with("WHEN ") && upper.ends_with(" THEN"));
         if upper == "DECLARE" {
             indent += 1;
             in_declare = true;
-        } else if upper.starts_with("BEGIN") {
+        } else if opens_branch {
             indent += 1;
-        } else if (upper.starts_with("IF ") || upper.starts_with("ELSIF "))
-            && upper.ends_with(" THEN")
-        {
-            indent += 1;
-        } else if upper == "ELSE" {
-            indent += 1;
-        } else if upper == "EXCEPTION" {
-            indent += 1;
-        } else if upper.starts_with("WHEN ") && upper.ends_with(" THEN") {
-            indent += 1;
-            in_handler = true;
+            if upper.starts_with("WHEN ") {
+                in_handler = true;
+            }
         }
     }
 
@@ -302,11 +341,7 @@ fn format_body_line(text: &str, options: &FormatOptions) -> Result<String, Forma
             )));
         }
     }
-    Ok(text
-        .replace(":=", " := ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" "))
+    Ok(space_assignment_operator(text))
 }
 
 fn uppercase_procedural_words(text: &str) -> String {
@@ -365,8 +400,8 @@ fn uppercase_procedural_words(text: &str) -> String {
 fn validate_plpgsql_equivalent(before: &Value, after: &Value) -> Result<(), FormatDiagnostic> {
     let mut before = before.clone();
     let mut after = after.clone();
-    normalize_plpgsql(&mut before);
-    normalize_plpgsql(&mut after);
+    normalize_plpgsql(&mut before)?;
+    normalize_plpgsql(&mut after)?;
     if before == after {
         Ok(())
     } else {
@@ -374,27 +409,106 @@ fn validate_plpgsql_equivalent(before: &Value, after: &Value) -> Result<(), Form
     }
 }
 
-fn normalize_plpgsql(value: &mut Value) {
+fn normalize_plpgsql(value: &mut Value) -> Result<(), FormatDiagnostic> {
     match value {
         Value::Object(fields) => {
             fields.remove("lineno");
-            if fields.contains_key("query") {
-                fields.remove("query");
-            }
             if let Some(Value::String(type_name)) = fields.get_mut("typname") {
                 *type_name = type_name.trim().to_owned();
             }
+            if let Some(Value::String(query)) = fields.get("query") {
+                let mode = fields.get("parseMode").and_then(Value::as_i64).unwrap_or(0);
+                let sql = if mode == 0 {
+                    query.clone()
+                } else {
+                    format!("SELECT {query}")
+                };
+                let parsed = pg_query::parse(&sql)
+                    .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
+                let mut canonical = serde_json::to_value(parsed.protobuf)
+                    .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
+                strip_locations(&mut canonical);
+                fields.insert("query".into(), canonical);
+            }
             for child in fields.values_mut() {
-                normalize_plpgsql(child);
+                normalize_plpgsql(child)?;
             }
         }
         Value::Array(items) => {
             for item in items {
-                normalize_plpgsql(item);
+                normalize_plpgsql(item)?;
             }
         }
         _ => {}
     }
+    Ok(())
+}
+
+fn strip_locations(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            for name in ["location", "stmt_location", "stmt_len"] {
+                fields.remove(name);
+            }
+            for child in fields.values_mut() {
+                strip_locations(child);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_locations),
+        _ => {}
+    }
+}
+
+fn normalize_outer_tokens(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
+    let tokens = super::tokens::tokenize(source)?;
+    let mut output = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+    for (index, token) in tokens.iter().enumerate() {
+        output.push_str(&source[cursor..token.start]);
+        if ["function", "procedure", "language", "returns"]
+            .iter()
+            .any(|keyword| token.text.eq_ignore_ascii_case(keyword))
+        {
+            output.push_str(&token.text.to_ascii_uppercase());
+        } else {
+            output.push_str(&super::semantic_block::render_token(
+                &tokens, index, options,
+            ));
+        }
+        cursor = token.end;
+    }
+    output.push_str(&source[cursor..]);
+    Ok(output)
+}
+
+fn space_assignment_operator(text: &str) -> String {
+    let mut output = String::with_capacity(text.len() + 2);
+    let bytes = text.as_bytes();
+    let mut index = 0usize;
+    let mut quoted = false;
+    while index < bytes.len() {
+        if bytes[index] == b'\'' {
+            quoted = !quoted;
+            output.push('\'');
+            index += 1;
+        } else if !quoted && bytes[index..].starts_with(b":=") {
+            while output.ends_with(' ') {
+                output.pop();
+            }
+            output.push_str(" := ");
+            index += 2;
+            while bytes.get(index) == Some(&b' ') {
+                index += 1;
+            }
+        } else {
+            output.push(bytes[index] as char);
+            index += 1;
+        }
+    }
+    output.trim().to_owned()
 }
 
 fn unsupported(source: &str, feature: impl Into<String>) -> FormatDiagnostic {

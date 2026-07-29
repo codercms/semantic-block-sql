@@ -212,9 +212,9 @@ pub enum FormatDiagnostic {
 /// Formats one or more complete PostgreSQL statements without touching files.
 pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql, FormatDiagnostic> {
     options.validate()?;
-    if procedural::is_routine(source)? {
-        let mut formatted = procedural::format_routine(source, options)?;
-        let second = procedural::format_routine(&formatted.output, options)?;
+    if procedural::contains_routine(source)? {
+        let mut formatted = procedural::format_routine_document(source, options)?;
+        let second = procedural::format_routine_document(&formatted.output, options)?;
         if second.output != formatted.output {
             return Err(FormatDiagnostic::NotIdempotent);
         }
