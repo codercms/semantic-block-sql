@@ -359,9 +359,11 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Admin
             | Token::After
             | Token::Before
+            | Token::Breadth
             | Token::Cache
             | Token::Comment
             | Token::Cycle
+            | Token::Depth
             | Token::DomainP
             | Token::Each
             | Token::EnumP
@@ -369,17 +371,26 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Function
             | Token::Grant
             | Token::Increment
+            | Token::Locked
             | Token::Maxvalue
             | Token::Minvalue
+            | Token::Nowait
+            | Token::Of
             | Token::Owned
             | Token::Policy
             | Token::Restart
             | Token::Revoke
+            | Token::Search
+            | Token::Share
+            | Token::Skip
             | Token::Sequence
             | Token::Start
+            | Token::Temp
+            | Token::Temporary
             | Token::Trigger
             | Token::Truncate
             | Token::TypeP
+            | Token::Unlogged
             | Token::YearP
     )
 }

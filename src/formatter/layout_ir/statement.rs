@@ -91,6 +91,20 @@ fn verify_select_shape(
         named_windows,
         spec.named_windows,
     )?;
+    require_presence(
+        owner,
+        "INTO clause",
+        find_kind(tokens, depths, body_start + 1, end, base_depth, Token::Into).is_some(),
+        spec.has_into,
+    )?;
+    require_count(
+        owner,
+        "locking-clause count",
+        (body_start + 1..end)
+            .filter(|index| depths[*index] == base_depth && tokens[*index].kind == Token::For)
+            .count(),
+        spec.locking_clauses,
+    )?;
     Ok(())
 }
 

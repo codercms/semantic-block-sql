@@ -29,6 +29,7 @@ pub(super) struct TokenSpan {
 /// Query-clause locations bound once for a SELECT token span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) struct QueryClauses {
+    pub into: Option<usize>,
     pub from: Option<usize>,
     pub where_clause: Option<usize>,
     pub group_by: Option<usize>,
@@ -44,6 +45,7 @@ pub(super) struct QueryClauses {
 impl QueryClauses {
     pub fn ordered_boundaries(self, end: usize) -> Vec<usize> {
         let mut result = [
+            self.into,
             self.from,
             self.where_clause,
             self.group_by,

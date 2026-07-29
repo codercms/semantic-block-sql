@@ -7,8 +7,10 @@ use super::{FormatDiagnostic, SourceRange};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct SelectSpec {
     pub has_with: bool,
+    pub has_into: bool,
     pub set_operations: usize,
     pub named_windows: usize,
+    pub locking_clauses: usize,
 }
 
 /// Top-level VALUES capabilities proven by PostgreSQL AST validation.
@@ -509,8 +511,10 @@ mod tests {
             SourceStatement {
                 spec: StatementSpec::Select(SelectSpec {
                     has_with: false,
+                    has_into: false,
                     set_operations: 0,
                     named_windows: 0,
+                    locking_clauses: 0,
                 }),
                 range: SourceRange::new(0, 9),
             },
@@ -543,8 +547,10 @@ mod tests {
         let document = SupportedDocument::new(vec![SourceStatement {
             spec: StatementSpec::Select(SelectSpec {
                 has_with: false,
+                has_into: false,
                 set_operations: 0,
                 named_windows: 0,
+                locking_clauses: 0,
             }),
             range: SourceRange::new(0, source.len()),
         }]);

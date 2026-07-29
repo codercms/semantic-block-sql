@@ -4,9 +4,9 @@ use pg_query::protobuf::{
     AlterTableStmt, AlterTableType, CmdType, ColumnDef, ConstrType, Constraint, CreateDomainStmt,
     CreatePolicyStmt, CreateSeqStmt, CreateStmt, CreateTableAsStmt, CreateTrigStmt, DeleteStmt,
     DropBehavior, DropStmt, GrantRoleStmt, GrantStmt, GrantTargetType, IndexStmt, InsertStmt,
-    JoinExpr, JoinType, MergeMatchKind, MergeStmt, Node, ObjectType, OnCommitAction,
-    OnConflictAction, OverridingKind, RawStmt, SelectStmt, SetOperation, TruncateStmt, UpdateStmt,
-    ViewCheckOption, ViewStmt,
+    JoinExpr, JoinType, LockClauseStrength, LockWaitPolicy, MergeMatchKind, MergeStmt, Node,
+    ObjectType, OnCommitAction, OnConflictAction, OverridingKind, RawStmt, SelectStmt,
+    SetOperation, TruncateStmt, UpdateStmt, ViewCheckOption, ViewStmt,
 };
 use pg_query::{Context, NodeRef};
 mod equivalence;
@@ -1201,9 +1201,6 @@ fn validate_dml_expression(expression: &Node) -> Result<(), &'static str> {
         .as_ref()
         .ok_or("empty data-modifying expression")?;
     for (node, _, context, _) in root.nodes() {
-        if matches!(node, NodeRef::SubLink(_)) {
-            return Err("subquery in data-modifying expression");
-        }
         validate_nested_node(node, context)?;
     }
     Ok(())
@@ -1265,8 +1262,24 @@ fn validate_with_clause(with_clause: &pg_query::protobuf::WithClause) -> Result<
             Some(NodeEnum::CommonTableExpr(cte)) => cte,
             _ => return Err("unrecognized common table expression"),
         };
-        if cte.search_clause.is_some() || cte.cycle_clause.is_some() {
-            return Err("CTE SEARCH or CYCLE clause");
+        if let Some(search) = &cte.search_clause {
+            if search.search_col_list.is_empty() || search.search_seq_column.is_empty() {
+                return Err("incomplete CTE SEARCH clause");
+            }
+        }
+        if let Some(cycle) = &cte.cycle_clause {
+            if cycle.cycle_col_list.is_empty()
+                || cycle.cycle_mark_column.is_empty()
+                || cycle.cycle_path_column.is_empty()
+            {
+                return Err("incomplete CTE CYCLE clause");
+            }
+            if let Some(value) = cycle.cycle_mark_value.as_deref() {
+                validate_ddl_expression(value)?;
+            }
+            if let Some(value) = cycle.cycle_mark_default.as_deref() {
+                validate_ddl_expression(value)?;
+            }
         }
         let query = cte
             .ctequery
@@ -1277,7 +1290,19 @@ fn validate_with_clause(with_clause: &pg_query::protobuf::WithClause) -> Result<
             NodeEnum::SelectStmt(select) => {
                 let _ = validate_select(select, with_clause.recursive)?;
             }
-            _ => return Err("data-modifying common table expression"),
+            NodeEnum::InsertStmt(insert) => {
+                let _ = validate_insert(insert)?;
+            }
+            NodeEnum::UpdateStmt(update) => {
+                let _ = validate_update(update)?;
+            }
+            NodeEnum::DeleteStmt(delete) => {
+                let _ = validate_delete(delete)?;
+            }
+            NodeEnum::MergeStmt(merge) => {
+                let _ = validate_merge(merge)?;
+            }
+            _ => return Err("unreviewed common table expression body"),
         }
     }
     Ok(())
@@ -1311,30 +1336,67 @@ fn validate_select(
 
     Ok(SelectSpec {
         has_with: select.with_clause.is_some(),
+        has_into: select.into_clause.is_some(),
         set_operations,
         named_windows: select.window_clause.len(),
+        locking_clauses: select.locking_clause.len(),
     })
 }
 
 fn validate_select_fields(select: &SelectStmt, allow_values: bool) -> Result<(), &'static str> {
-    if select.into_clause.is_some() {
-        return Err("SELECT INTO clause");
+    if let Some(into) = &select.into_clause {
+        let relation = into.rel.as_ref().ok_or("SELECT INTO without target")?;
+        if relation.alias.is_some() || into.view_query.is_some() || into.skip_data {
+            return Err("unreviewed SELECT INTO target form");
+        }
+        for name in &into.col_names {
+            if !matches!(name.node.as_ref(), Some(NodeEnum::String(_))) {
+                return Err("unrecognized SELECT INTO column name");
+            }
+        }
+        validate_def_elements(&into.options, "SELECT INTO option")?;
+        match OnCommitAction::try_from(into.on_commit).unwrap_or(OnCommitAction::Undefined) {
+            OnCommitAction::OncommitNoop
+            | OnCommitAction::OncommitPreserveRows
+            | OnCommitAction::OncommitDeleteRows
+            | OnCommitAction::OncommitDrop => {}
+            OnCommitAction::Undefined => return Err("unknown SELECT INTO ON COMMIT mode"),
+        }
     }
     if !allow_values && !select.values_lists.is_empty() {
         return Err("VALUES statement");
     }
-    if !select.locking_clause.is_empty() {
-        return Err("row-locking clause");
+    for clause in &select.locking_clause {
+        let Some(NodeEnum::LockingClause(clause)) = clause.node.as_ref() else {
+            return Err("unrecognized row-locking clause");
+        };
+        if !matches!(
+            LockClauseStrength::try_from(clause.strength).unwrap_or(LockClauseStrength::Undefined),
+            LockClauseStrength::LcsForkeyshare
+                | LockClauseStrength::LcsForshare
+                | LockClauseStrength::LcsFornokeyupdate
+                | LockClauseStrength::LcsForupdate
+        ) {
+            return Err("unknown row-locking strength");
+        }
+        if matches!(
+            LockWaitPolicy::try_from(clause.wait_policy).unwrap_or(LockWaitPolicy::Undefined),
+            LockWaitPolicy::Undefined
+        ) {
+            return Err("unknown row-locking wait policy");
+        }
+        for relation in &clause.locked_rels {
+            if !matches!(relation.node.as_ref(), Some(NodeEnum::RangeVar(_))) {
+                return Err("unrecognized row-locking relation");
+            }
+        }
     }
     Ok(())
 }
 
-fn validate_nested_node(node: NodeRef<'_>, context: Context) -> Result<(), &'static str> {
+fn validate_nested_node(node: NodeRef<'_>, _context: Context) -> Result<(), &'static str> {
     match node {
         NodeRef::SelectStmt(select) => validate_nested_select(select),
-        NodeRef::SubLink(_) if context == Context::DML => {
-            Err("subquery in data-modifying statement")
-        }
         NodeRef::JsonObjectConstructor(constructor) => {
             validate_simple_json_object_constructor(constructor)
         }

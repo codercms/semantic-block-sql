@@ -453,9 +453,19 @@ fn plan_query_clauses(
         .iter()
         .flat_map(|with| {
             with.definitions.iter().filter_map(|&(open, close)| {
+                let body_depth = depths[open] + 1;
+                let body_start = (open + 1..close)
+                    .find(|index| depths[*index] == body_depth && !tokens[*index].is_comment())?;
+                if !matches!(tokens[body_start].kind, Token::Select | Token::With) {
+                    return None;
+                }
                 queries
                     .iter()
-                    .find(|query| query.select > open && query.select < close)
+                    .find(|query| {
+                        query.select > open
+                            && query.select < close
+                            && query.base_depth == body_depth
+                    })
                     .map(|query| query.select)
             })
         })
@@ -491,6 +501,13 @@ fn plan_query_clauses(
         for boundary in query.clauses.ordered_boundaries(end) {
             if boundary < end {
                 plan.break_before(boundary, 1, base_depth);
+            }
+        }
+        if query.clauses.locking.is_some() {
+            for index in select + 1..end {
+                if depths[index] == base_depth && tokens[index].kind == Token::For {
+                    plan.break_before(index, 1, base_depth);
+                }
             }
         }
         for (index, depth) in depths.iter().enumerate().take(end).skip(select + 1) {
@@ -648,6 +665,11 @@ fn plan_ctes(
                     plan.break_before(after_close + 1, usize::from(blank) + 1, base_indent);
                 }
             } else if position + 1 == block.definitions.len() {
+                for clause in close + 1..block.body_start {
+                    if matches!(tokens[clause].kind, Token::Search | Token::Cycle) {
+                        plan.break_before(clause, 1, base_indent);
+                    }
+                }
                 plan.break_before(block.body_start, 1, base_indent);
             }
 

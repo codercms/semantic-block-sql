@@ -1,6 +1,6 @@
 # Expanded PostgreSQL coverage — durable checklist
 
-Status: **Batch X1 complete; Batch X2 in progress**
+Status: **Batch X2 complete; Batch X3 in progress**
 
 This workstream is one PR-sized batch, split into durable internal checkpoints.
 Every checked implementation item requires fixtures, parser-backed capability
@@ -47,15 +47,15 @@ batch self-review.
 
 ## Batch X2 — Query and DML variants
 
-- [ ] `SELECT ... INTO` capability and layout.
-- [ ] `FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, and `FOR KEY SHARE`,
+- [x] `SELECT ... INTO` capability and layout.
+- [x] `FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, and `FOR KEY SHARE`,
   including `OF`, `NOWAIT`, and `SKIP LOCKED`.
-- [ ] Data-modifying CTE bodies for reviewed INSERT/UPDATE/DELETE/MERGE shapes.
-- [ ] `SEARCH` and `CYCLE` CTE clauses.
-- [ ] Scalar/existence subqueries in UPDATE, DELETE, and MERGE expressions.
-- [ ] Preserve query-clause ownership and prevent DML predicate/subquery confusion.
-- [ ] Golden, comment, equivalence, idempotence, and fail-closed fixtures.
-- [ ] X2 self-review and checkpoint commit.
+- [x] Data-modifying CTE bodies for reviewed INSERT/UPDATE/DELETE/MERGE shapes.
+- [x] `SEARCH` and `CYCLE` CTE clauses.
+- [x] Scalar/existence subqueries in UPDATE, DELETE, and MERGE expressions.
+- [x] Preserve query-clause ownership and prevent DML predicate/subquery confusion.
+- [x] Golden, comment, equivalence, idempotence, and fail-closed fixtures.
+- [x] X2 self-review and checkpoint commit.
 
 ## Batch X3 — Relation sources and richer table DDL
 
@@ -67,7 +67,7 @@ batch self-review.
 - [ ] Table inheritance.
 - [ ] Reviewed storage/access-method/tablespace/on-commit options.
 - [ ] Typed-table forms and reviewed typed-table column options.
-- [ ] Golden, comment, equivalence, idempotence, and fail-closed fixtures.
+- [x] Golden, comment, equivalence, idempotence, and fail-closed fixtures.
 - [ ] X3 self-review and checkpoint commit.
 
 ## Batch X4 — PL/pgSQL control-flow and dynamic execution
