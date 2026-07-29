@@ -339,7 +339,15 @@ fn format_regular_document_content(
         output.push_str(&normalize_document_gap(&source[cursor..start], false));
         let statement = &source[start..end];
         match format_statement_once(statement, raw, options) {
-            Ok(formatted) => output.push_str(&formatted.output),
+            Ok(formatted) => {
+                output.push_str(&formatted.output);
+                diagnostics.extend(
+                    formatted
+                        .diagnostics
+                        .into_iter()
+                        .map(|diagnostic| diagnostic.shifted(start)),
+                );
+            }
             Err(error @ FormatDiagnostic::UnsupportedSyntax { .. }) => {
                 output.push_str(statement);
                 diagnostics.push(

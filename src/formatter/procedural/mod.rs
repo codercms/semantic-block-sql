@@ -1,3 +1,6 @@
+mod ir;
+mod layout;
+
 use serde_json::Value;
 
 use super::{FormatDiagnostic, FormatOptions, FormattedSql};
@@ -9,15 +12,17 @@ pub(super) fn format_single_routine(
     validate_outer(source)?;
     let parsed = pg_query::parse_plpgsql(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
-    validate_plpgsql_json(&parsed)?;
+    let parser_model = ir::adapt_parser(&parsed)?;
 
     let (open_start, open_end, close_start, close_end) = dollar_body_span(source)?;
     let body = &source[open_end..close_start];
-    let formatted_body = format_body(body, options)?;
-    let mut output = String::with_capacity(source.len() + formatted_body.len());
+    let body_ir = ir::parse(body)?;
+    ir::validate_parser_alignment(&body_ir, &parser_model)?;
+    let formatted_body = layout::format(&body_ir, options)?;
+    let mut output = String::with_capacity(source.len() + formatted_body.output.len());
     output.push_str(&source[..open_start]);
     output.push_str(&source[open_start..open_end]);
-    output.push_str(&formatted_body);
+    output.push_str(&formatted_body.output);
     output.push_str(&source[close_start..close_end]);
     output.push_str(&source[close_end..]);
     let output = normalize_outer_tokens(&output, options)?;
@@ -25,14 +30,19 @@ pub(super) fn format_single_routine(
     validate_outer(&output)?;
     let reparsed = pg_query::parse_plpgsql(&output)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
-    validate_plpgsql_json(&reparsed)?;
+    let reparsed_model = ir::adapt_parser(&reparsed)?;
     validate_plpgsql_equivalent(&parsed, &reparsed)?;
+    if parser_model != reparsed_model {
+        return Err(FormatDiagnostic::SemanticMismatch);
+    }
 
     let second_body = {
         let (_, second_open, second_close, _) = dollar_body_span(&output)?;
-        format_body(&output[second_open..second_close], options)?
+        let second_ir = ir::parse(&output[second_open..second_close])?;
+        ir::validate_parser_alignment(&second_ir, &reparsed_model)?;
+        layout::format(&second_ir, options)?
     };
-    if second_body != formatted_body {
+    if second_body.output != formatted_body.output {
         return Err(FormatDiagnostic::NotIdempotent);
     }
 
@@ -40,7 +50,11 @@ pub(super) fn format_single_routine(
         changed: output != source,
         output,
         warnings: Vec::new(),
-        diagnostics: Vec::new(),
+        diagnostics: formatted_body
+            .diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.shifted(open_end))
+            .collect(),
     })
 }
 
@@ -103,64 +117,6 @@ fn option_string(option: &pg_query::protobuf::DefElem) -> Option<String> {
     }
 }
 
-fn validate_plpgsql_json(value: &Value) -> Result<(), FormatDiagnostic> {
-    const ALLOWED: &[&str] = &[
-        "PLpgSQL_function",
-        "PLpgSQL_stmt_block",
-        "PLpgSQL_stmt_execsql",
-        "PLpgSQL_stmt_perform",
-        "PLpgSQL_stmt_return",
-        "PLpgSQL_stmt_if",
-        "PLpgSQL_stmt_assign",
-        "PLpgSQL_stmt_raise",
-        "PLpgSQL_stmt_getdiag",
-        "PLpgSQL_stmt_loop",
-        "PLpgSQL_stmt_while",
-        "PLpgSQL_stmt_fori",
-        "PLpgSQL_stmt_fors",
-        "PLpgSQL_stmt_forc",
-        "PLpgSQL_stmt_foreach_a",
-        "PLpgSQL_stmt_exit",
-        "PLpgSQL_stmt_case",
-        "PLpgSQL_case_when",
-        "PLpgSQL_stmt_dynexecute",
-        "PLpgSQL_stmt_open",
-        "PLpgSQL_stmt_fetch",
-        "PLpgSQL_stmt_close",
-        "PLpgSQL_rec",
-        "PLpgSQL_recfield",
-        "PLpgSQL_row",
-        "PLpgSQL_exception_block",
-        "PLpgSQL_exception",
-        "PLpgSQL_condition",
-        "PLpgSQL_expr",
-        "PLpgSQL_var",
-        "PLpgSQL_type",
-        "PLpgSQL_diag_item",
-    ];
-    match value {
-        Value::Object(fields) => {
-            for (name, child) in fields {
-                if name.starts_with("PLpgSQL_") && !ALLOWED.contains(&name.as_str()) {
-                    return Err(FormatDiagnostic::UnsupportedSyntax {
-                        feature: format!("PL/pgSQL node {name}"),
-                        start: 0,
-                        end: 0,
-                    });
-                }
-                validate_plpgsql_json(child)?;
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                validate_plpgsql_json(item)?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
 fn dollar_body_span(source: &str) -> Result<(usize, usize, usize, usize), FormatDiagnostic> {
     let bytes = source.as_bytes();
     let mut index = 0usize;
@@ -187,172 +143,29 @@ fn dollar_body_span(source: &str) -> Result<(usize, usize, usize, usize), Format
     Err(unsupported(source, "non-dollar-quoted routine body"))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BodyFrame {
-    Begin,
-    If,
-    Loop,
-    Case,
-    CaseBranch,
-    Exception,
-    ExceptionBranch,
+fn format_leaf(
+    kind: ir::BodyNodeKind,
+    text: &str,
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
+    format_body_statement(kind, text, options)
 }
 
-fn format_body(body: &str, options: &FormatOptions) -> Result<String, FormatDiagnostic> {
-    let newline = if body.contains("\r\n") { "\r\n" } else { "\n" };
-    let normalized = body.replace("\r\n", "\n");
-    if !normalized.contains('\n') {
-        return Err(unsupported(body, "compact single-line PL/pgSQL body"));
-    }
-    let mut lines = Vec::new();
-    let mut frames = Vec::new();
-    let mut in_declare = false;
-
-    for raw in normalized.lines() {
-        let text = raw.trim();
-        if text.is_empty() {
-            lines.push(String::new());
-            continue;
-        }
-        let code = line_code(text).trim();
-        let upper = code.to_ascii_uppercase();
-        let mut render_indent = frames.len() + usize::from(in_declare);
-        let mut push_after = None;
-
-        if upper == "DECLARE" {
-            render_indent = frames.len();
-            in_declare = true;
-        } else if starts_control(&upper, "BEGIN") {
-            render_indent = frames.len();
-            in_declare = false;
-            push_after = Some(BodyFrame::Begin);
-        } else if starts_control(&upper, "END IF") {
-            pop_expected(&mut frames, BodyFrame::If, body)?;
-            render_indent = frames.len();
-        } else if starts_control(&upper, "END LOOP") {
-            pop_expected(&mut frames, BodyFrame::Loop, body)?;
-            render_indent = frames.len();
-        } else if starts_control(&upper, "END CASE") {
-            pop_optional_branch(&mut frames, BodyFrame::CaseBranch);
-            pop_expected(&mut frames, BodyFrame::Case, body)?;
-            render_indent = frames.len();
-        } else if starts_control(&upper, "END") {
-            pop_optional_branch(&mut frames, BodyFrame::ExceptionBranch);
-            match frames.pop() {
-                Some(BodyFrame::Begin | BodyFrame::Exception) => {}
-                _ => return Err(unsupported(body, "unbalanced PL/pgSQL END")),
-            }
-            render_indent = frames.len();
-        } else if upper == "EXCEPTION" {
-            pop_optional_branch(&mut frames, BodyFrame::ExceptionBranch);
-            match frames.last_mut() {
-                Some(frame @ BodyFrame::Begin) => *frame = BodyFrame::Exception,
-                _ => return Err(unsupported(body, "EXCEPTION outside a block")),
-            }
-            render_indent = frames.len().saturating_sub(1);
-        } else if starts_control(&upper, "ELSIF") {
-            if frames.last() != Some(&BodyFrame::If) {
-                return Err(unsupported(body, "ELSIF outside IF"));
-            }
-            render_indent = frames.len().saturating_sub(1);
-        } else if starts_control(&upper, "WHEN") {
-            pop_optional_branch(&mut frames, BodyFrame::CaseBranch);
-            pop_optional_branch(&mut frames, BodyFrame::ExceptionBranch);
-            render_indent = frames.len();
-            push_after = match frames.last() {
-                Some(BodyFrame::Case) => Some(BodyFrame::CaseBranch),
-                Some(BodyFrame::Exception) => Some(BodyFrame::ExceptionBranch),
-                _ => return Err(unsupported(body, "WHEN outside CASE or EXCEPTION")),
-            };
-            if matches!(push_after, Some(BodyFrame::ExceptionBranch))
-                && lines.last().is_some_and(|line| !line.is_empty())
-                && frames.last() == Some(&BodyFrame::Exception)
-                && lines
-                    .iter()
-                    .rev()
-                    .any(|line| line.trim_start().starts_with("WHEN "))
-            {
-                lines.push(String::new());
-            }
-        } else if upper == "ELSE" {
-            if frames.last() == Some(&BodyFrame::CaseBranch) {
-                frames.pop();
-                render_indent = frames.len();
-                push_after = Some(BodyFrame::CaseBranch);
-            } else if frames.last() == Some(&BodyFrame::If) {
-                render_indent = frames.len().saturating_sub(1);
-            } else {
-                return Err(unsupported(body, "ELSE outside IF or CASE"));
-            }
-        } else if starts_control(&upper, "IF") && upper.ends_with(" THEN") {
-            push_after = Some(BodyFrame::If);
-        } else if is_loop_header(&upper) {
-            push_after = Some(BodyFrame::Loop);
-        } else if upper == "CASE" || upper.starts_with("CASE ") {
-            push_after = Some(BodyFrame::Case);
-        }
-
-        let rendered = format_body_line(text, options)?;
-        for part in rendered.lines() {
-            lines.push(format!("{}{}", " ".repeat(render_indent * 4), part));
-        }
-        if let Some(frame) = push_after {
-            frames.push(frame);
-        }
-    }
-
-    while lines.first().is_some_and(|line| line.is_empty()) {
-        lines.remove(0);
-    }
-    while lines.last().is_some_and(|line| line.is_empty()) {
-        lines.pop();
-    }
-    if !frames.is_empty() || in_declare {
-        return Err(unsupported(body, "unbalanced PL/pgSQL block"));
-    }
-    Ok(format!("{newline}{}{newline}", lines.join(newline)))
-}
-
-fn starts_control(upper: &str, keyword: &str) -> bool {
-    upper == keyword
-        || upper
-            .strip_prefix(keyword)
-            .is_some_and(|rest| matches!(rest.as_bytes().first(), Some(b' ' | b';')))
-}
-
-fn is_loop_header(upper: &str) -> bool {
-    upper == "LOOP"
-        || ((upper.starts_with("WHILE ")
-            || upper.starts_with("FOR ")
-            || upper.starts_with("FOREACH "))
-            && upper.ends_with(" LOOP"))
-}
-
-fn pop_optional_branch(frames: &mut Vec<BodyFrame>, branch: BodyFrame) {
-    if frames.last() == Some(&branch) {
-        frames.pop();
-    }
-}
-
-fn pop_expected(
-    frames: &mut Vec<BodyFrame>,
-    expected: BodyFrame,
-    source: &str,
-) -> Result<(), FormatDiagnostic> {
-    if frames.pop() == Some(expected) {
-        Ok(())
-    } else {
-        Err(unsupported(source, "unbalanced PL/pgSQL control flow"))
-    }
-}
-
-fn format_body_line(text: &str, options: &FormatOptions) -> Result<String, FormatDiagnostic> {
+fn format_body_statement(
+    kind: ir::BodyNodeKind,
+    text: &str,
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
     let (raw_code, comment) = split_line_comment(text);
     let code = raw_code.trim();
     if code.is_empty() && !comment.is_empty() {
         return Ok(comment.to_owned());
     }
     let upper = code.to_ascii_uppercase();
+    if kind == ir::BodyNodeKind::ReturnQuery {
+        return format_return_query(code, &upper, options)
+            .map(|rendered| attach_line_comment(rendered, comment));
+    }
     for keyword in ["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE"] {
         if upper.starts_with(keyword) && code.ends_with(';') {
             let formatted = super::format_sql(code, options)?.output;
@@ -427,6 +240,23 @@ fn procedural_needs_space(
         return false;
     }
     super::semantic_block::needs_space(tokens, Some(previous), current)
+}
+
+fn format_return_query(
+    code: &str,
+    upper: &str,
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
+    let body = code.trim_end_matches(';').trim();
+    if upper.starts_with("RETURN QUERY EXECUTE ") {
+        return Ok(format!("{};", uppercase_procedural_words(body)));
+    }
+    let prefix = "RETURN QUERY ";
+    let query = body
+        .get(prefix.len()..)
+        .ok_or_else(|| unsupported(code, "malformed RETURN QUERY"))?;
+    let formatted = format_query_fragment(query, options)?;
+    Ok(format!("RETURN QUERY {formatted};"))
 }
 
 fn format_for_query_header(
@@ -517,6 +347,7 @@ fn attach_line_comment(mut code: String, comment: &str) -> String {
 fn uppercase_procedural_words(text: &str) -> String {
     const WORDS: &[&str] = &[
         "array",
+        "assert",
         "backward",
         "begin",
         "by",
@@ -553,6 +384,7 @@ fn uppercase_procedural_words(text: &str) -> String {
         "others",
         "perform",
         "prior",
+        "query",
         "raise",
         "relative",
         "select",
@@ -612,10 +444,6 @@ fn uppercase_procedural_words(text: &str) -> String {
     }
     result.push_str(comment);
     result
-}
-
-fn line_code(text: &str) -> &str {
-    split_line_comment(text).0
 }
 
 fn split_line_comment(text: &str) -> (&str, &str) {

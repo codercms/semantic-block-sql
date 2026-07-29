@@ -1,5 +1,5 @@
 use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, Severity, check_sql, format_sql, format_sql_result};
+use semblock::{FormatOptions, Severity, UnsupportedPolicy, check_sql, format_sql};
 
 fn assert_fixture(source: &str, expected: &str) {
     let options = FormatOptions::default();
@@ -41,22 +41,32 @@ fn formats_cursor_declaration_open_fetch_move_and_close() {
 }
 
 #[test]
-fn unreviewed_procedural_neighbors_remain_fail_safe() {
-    for source in [
-        "DO $$\nBEGIN\nASSERT active, 'must be active';\nEND;\n$$;",
-        "CREATE FUNCTION stream_items() RETURNS SETOF bigint LANGUAGE plpgsql AS $$\nBEGIN\nRETURN QUERY SELECT id FROM items;\nEND;\n$$;",
-        "DO $$\nBEGIN\nCOMMIT;\nEND;\n$$;",
-    ] {
-        let result = format_sql_result(source, &FormatOptions::default());
-        assert_eq!(result.output, source, "{source}");
-        assert!(!result.changed, "{source}");
-        assert!(
-            result.diagnostics.iter().any(|diagnostic| {
-                diagnostic.rule_id == "syntax.unsupported"
-                    && diagnostic.severity == Severity::Warning
-            }),
-            "{source}: {:?}",
-            result.diagnostics,
-        );
-    }
+fn formats_assert_and_return_query() {
+    assert_fixture(
+        "CREATE FUNCTION stream_items() RETURNS SETOF bigint LANGUAGE plpgsql AS $$ BEGIN ASSERT active, 'must be active'; RETURN QUERY select id from items where active=true; END; $$;",
+        "CREATE FUNCTION stream_items() RETURNS SETOF bigint LANGUAGE plpgsql AS $$\nBEGIN\n    ASSERT active, 'must be active';\n    RETURN QUERY SELECT id FROM items WHERE active = TRUE;\nEND;\n$$;",
+    );
+}
+
+#[test]
+fn preserves_unsupported_transaction_control_while_formatting_siblings() {
+    let source =
+        "CREATE PROCEDURE p() LANGUAGE plpgsql AS $$ BEGIN perform 1; COMMIT; perform 2; END; $$;";
+    let expected = "CREATE PROCEDURE p() LANGUAGE plpgsql AS $$\nBEGIN\n    PERFORM 1;\n    COMMIT;\n    PERFORM 2;\nEND;\n$$;";
+    let result = format_sql(source, &FormatOptions::default()).expect("format succeeds");
+    assert_eq!(result.output, expected);
+    assert!(result.diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule_id == "syntax.unsupported" && diagnostic.severity == Severity::Warning
+    }));
+
+    let strict = FormatOptions {
+        unsupported_policy: UnsupportedPolicy::Error,
+        ..FormatOptions::default()
+    };
+    let result = format_sql(source, &strict).expect("strict policy returns a result");
+    assert_eq!(result.output, source);
+    assert!(!result.changed);
+    assert!(result.diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule_id == "syntax.unsupported" && diagnostic.severity == Severity::Error
+    }));
 }
