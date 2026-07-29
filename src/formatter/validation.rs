@@ -1,10 +1,12 @@
 use super::FormatDiagnostic;
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
-    AlterTableStmt, AlterTableType, CmdType, ColumnDef, ConstrType, Constraint, CreateStmt,
-    CreateTableAsStmt, DeleteStmt, IndexStmt, InsertStmt, JoinExpr, JoinType, MergeMatchKind,
-    MergeStmt, Node, ObjectType, OnCommitAction, OnConflictAction, OverridingKind, RawStmt,
-    SelectStmt, SetOperation, UpdateStmt, ViewCheckOption, ViewStmt,
+    AlterTableStmt, AlterTableType, CmdType, ColumnDef, ConstrType, Constraint, CreateDomainStmt,
+    CreatePolicyStmt, CreateSeqStmt, CreateStmt, CreateTableAsStmt, CreateTrigStmt, DeleteStmt,
+    DropBehavior, DropStmt, GrantRoleStmt, GrantStmt, GrantTargetType, IndexStmt, InsertStmt,
+    JoinExpr, JoinType, MergeMatchKind, MergeStmt, Node, ObjectType, OnCommitAction,
+    OnConflictAction, OverridingKind, RawStmt, SelectStmt, SetOperation, TruncateStmt, UpdateStmt,
+    ViewCheckOption, ViewStmt,
 };
 use pg_query::{Context, NodeRef};
 mod equivalence;
@@ -16,8 +18,8 @@ use super::ownership::{
     CreateTableElementSpec, CreateTableSpec, DeleteSpec, InsertSourceSpec, InsertSpec,
     MaterializedViewSpec, MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec,
     RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
-    RelationListSpec, SelectSpec, StatementSpec, SupportedDocument, UpdateSpec, ValuesSpec,
-    ViewCheckSpec, ViewSpec, source_statement,
+    RelationListSpec, SelectSpec, StatementSpec, SupportedDocument, UpdateSpec,
+    UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -107,9 +109,271 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
         NodeEnum::AlterTableStmt(alter) => {
             Ok(StatementSpec::AlterTable(validate_alter_table(alter)?))
         }
+        NodeEnum::DropStmt(statement) => {
+            validate_drop(statement)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::Drop))
+        }
+        NodeEnum::TruncateStmt(statement) => {
+            validate_truncate(statement)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::Truncate))
+        }
+        NodeEnum::GrantStmt(statement) => {
+            let kind = validate_grant(statement)?;
+            Ok(StatementSpec::Utility(kind))
+        }
+        NodeEnum::GrantRoleStmt(statement) => {
+            let kind = validate_grant_role(statement)?;
+            Ok(StatementSpec::Utility(kind))
+        }
+        NodeEnum::CommentStmt(statement) => {
+            validate_comment(statement)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::Comment))
+        }
+        NodeEnum::CreateEnumStmt(statement) => {
+            if statement.type_name.is_empty() || statement.vals.is_empty() {
+                return Err("empty CREATE TYPE AS ENUM");
+            }
+            Ok(StatementSpec::Utility(UtilityStatementKind::CreateEnum))
+        }
+        NodeEnum::CompositeTypeStmt(statement) => {
+            if statement.typevar.is_none() || statement.coldeflist.is_empty() {
+                return Err("empty CREATE TYPE composite definition");
+            }
+            for column in &statement.coldeflist {
+                let Some(NodeEnum::ColumnDef(column)) = column.node.as_ref() else {
+                    return Err("unrecognized composite type column");
+                };
+                validate_column_def(column)?;
+            }
+            Ok(StatementSpec::Utility(
+                UtilityStatementKind::CreateCompositeType,
+            ))
+        }
+        NodeEnum::CreateDomainStmt(statement) => {
+            validate_domain(statement)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::CreateDomain))
+        }
+        NodeEnum::CreateSeqStmt(statement) => {
+            validate_sequence(statement)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::CreateSequence))
+        }
+        NodeEnum::CreateTrigStmt(statement) => {
+            validate_trigger(statement)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::CreateTrigger))
+        }
+        NodeEnum::CreatePolicyStmt(statement) => {
+            validate_policy(statement)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::CreatePolicy))
+        }
         NodeEnum::CreateFunctionStmt(_) => Err("function or procedure definition"),
         NodeEnum::DoStmt(_) => Err("DO block"),
         _ => Err("unimplemented PostgreSQL statement family"),
+    }
+}
+
+fn validate_drop(statement: &DropStmt) -> Result<(), &'static str> {
+    if statement.objects.is_empty() {
+        return Err("DROP without objects");
+    }
+    let object = ObjectType::try_from(statement.remove_type).unwrap_or(ObjectType::Undefined);
+    if !matches!(
+        object,
+        ObjectType::ObjectTable
+            | ObjectType::ObjectView
+            | ObjectType::ObjectMatview
+            | ObjectType::ObjectIndex
+            | ObjectType::ObjectSequence
+            | ObjectType::ObjectType
+            | ObjectType::ObjectDomain
+            | ObjectType::ObjectSchema
+            | ObjectType::ObjectTrigger
+            | ObjectType::ObjectPolicy
+    ) {
+        return Err("unreviewed DROP object kind");
+    }
+    if statement.concurrent && object != ObjectType::ObjectIndex {
+        return Err("CONCURRENTLY on non-index DROP");
+    }
+    validate_drop_behavior(statement.behavior)
+}
+
+fn validate_truncate(statement: &TruncateStmt) -> Result<(), &'static str> {
+    if statement.relations.is_empty() {
+        return Err("TRUNCATE without relations");
+    }
+    for relation in &statement.relations {
+        let Some(NodeEnum::RangeVar(relation)) = relation.node.as_ref() else {
+            return Err("unrecognized TRUNCATE relation");
+        };
+        if relation.alias.is_some() {
+            return Err("TRUNCATE relation alias");
+        }
+    }
+    validate_drop_behavior(statement.behavior)
+}
+
+fn validate_grant(statement: &GrantStmt) -> Result<UtilityStatementKind, &'static str> {
+    if GrantTargetType::try_from(statement.targtype).unwrap_or(GrantTargetType::Undefined)
+        != GrantTargetType::AclTargetObject
+    {
+        return Err("unreviewed GRANT target mode");
+    }
+    let object = ObjectType::try_from(statement.objtype).unwrap_or(ObjectType::Undefined);
+    if !matches!(
+        object,
+        ObjectType::ObjectTable
+            | ObjectType::ObjectSequence
+            | ObjectType::ObjectSchema
+            | ObjectType::ObjectFunction
+            | ObjectType::ObjectProcedure
+            | ObjectType::ObjectType
+            | ObjectType::ObjectDomain
+    ) {
+        return Err("unreviewed GRANT object kind");
+    }
+    if statement.objects.is_empty() || statement.grantees.is_empty() {
+        return Err("GRANT without objects or grantees");
+    }
+    for privilege in &statement.privileges {
+        let Some(NodeEnum::AccessPriv(privilege)) = privilege.node.as_ref() else {
+            return Err("unrecognized GRANT privilege");
+        };
+        if privilege.priv_name.is_empty() {
+            return Err("empty GRANT privilege");
+        }
+    }
+    validate_drop_behavior(statement.behavior)?;
+    Ok(if statement.is_grant {
+        UtilityStatementKind::Grant
+    } else {
+        UtilityStatementKind::Revoke
+    })
+}
+
+fn validate_grant_role(statement: &GrantRoleStmt) -> Result<UtilityStatementKind, &'static str> {
+    if statement.granted_roles.is_empty() || statement.grantee_roles.is_empty() {
+        return Err("role grant without roles or grantees");
+    }
+    for option in &statement.opt {
+        let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
+            return Err("unrecognized role-grant option");
+        };
+        if !matches!(option.defname.as_str(), "admin" | "inherit" | "set") {
+            return Err("unreviewed role-grant option");
+        }
+    }
+    validate_drop_behavior(statement.behavior)?;
+    Ok(if statement.is_grant {
+        UtilityStatementKind::GrantRole
+    } else {
+        UtilityStatementKind::RevokeRole
+    })
+}
+
+fn validate_comment(statement: &pg_query::protobuf::CommentStmt) -> Result<(), &'static str> {
+    let object = ObjectType::try_from(statement.objtype).unwrap_or(ObjectType::Undefined);
+    if !matches!(
+        object,
+        ObjectType::ObjectTable
+            | ObjectType::ObjectColumn
+            | ObjectType::ObjectView
+            | ObjectType::ObjectMatview
+            | ObjectType::ObjectIndex
+            | ObjectType::ObjectSequence
+            | ObjectType::ObjectType
+            | ObjectType::ObjectDomain
+            | ObjectType::ObjectTrigger
+            | ObjectType::ObjectPolicy
+            | ObjectType::ObjectFunction
+            | ObjectType::ObjectProcedure
+    ) {
+        return Err("unreviewed COMMENT object kind");
+    }
+    if statement.object.is_none() {
+        return Err("COMMENT without object");
+    }
+    Ok(())
+}
+
+fn validate_domain(statement: &CreateDomainStmt) -> Result<(), &'static str> {
+    if statement.domainname.is_empty() || statement.type_name.is_none() {
+        return Err("incomplete CREATE DOMAIN");
+    }
+    for constraint in &statement.constraints {
+        let Some(NodeEnum::Constraint(constraint)) = constraint.node.as_ref() else {
+            return Err("unrecognized domain constraint");
+        };
+        let kind = ConstrType::try_from(constraint.contype).unwrap_or(ConstrType::Undefined);
+        if !matches!(
+            kind,
+            ConstrType::ConstrDefault
+                | ConstrType::ConstrNotnull
+                | ConstrType::ConstrNull
+                | ConstrType::ConstrCheck
+        ) {
+            return Err("unreviewed domain constraint");
+        }
+        if let Some(expression) = constraint.raw_expr.as_deref() {
+            validate_ddl_expression(expression)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_sequence(statement: &CreateSeqStmt) -> Result<(), &'static str> {
+    if statement.sequence.is_none() || statement.for_identity {
+        return Err("unreviewed CREATE SEQUENCE form");
+    }
+    for option in &statement.options {
+        let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
+            return Err("unrecognized sequence option");
+        };
+        if !matches!(
+            option.defname.as_str(),
+            "as" | "increment" | "minvalue" | "maxvalue" | "start" | "cache" | "cycle" | "owned_by"
+        ) {
+            return Err("unreviewed sequence option");
+        }
+    }
+    Ok(())
+}
+
+fn validate_trigger(statement: &CreateTrigStmt) -> Result<(), &'static str> {
+    if statement.relation.is_none() || statement.funcname.is_empty() {
+        return Err("incomplete CREATE TRIGGER");
+    }
+    if !statement.transition_rels.is_empty() {
+        return Err("transition tables in CREATE TRIGGER");
+    }
+    if let Some(expression) = statement.when_clause.as_deref() {
+        validate_ddl_expression(expression)?;
+    }
+    Ok(())
+}
+
+fn validate_policy(statement: &CreatePolicyStmt) -> Result<(), &'static str> {
+    if statement.policy_name.is_empty() || statement.table.is_none() {
+        return Err("incomplete CREATE POLICY");
+    }
+    if !matches!(
+        statement.cmd_name.as_str(),
+        "all" | "select" | "insert" | "update" | "delete"
+    ) {
+        return Err("unreviewed CREATE POLICY command");
+    }
+    if let Some(expression) = statement.qual.as_deref() {
+        validate_ddl_expression(expression)?;
+    }
+    if let Some(expression) = statement.with_check.as_deref() {
+        validate_ddl_expression(expression)?;
+    }
+    Ok(())
+}
+
+fn validate_drop_behavior(value: i32) -> Result<(), &'static str> {
+    match DropBehavior::try_from(value).unwrap_or(DropBehavior::Undefined) {
+        DropBehavior::DropRestrict | DropBehavior::DropCascade => Ok(()),
+        DropBehavior::Undefined => Err("unknown DROP behavior"),
     }
 }
 

@@ -1,0 +1,14 @@
+drop table if exists public.old_items, public.old_events cascade;
+truncate table public.items, public.events restart identity cascade;
+grant select, insert(id,name) on table public.items to app_user, readonly with grant option;
+revoke grant option for update on table public.items from app_user cascade;
+grant app_reader, app_writer to app_user with admin option;
+revoke admin option for app_reader from app_user cascade;
+comment on table public.items is 'items';
+comment on column public.items.payload is null;
+create type public.status as enum('new','active','done');
+create type public.point as(x double precision,y double precision);
+create domain public.email as text default '' not null check(value <> '');
+create sequence if not exists public.item_id_seq as bigint increment by 2 start with 10 cache 5 cycle;
+create trigger items_audit before insert or update on public.items for each row execute function public.audit_item();
+create policy item_visibility on public.items for select to app_user using(owner_id=current_user_id());

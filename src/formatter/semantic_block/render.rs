@@ -356,6 +356,30 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Within
             | Token::With
             | Token::DataP
+            | Token::Admin
+            | Token::After
+            | Token::Before
+            | Token::Cache
+            | Token::Comment
+            | Token::Cycle
+            | Token::DomainP
+            | Token::Each
+            | Token::EnumP
+            | Token::Execute
+            | Token::Function
+            | Token::Grant
+            | Token::Increment
+            | Token::Maxvalue
+            | Token::Minvalue
+            | Token::Owned
+            | Token::Policy
+            | Token::Restart
+            | Token::Revoke
+            | Token::Sequence
+            | Token::Start
+            | Token::Trigger
+            | Token::Truncate
+            | Token::TypeP
             | Token::YearP
     )
 }
@@ -497,7 +521,18 @@ fn is_insert_target_list_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
     {
         return false;
     }
-    for token in tokens[..open].iter().rev() {
+    let statement_start = tokens[..open]
+        .iter()
+        .rposition(|token| token.kind == Token::Ascii59)
+        .map_or(0, |semicolon| semicolon + 1);
+    let first = tokens[statement_start..open]
+        .iter()
+        .find(|token| !token.is_comment())
+        .map(|token| token.kind);
+    if !matches!(first, Some(Token::Insert | Token::With)) {
+        return false;
+    }
+    for token in tokens[statement_start..open].iter().rev() {
         match token.kind {
             Token::Ascii59 | Token::Values | Token::Select => return false,
             Token::Insert => return true,

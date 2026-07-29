@@ -454,7 +454,8 @@ pub(super) fn bind_predicates(
             | StatementLayout::View(_)
             | StatementLayout::MaterializedView(_)
             | StatementLayout::CreateTable(_)
-            | StatementLayout::AlterTable(_) => {}
+            | StatementLayout::AlterTable(_)
+            | StatementLayout::Utility(_) => {}
         }
     }
 

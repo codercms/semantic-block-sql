@@ -328,6 +328,7 @@ pub(super) enum StatementLayout {
     CreateTable(CreateTableBlock),
     CreateIndex(CreateIndexBlock),
     AlterTable(AlterTableBlock),
+    Utility(TokenSpan),
 }
 
 /// Token-bound ownership IR consumed by all layout planners.
@@ -405,6 +406,11 @@ impl LayoutDocument {
                     body_start,
                     spec,
                 )?),
+                StatementSpec::Utility(_) => StatementLayout::Utility(TokenSpan {
+                    start: statement.range.start,
+                    end: statement.range.end,
+                    base_depth: statement.base_depth,
+                }),
             });
         }
 
@@ -456,6 +462,7 @@ impl LayoutDocument {
             StatementLayout::CreateTable(block) => block.span,
             StatementLayout::CreateIndex(block) => block.span,
             StatementLayout::AlterTable(block) => block.span,
+            StatementLayout::Utility(span) => *span,
         })
     }
 

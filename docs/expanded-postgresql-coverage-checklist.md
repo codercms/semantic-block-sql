@@ -1,6 +1,6 @@
 # Expanded PostgreSQL coverage — durable checklist
 
-Status: **Batch X0 complete; Batch X1 in progress**
+Status: **Batch X1 complete; Batch X2 in progress**
 
 This workstream is one PR-sized batch, split into durable internal checkpoints.
 Every checked implementation item requires fixtures, parser-backed capability
@@ -33,17 +33,17 @@ batch self-review.
 
 ## Batch X1 — Common migration SQL
 
-- [ ] `DROP` for reviewed object kinds and behavior modes.
-- [ ] `TRUNCATE` with multiple relations, identity mode, and cascade/restrict.
-- [ ] `GRANT` / `REVOKE` for object privileges and role membership.
-- [ ] `COMMENT ON` for reviewed object kinds.
-- [ ] `CREATE TYPE` composite and enum forms.
-- [ ] `CREATE DOMAIN` with defaults, nullability, collation, and constraints.
-- [ ] `CREATE SEQUENCE` options.
-- [ ] `CREATE TRIGGER` / constraint-trigger reviewed forms.
-- [ ] `CREATE POLICY` with roles, USING, and WITH CHECK.
-- [ ] Golden, comment, width, equivalence, idempotence, and fail-closed fixtures.
-- [ ] X1 self-review and checkpoint commit.
+- [x] `DROP` for reviewed object kinds and behavior modes.
+- [x] `TRUNCATE` with multiple relations, identity mode, and cascade/restrict.
+- [x] `GRANT` / `REVOKE` for object privileges and role membership.
+- [x] `COMMENT ON` for reviewed object kinds.
+- [x] `CREATE TYPE` composite and enum forms.
+- [x] `CREATE DOMAIN` with defaults, nullability, collation, and constraints.
+- [x] `CREATE SEQUENCE` options.
+- [x] `CREATE TRIGGER` / constraint-trigger reviewed forms.
+- [x] `CREATE POLICY` with roles, USING, and WITH CHECK.
+- [x] Golden, comment, width, equivalence, idempotence, and fail-closed fixtures.
+- [x] X1 self-review and checkpoint commit.
 
 ## Batch X2 — Query and DML variants
 
