@@ -177,6 +177,7 @@ Batch 2 evidence:
 - [x] Window expressions and named windows.
 - [x] `FILTER` and ordered aggregate clauses.
 - [ ] PostgreSQL casts, arrays, and JSON expressions.
+  - Active tranche: `docs/postgresql-expression-coverage-checklist.md`.
 - [x] Basic `CREATE TABLE` columns and table constraints.
 - [x] Simple one-line `CREATE INDEX`.
 - [x] Simple one-line partial index.
