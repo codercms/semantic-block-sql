@@ -1,6 +1,6 @@
 # Go integration hardening — durable checklist
 
-Status: **Batches G0-G3 complete; Batch G4 in progress**
+Status: **Implementation complete; publication handoff in progress**
 
 This workstream strengthens embedded-Go SQL support after PR 7. Update this
 file before every checkpoint commit. A checked item requires focused tests and
@@ -82,11 +82,21 @@ the batch self-review described in `AGENTS.md`.
 - [x] Verify a failure prevents every project write.
 - [x] Add explicit pinned Go setup to CI before Rust tests invoke Go tooling.
 - [x] Document the host integration suite and supported owner boundary.
-- [ ] Run `cargo fmt --all -- --check`.
-- [ ] Run `cargo clippy --locked --all-targets -- -D warnings`.
-- [ ] Run `cargo test --locked --all-targets`.
-- [ ] Run `cargo doc --locked --no-deps`.
-- [ ] Run `git diff --check`.
-- [ ] Perform final dead-code and architecture self-review.
-- [ ] Commit Batch G4 and produce a portable git bundle.
+- [x] Run `cargo fmt --all -- --check`.
+- [x] Run `cargo clippy --locked --all-targets -- -D warnings`.
+- [x] Run `cargo test --locked --all-targets`.
+- [x] Run `cargo doc --locked --no-deps`.
+- [x] Run `git diff --check`.
+- [x] Perform final dead-code and architecture self-review.
+- [ ] Commit the final Batch G4 checkpoint and verify a portable git bundle.
 - [ ] Push the branch and open a draft PR when authentication is available.
+
+Final validation on 2026-07-29:
+
+- Rust formatting passed.
+- Clippy passed for all targets with warnings denied.
+- All 138 Rust tests passed, including the Go project compilation suite.
+- Rust documentation built successfully.
+- `git diff --check` passed.
+- Final review found no new dead code, database-library name coupling, or
+  accidental support for `defer`/`go` statement owners.
