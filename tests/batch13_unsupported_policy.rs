@@ -28,8 +28,10 @@ fn formats_supported_siblings_and_preserves_unsupported_statements() {
 #[test]
 fn strict_unsupported_preserves_the_complete_document_and_collects_errors() {
     let source = "select id,name from users;\n\nselect * from json_table(payload, '$[*]' columns (value text path '$.value')) jt;\n\ncreate table child (like parent including all);\n";
-    let mut options = FormatOptions::default();
-    options.unsupported_policy = UnsupportedPolicy::Error;
+    let options = FormatOptions {
+        unsupported_policy: UnsupportedPolicy::Error,
+        ..FormatOptions::default()
+    };
 
     let formatted = format_sql(source, &options).expect("strict policy is non-panicking");
 

@@ -74,8 +74,10 @@ fn rejects_unreviewed_sql_json_expression_families_without_rewriting() {
         assert_eq!(direct.output, source);
         assert_eq!(direct.diagnostics[0].severity, Severity::Warning);
 
-        let mut strict = FormatOptions::default();
-        strict.unsupported_policy = UnsupportedPolicy::Error;
+        let strict = FormatOptions {
+            unsupported_policy: UnsupportedPolicy::Error,
+            ..FormatOptions::default()
+        };
         let strict_result = format_sql(source, &strict).expect("strict policy returns diagnostics");
         assert_eq!(strict_result.output, source);
         assert_eq!(strict_result.diagnostics[0].severity, Severity::Error);

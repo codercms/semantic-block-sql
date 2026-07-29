@@ -1,6 +1,6 @@
 # Real-world formatter readiness — durable three-PR checklist
 
-Status: **PR 1 planning complete; classifier refactor in progress**
+Status: **PR 1 implementation complete; final bundle pending**
 
 This roadmap is intentionally split into three stacked pull requests. Each PR
 must pass the complete repository quality gate and remain independently
@@ -48,77 +48,87 @@ restacked afterward.
 ## C0 — Characterization and public model
 
 - [x] Record the three-PR roadmap and locked decisions.
-- [ ] Characterize current formatter, CLI, source, Go, and project-preflight error
+- [x] Characterize current formatter, CLI, source, Go, and project-preflight error
   paths for unsupported syntax.
-- [ ] Add `UnsupportedPolicy::{Skip, Error}` with default `Skip`.
-- [ ] Add strict TOML key `format.unsupported_policy`.
-- [ ] Add CLI override `--strict-unsupported` for fmt/check/diff and stdin flows.
-- [ ] Document exit-code behavior for both policies.
-- [ ] Commit C0.
+- [x] Add `UnsupportedPolicy::{Skip, Error}` with default `Skip`.
+- [x] Add strict TOML key `format.unsupported_policy`.
+- [x] Add CLI override `--strict-unsupported` for fmt/check/diff and stdin flows.
+- [x] Document exit-code behavior for both policies.
+- [x] Commit C0.
 
 ## C1 — Statement-granular SQL classification
 
-- [ ] Split a PostgreSQL document into parser-proven top-level statement units.
-- [ ] Classify each unit as supported, unsupported, or fatal-invalid.
-- [ ] Preserve inter-statement whitespace and comments exactly outside formatted
+- [x] Split a PostgreSQL document into parser-proven top-level statement units.
+- [x] Classify each unit as supported, unsupported, or fatal-invalid.
+- [x] Preserve inter-statement whitespace and comments exactly outside formatted
   unit spans.
-- [ ] Format supported statements independently.
-- [ ] Preserve unsupported statement bytes and emit warning diagnostics by default.
-- [ ] Collect all unsupported diagnostics rather than stopping at the first.
-- [ ] In strict mode, elevate unsupported diagnostics to errors and return the
+- [x] Format supported statements independently.
+- [x] Preserve unsupported statement bytes and emit warning diagnostics by default.
+- [x] Collect all unsupported diagnostics rather than stopping at the first.
+- [x] In strict mode, elevate unsupported diagnostics to errors and return the
   original complete source unchanged.
-- [ ] Preserve semantic equivalence and idempotence checks per supported unit and
+- [x] Preserve semantic equivalence and idempotence checks per supported unit and
   for the reconstructed document.
-- [ ] Add mixed supported/unsupported/malformed document fixtures.
-- [ ] Commit C1.
+- [x] Add mixed supported/unsupported/malformed document fixtures.
+- [x] Commit C1.
 
 ## C2 — File/project and embedded-SQL policy propagation
 
-- [ ] Propagate unsupported warnings through `.sql`, stdin, and Go-host call paths.
-- [ ] Ensure one unsupported literal does not suppress formatting of supported
+- [x] Propagate unsupported warnings through `.sql`, stdin, and Go-host call paths.
+- [x] Ensure one unsupported literal does not suppress formatting of supported
   literals in the same Go file.
-- [ ] Keep malformed explicitly marked SQL fatal.
-- [ ] Make auto-detected non-SQL/parse-failing candidates skippable without
+- [x] Keep malformed explicitly marked SQL fatal.
+- [x] Make auto-detected non-SQL/parse-failing candidates skippable without
   claiming that they are SQL.
-- [ ] Default fmt writes safe supported changes while preserving unsupported units.
-- [ ] Strict mode performs complete project preflight and writes nothing when any
+- [x] Default fmt writes safe supported changes while preserving unsupported units.
+- [x] Strict mode performs complete project preflight and writes nothing when any
   unsupported unit exists.
-- [ ] Check/diff return differences independently from unsupported warnings;
+- [x] Check/diff return differences independently from unsupported warnings;
   strict unsupported errors retain exit code 3.
-- [ ] Add serial/parallel determinism and project atomicity tests for both policies.
-- [ ] Commit C2.
+- [x] Add serial/parallel determinism and project atomicity tests for both policies.
+- [x] Commit C2.
 
 ## C3 — Utility statement expansion
 
-- [ ] Support reviewed forms of `COPY`, including query sources and protected
+- [x] Support reviewed forms of `COPY`, including query sources and protected
   `FROM STDIN` payloads.
-- [ ] Support `CALL`.
-- [ ] Support `EXPLAIN` with options and a nested supported/unsupported statement.
-- [ ] Support reviewed `VACUUM` and `ANALYZE` option/relation forms.
-- [ ] Support `REFRESH MATERIALIZED VIEW`.
-- [ ] Support `LISTEN` and `NOTIFY`.
-- [ ] Support `CREATE EXTENSION`.
-- [ ] Support reviewed `ALTER TYPE`, `ALTER DOMAIN`, and `ALTER POLICY` forms.
-- [ ] Support `CREATE RULE` with nested actions.
-- [ ] Support `CREATE STATISTICS`, `CREATE COLLATION`, and `CREATE CAST`.
-- [ ] Characterize and include low-cost frequent neighbors such as `CREATE SCHEMA`,
+- [x] Support `CALL`.
+- [x] Support `EXPLAIN` with options and a nested supported/unsupported statement.
+- [x] Support reviewed `VACUUM` and `ANALYZE` option/relation forms.
+- [x] Support `REFRESH MATERIALIZED VIEW`.
+- [x] Support `LISTEN` and `NOTIFY`.
+- [x] Support `CREATE EXTENSION`.
+- [x] Support reviewed `ALTER TYPE`, `ALTER DOMAIN`, and `ALTER POLICY` forms.
+- [x] Support `CREATE RULE` with nested actions.
+- [x] Support `CREATE STATISTICS`, `CREATE COLLATION`, and `CREATE CAST`.
+- [x] Characterize and include low-cost frequent neighbors such as `CREATE SCHEMA`,
   `ALTER SEQUENCE`, `ALTER INDEX`, `ALTER VIEW`, `ALTER MATERIALIZED VIEW`, and
   `ALTER TRIGGER` only when they fit the same closed strategy.
-- [ ] Add dedicated layout IR where option lists or nested statements need more
+- [x] Add dedicated layout IR where option lists or nested statements need more
   than token-normalization.
-- [ ] Add golden, equivalence, idempotence, comment, payload-protection, and
+- [x] Add golden, equivalence, idempotence, comment, payload-protection, and
   unsupported-neighbor fixtures for every family.
-- [ ] Commit C3.
+- [x] Commit C3.
 
 ## C4 — PR 1 reconciliation
 
-- [ ] Update core spec, design, architecture, extension guide, README, and CLI docs.
-- [ ] Run formatter checks, Clippy with warnings denied, all tests, Rustdoc, and
+- [x] Update core spec, design, architecture, extension guide, README, and CLI docs.
+- [x] Run formatter checks, Clippy with warnings denied, all tests, Rustdoc, and
   `git diff --check` using the supplied offline toolchain.
-- [ ] Perform semantic, diagnostics, policy, atomicity, dependency, and dead-code
+- [x] Perform semantic, diagnostics, policy, atomicity, dependency, and dead-code
   self-review.
 - [ ] Produce a verified PR 1 git bundle and SHA-256 file.
 - [ ] Record Windows apply/push/PR instructions.
+
+
+PR 1 validation on 2026-07-30:
+
+- Rust formatting passed.
+- Clippy passed for all targets with warnings denied.
+- All 176 Rust tests passed, including CLI, Git workflow, COPY payload, strict/default policy, and realistic Go compilation coverage.
+- Rust documentation built successfully.
+- `git diff --check` passed.
+- Final review found no dependency additions, permissive parser-success fallback, unsupported-range style rewriting, partial-write path under strict policy, or protected COPY payload changes.
 
 # PR 2 — PL/pgSQL semantic IR and formatter
 

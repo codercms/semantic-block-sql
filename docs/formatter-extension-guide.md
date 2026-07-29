@@ -211,3 +211,7 @@ owned root statement rather than the first nested SELECT. When adding relation
 or table variants, include an adjacent parsed-but-unowned form. When adding a
 procedural node, include both nested control flow and a still-unsupported sibling
 node so the allowlist cannot broaden accidentally.
+
+## Unsupported-policy requirements
+
+Every new syntax family must distinguish valid-but-unowned syntax from malformed input. Valid unsupported units must be preserved exactly and reported as warnings under the default policy; tests must also prove strict-policy error elevation and no writes. Add mixed-document fixtures showing that unsupported units do not suppress supported siblings. Utilities may share a renderer only through a closed AST-validated capability enum, with explicit ownership for nested SQL and protected payloads.
