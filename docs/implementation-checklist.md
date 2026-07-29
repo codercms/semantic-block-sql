@@ -636,3 +636,10 @@ PR #7 Git-aware CLI hardening evidence:
 - [ ] Architecture boundaries remain one-way.
 - [ ] Unsupported syntax is not advertised.
 - [ ] Dead code and obsolete compatibility paths are removed.
+
+## Go integration hardening workstream
+
+The post-PR-7 fixture-backed Go integration work is tracked durably in
+[`go-integration-hardening-checklist.md`](go-integration-hardening-checklist.md).
+That checklist also records the newer embedded-SQL indentation decision from
+style guide 1.0.1, which supersedes the historical MVP envelope behavior.

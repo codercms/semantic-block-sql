@@ -35,10 +35,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Go toolchain for host-language integration tests
+      - name: Install pinned Go toolchain
         uses: actions/setup-go@v6
         with:
-          go-version: "1.22.x"
+          go-version: '1.23.2'
           cache: false
 
       - name: Install native build dependencies

@@ -1,0 +1,11 @@
+dialect = "postgresql"
+
+[layout]
+soft_line_width = 120
+hard_line_width = 160
+
+[go]
+enabled = true
+auto_detect = true
+raw_strings = true
+interpreted_strings = false

@@ -1,3 +1,3 @@
-module example.com/semblockfixture
+module example.com/semblock-go-fixture
 
-go 1.22
+go 1.23

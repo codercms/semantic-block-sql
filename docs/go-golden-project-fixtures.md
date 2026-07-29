@@ -2,18 +2,19 @@
 
 The Go host-language integration suite uses realistic multi-package fixture projects under `tests/fixtures/` rather than isolated string snippets.
 
-The success corpus keeps each input `.go` file beside a complete `.go.expected` golden file. The integration test copies the project, runs the compiled `semblock` CLI, compares complete files byte-for-byte, verifies a second formatting pass is idempotent, checks the clean project with `semblock check`, runs `gofmt`, and compiles the project offline with `go test ./...`.
+The success corpus keeps each input `.go` file beside a complete `.go.expected` golden file. The integration test copies the project, runs the compiled `semblock` CLI, compares complete files byte-for-byte, verifies serial and parallel formatting produce identical trees, checks idempotence, runs `gofmt`, and compiles the project offline with `go test ./...`.
 
 The corpus covers:
 
-- package-level and grouped `const` declarations;
-- package-level `var` declarations and raw SQL nested in function-call arguments;
-- local constants, short declarations, and regular assignments;
-- direct `return` statements containing database calls;
-- standalone call expression statements;
-- SELECT, INSERT/ON CONFLICT, UPDATE, DELETE, comments, quoted identifiers, and backslash-containing literals;
-- interpreted strings, incomplete fragments, explicit ignore directives, and project ignore files that must remain unchanged.
+- package-level and grouped declarations;
+- local constants, variables, assignments, and nested call arguments;
+- direct `return` and standalone expression-statement owners;
+- SQL-root indentation inside multiline raw strings;
+- concatenated SQL fragments that must be skipped conservatively;
+- representative supported PostgreSQL statements, comments, quoted identifiers, and backslash-containing literals;
+- interpreted strings, explicit directives, and project ignore files that must remain unchanged;
+- CRLF preservation and deterministic `--jobs 1` versus `--jobs 4` output.
 
-A separate invalid project proves project-wide preflight: malformed embedded SQL prevents every planned Go rewrite, including otherwise valid files.
+Separate malformed-SQL, malformed-Go, and directive-error projects prove project-wide preflight: one invalid host file prevents every planned rewrite.
 
-Direct `return` and standalone expression statements are structural Go owners. Detection remains database-library-neutral: a raw string is considered only after Tree-sitter locates it under an explicitly supported owner, and PostgreSQL parsing remains the SQL authority.
+Detection remains structural and database-library-neutral. Tree-sitter identifies an explicitly supported Go owner and PostgreSQL parsing remains the SQL authority.

@@ -1,0 +1,48 @@
+package orders
+
+// semblock:sql
+const recent = `
+/* dashboard query */ SELECT id, user_id, total FROM public.orders WHERE created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC;
+`
+
+// semblock:ignore
+const legacy = `
+    select id,total from legacy.orders where deleted_at is null;
+`
+
+const updateFromImport = `
+UPDATE public.orders item
+SET
+    total = source.total,
+    updated_at = NOW()
+FROM staging.orders source
+WHERE
+    item.id = source.id
+    AND source.ready = TRUE
+RETURNING
+    item.id,
+    item.updated_at;
+`
+
+const deleteExpired = `
+DELETE FROM public.orders item
+USING staging.orders source
+WHERE
+    item.id = source.id
+    AND source.expired = TRUE
+RETURNING item.id;
+`
+
+const (
+	dynamicColumns = "id,total"
+	dynamicQuery   = `SELECT ` + dynamicColumns + ` FROM public.orders`
+	groupedQuery   = `SELECT id, total FROM public.orders;`
+)
+
+const message = `choose a plan from the menu`
+const fragment = `WHERE deleted_at IS NULL`
+const interpreted = "select id,total from public.orders;"
+
+func Queries() []string {
+	return []string{recent, legacy, updateFromImport, deleteExpired, dynamicQuery, groupedQuery, message, fragment, interpreted}
+}
