@@ -50,7 +50,11 @@ func ReassignedQuery() string {
         SELECT id, total FROM public.orders WHERE customer_id = $1;
     `
 	query = `
-        SELECT id, total FROM public.orders WHERE customer_id = $1 AND cancelled_at IS NULL;
+        SELECT id, total
+        FROM public.orders
+        WHERE
+            customer_id = $1
+            AND cancelled_at IS NULL;
     `
 	return query
 }
