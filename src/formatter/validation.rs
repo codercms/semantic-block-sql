@@ -1071,9 +1071,44 @@ fn validate_nested_node(node: NodeRef<'_>, context: Context) -> Result<(), &'sta
         NodeRef::SubLink(_) if context == Context::DML => {
             Err("subquery in data-modifying statement")
         }
+        NodeRef::JsonObjectConstructor(constructor) => {
+            validate_simple_json_object_constructor(constructor)
+        }
+        NodeRef::JsonArrayConstructor(constructor) => {
+            validate_simple_json_array_constructor(constructor)
+        }
+        NodeRef::JsonFuncExpr(_) => Err("JSON query/value/exists expression"),
+        NodeRef::JsonSerializeExpr(_) => Err("JSON serialization expression"),
+        NodeRef::JsonScalarExpr(_) => Err("JSON scalar expression"),
+        NodeRef::JsonParseExpr(_) => Err("JSON parse expression"),
+        NodeRef::JsonIsPredicate(_) => Err("IS JSON predicate"),
         NodeRef::JsonTable(_) => Err("JSON_TABLE expression"),
+        NodeRef::JsonArrayQueryConstructor(_)
+        | NodeRef::JsonAggConstructor(_)
+        | NodeRef::JsonObjectAgg(_)
+        | NodeRef::JsonArrayAgg(_)
+        | NodeRef::JsonConstructorExpr(_)
+        | NodeRef::JsonExpr(_) => Err("advanced SQL/JSON expression"),
         _ => Ok(()),
     }
+}
+
+fn validate_simple_json_object_constructor(
+    constructor: &pg_query::protobuf::JsonObjectConstructor,
+) -> Result<(), &'static str> {
+    if constructor.output.is_some() || constructor.absent_on_null || constructor.unique {
+        return Err("advanced JSON_OBJECT constructor");
+    }
+    Ok(())
+}
+
+fn validate_simple_json_array_constructor(
+    constructor: &pg_query::protobuf::JsonArrayConstructor,
+) -> Result<(), &'static str> {
+    if constructor.output.is_some() || !constructor.absent_on_null {
+        return Err("advanced JSON_ARRAY constructor");
+    }
+    Ok(())
 }
 
 fn validate_nested_select(select: &SelectStmt) -> Result<(), &'static str> {

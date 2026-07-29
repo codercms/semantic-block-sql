@@ -176,7 +176,7 @@ Batch 2 evidence:
 - [x] Grouping, `HAVING`, ordering, and pagination clauses.
 - [x] Window expressions and named windows.
 - [x] `FILTER` and ordered aggregate clauses.
-- [ ] PostgreSQL casts, arrays, and JSON expressions.
+- [x] PostgreSQL casts, arrays, and JSON expressions.
 - [x] Basic `CREATE TABLE` columns and table constraints.
 - [x] Simple one-line `CREATE INDEX`.
 - [x] Simple one-line partial index.
@@ -190,6 +190,24 @@ Batch 2 evidence:
 - [x] Golden, parse, idempotence, and safety fixtures for every checked item.
 - [ ] Batch 3 full tests and self-review.
 - [ ] Dead-code removal, docs, checklist, and commit.
+
+Expression tranche evidence:
+
+- `tests/fixtures/batch7/casts-arrays.*.sql` and
+  `tests/fixtures/batch7/json-operators.*.sql` require exact golden layout,
+  structural equivalence, idempotence, clean `check`, literal/comment
+  preservation, and bounded-width behavior;
+- square brackets and slice colons are rendered as owned array punctuation while
+  grammar colons nested inside array elements retain SQL/JSON spacing;
+- cast type casing covers `::`, `CAST`, quoted and unquoted qualified names,
+  type modifiers, array suffixes, and contextual multiword type components;
+- every reviewed legacy PostgreSQL JSON operator is covered across SELECT,
+  predicates, UPDATE assignments, INSERT VALUES, and RETURNING;
+- simple fixture-backed `JSON_OBJECT` and `JSON_ARRAY` remain supported, while
+  unreviewed SQL/JSON root families return unchanged source with
+  `syntax.unsupported`;
+- the detailed durable record is
+  `docs/postgresql-expression-coverage-checklist.md`.
 
 Values, windows, lateral, and DDL tranche evidence:
 
