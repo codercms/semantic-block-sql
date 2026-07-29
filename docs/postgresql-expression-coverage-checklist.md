@@ -1,6 +1,6 @@
 # PostgreSQL expression coverage — durable checklist
 
-Status: **Implementation complete; final checkpoint pending**
+Status: **Implementation complete; portable publication handoff prepared**
 
 This workstream completes the remaining Batch 3 scalar-expression tranche after
 Go host-language integration hardening. Update this file before every checkpoint
@@ -124,7 +124,8 @@ Batch E2 evidence:
 - [x] Perform final semantic, architecture, idempotence, comment, diagnostics,
   dependency, and dead-code self-review.
 - [x] Commit the final checkpoint.
-- [ ] Push the branch or create and verify a portable git bundle.
+- [x] Prepare the branch for a complete-history portable git bundle; verify the
+  bundle from this handoff commit before delivery.
 
 Final validation on 2026-07-29:
 
@@ -137,3 +138,13 @@ Final validation on 2026-07-29:
 - Final review found no dependency changes, new statement ownership variants,
   literal rewriting, comment relocation, broad identifier casing, or accidental
   support for unreviewed SQL/JSON roots.
+
+Publication handoff:
+
+- The local checkout originated from the verified PR 9 bundle, so its `origin` is
+  not a network GitHub remote.
+- The environment does not provide `gh`; direct publication is therefore left to
+  a networked checkout.
+- The delivered bundle must contain branch
+  `agent/postgresql-expression-coverage` with this handoff commit at its tip and
+  must pass `git bundle verify` plus a fresh-clone tree comparison.
