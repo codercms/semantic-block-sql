@@ -1,6 +1,6 @@
 # Expanded PostgreSQL coverage — durable checklist
 
-Status: **Implementation complete; publication pending**
+Status: **Complete**
 
 This workstream is one PR-sized batch, split into durable internal checkpoints.
 Every checked implementation item requires fixtures, parser-backed capability
@@ -96,7 +96,7 @@ batch self-review.
 - [x] Run `git diff --check`.
 - [x] Perform final semantic, ownership, comments, diagnostics, atomicity,
   dependency, and dead-code review.
-- [ ] Commit final checkpoint, publish branch, and open one draft PR to `main`.
+- [x] Commit final checkpoint, publish branch, and open one draft PR to `main`.
 
 
 Final validation on 2026-07-29:
