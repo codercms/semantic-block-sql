@@ -5,45 +5,59 @@ import (
 	"database/sql"
 )
 
-const FindByIDQuery = `select id,name,email from public.users where id=$1;`
-
-var ActiveUsersQuery = `
-    select id,name,email
-    from public.users
-    where deleted_at is null
-    order by id;
+const findByID = `
+    select id,name,email from public.users where id=$1;
 `
+
+const (
+	insertUser = `insert into public.users (name,email) values ($1,$2) returning id;`
+	deleteUser = `delete from public.users where id=$1 returning id;`
+)
+
+var listActive = `
+    select id,name,email from public.users where active=true order by name;
+`
+
+var prepared = mustPrepare(`
+    select id,name from public.users where active=true;
+`)
 
 type Repository struct {
 	DB *sql.DB
 }
 
-func (repository Repository) FindByID(ctx context.Context, id int64) (*sql.Rows, error) {
-	const auditQuery = `
-        select id,created_at from public.user_audit where user_id=$1 order by created_at desc;
-    `
-	_ = auditQuery
+func (repository Repository) Load(ctx context.Context, id int64) (*sql.Rows, error) {
+	const lookup = `
+        select id,name,email from public.users where id=$1;
+	`
 
-	return repository.DB.QueryContext(ctx, `
-        select id,name,email from public.users where id=$1 and deleted_at is null;
-    `, id)
-}
+	query := `select id,name from public.users order by id;`
+	query = `select id,name from public.users where active=true order by id;`
 
-func (repository Repository) ListActive(ctx context.Context) (*sql.Rows, error) {
 	rows, err := repository.DB.QueryContext(ctx, `
-        select id,name,email from public.users where deleted_at is null order by id;
-    `)
+        select id,name,email from public.users where active=true and id>=$1 order by id;
+	`, id)
+	_ = query
+	_ = prepared
 	return rows, err
 }
 
-func (repository Repository) Disable(ctx context.Context, id int64) {
-	repository.DB.ExecContext(ctx, `
-        update public.users set disabled_at=now() where id=$1;
-    `, id)
+func (repository Repository) ReturnActive(ctx context.Context, minimumID int64) (*sql.Rows, error) {
+	return repository.DB.QueryContext(ctx, `
+        select id,name from public.users where active=true and id>=$1;
+	`, minimumID)
 }
 
-func (repository Repository) DeleteExpired(ctx context.Context) {
+func (repository Repository) Deactivate(ctx context.Context, id int64) {
 	repository.DB.ExecContext(ctx, `
-        delete from public.users where disabled_at is not null returning id;
-    `)
+        update public.users set active=false where id=$1;
+	`, id)
+}
+
+func FindByID() string {
+	return findByID
+}
+
+func mustPrepare(query string) string {
+	return query
 }

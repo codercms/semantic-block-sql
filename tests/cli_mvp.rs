@@ -101,7 +101,7 @@ fn fmt_discovers_sql_and_go_while_respecting_both_ignore_files() {
         "select ignored_too from legacy;\n"
     );
     let go = fs::read_to_string(project.path().join("queries.go")).expect("read Go");
-    assert!(go.contains("`\n    SELECT id, title FROM public.items WHERE deleted_at IS NULL;\n`"));
+    assert!(go.contains("`\nSELECT id, title FROM public.items WHERE deleted_at IS NULL;\n`"));
 }
 
 #[test]
@@ -210,10 +210,10 @@ const fragment = `WHERE deleted_at IS NULL`
 
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let go = fs::read_to_string(project.path().join("queries.go")).expect("read Go");
-    assert!(go.contains("    SELECT id, title FROM public.items;"));
+    assert!(go.contains("`\nSELECT id, title FROM public.items;\n`"));
     assert!(go.contains("    select id,title from legacy.items;"));
     assert!(
-        go.contains("    /* injected */ SELECT id, title"),
+        go.contains("`\n/* injected */ SELECT id, title"),
         "formatted Go:\n{go}"
     );
     assert!(go.contains("const notSQL = `hello`"));

@@ -1,10 +1,12 @@
 package main
 
 import (
-	"example.com/semblockfixture/internal/orders"
-	"example.com/semblockfixture/internal/users"
+	"fmt"
+
+	"example.com/semblock-go-fixture/internal/orders"
+	"example.com/semblock-go-fixture/internal/users"
 )
 
 func main() {
-	_, _ = orders.ListQuery, users.FindByIDQuery
+	fmt.Println(len(users.FindByID()), len(orders.Queries()))
 }
