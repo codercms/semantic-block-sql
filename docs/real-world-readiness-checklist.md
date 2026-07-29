@@ -1,6 +1,6 @@
 # Real-world formatter readiness — durable three-PR checklist
 
-Status: **PR 1 implementation complete; final bundle pending**
+Status: **PR 1 complete; PR 2 in progress**
 
 This roadmap is intentionally split into three stacked pull requests. Each PR
 must pass the complete repository quality gate and remain independently
@@ -117,8 +117,8 @@ restacked afterward.
   `git diff --check` using the supplied offline toolchain.
 - [x] Perform semantic, diagnostics, policy, atomicity, dependency, and dead-code
   self-review.
-- [ ] Produce a verified PR 1 git bundle and SHA-256 file.
-- [ ] Record Windows apply/push/PR instructions.
+- [x] Produce a verified PR 1 git bundle and SHA-256 file.
+- [x] Record Windows apply/push/PR instructions.
 
 
 PR 1 validation on 2026-07-30:
