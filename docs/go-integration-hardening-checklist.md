@@ -80,8 +80,8 @@ the batch self-review described in `AGENTS.md`.
 
 - [x] Add invalid-SQL, invalid-Go, and directive-error fixture projects.
 - [x] Verify a failure prevents every project write.
-- [ ] Add explicit pinned Go setup to CI before Rust tests invoke Go tooling.
-- [ ] Document the host integration suite and supported owner boundary.
+- [x] Add explicit pinned Go setup to CI before Rust tests invoke Go tooling.
+- [x] Document the host integration suite and supported owner boundary.
 - [ ] Run `cargo fmt --all -- --check`.
 - [ ] Run `cargo clippy --locked --all-targets -- -D warnings`.
 - [ ] Run `cargo test --locked --all-targets`.

@@ -35,6 +35,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install pinned Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.23.2'
+          cache: false
+
       - name: Install native build dependencies
         run: |
           sudo apt-get update

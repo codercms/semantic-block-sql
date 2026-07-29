@@ -2,7 +2,7 @@
 
 Status: **Runnable CLI and raw-Go MVP complete**
 
-Last updated: **2026-07-26**
+Last updated: **2026-07-29**
 
 ## Purpose
 
@@ -471,11 +471,46 @@ MVP supports raw backtick literals only. Interpreted strings remain disabled.
 
 The 2026-07-29 style-guide 1.0.1 requirement supersedes the earlier MVP
 envelope behavior: multiline SQL in Go raw strings is formatted at SQL root
-indentation, independent from the surrounding Go block. Host syntax remains
-valid and is reparsed after replacement. One-line raw strings retain their Go
-expression placement; only continuation lines created by SQL formatting are
-indented as required to remain readable Go source.
+indentation, independent from the surrounding Go block. The closing backtick
+retains its authored host indentation, the original LF or CRLF convention is
+preserved, and the complete rewritten Go file is reparsed. A compact one-line
+raw string may expand to multiple SQL-root lines without adding host-language
+indentation to the SQL body.
 
+### Supported Go owners and literal usage
+
+The extractor uses a closed `GoSqlOwnerKind` capability list. Complete raw SQL
+literals may be owned by:
+
+- package or local `const` declarations;
+- package or local `var` declarations;
+- short variable declarations;
+- assignment statements;
+- return statements;
+- expression statements.
+
+This includes a literal nested as a call argument, such as direct
+`return db.QueryContext(...)` and standalone `db.ExecContext(...)` calls. It
+does not depend on `database/sql` names; ownership is determined only from the
+Go syntax tree. `defer_statement` and `go_statement` remain unsupported until
+fixture-backed.
+
+A raw literal with a Go `binary_expression` between the literal and its owner is
+classified as a concatenated fragment. Auto-detection skips that literal while
+continuing to process unrelated complete literals in the same declaration or
+file. An explicit SQL marker on a concatenated fragment is an error because no
+fragment decode/format/recompose contract exists.
+
+### Go project integration evidence
+
+`tests/go_project_integration.rs` copies fixture projects to temporary
+directories and invokes the compiled `semblock` CLI. The successful project
+proves deterministic `--jobs 1` versus `--jobs 4` output, adjacent byte-for-byte
+goldens, clean-check behavior, idempotence, `gofmt -l`, `go test ./...`, and
+CRLF preservation. Separate invalid-SQL, invalid-Go, and directive-error
+projects prove whole-project preflight: one failure prevents every file write.
+The fixture modules use only the Go standard library and require no dependency
+downloads.
 
 ## Directives
 
