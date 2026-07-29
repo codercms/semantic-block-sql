@@ -79,6 +79,9 @@ Batch E1 evidence:
 - The cast-type classifier follows only an explicit `::`, a `CAST(... AS ...)`
   marker, or a qualified-name dot chain. An implicit alias after a cast is not
   lowercased as though it were another type component.
+- Contextual multiword type components (`double precision`, `character varying`,
+  `national character`, and `time zone`) are lowercased only in their grammar
+  sequences. `AT TIME ZONE` is not mistaken for a cast-type continuation.
 
 ## Batch E2 — JSON operators and fail-closed SQL/JSON boundary
 

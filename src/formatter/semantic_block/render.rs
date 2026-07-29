@@ -44,7 +44,7 @@ pub(in crate::formatter) fn render_token(
     {
         return token.text.to_lowercase();
     }
-    if is_type_keyword(token.kind) {
+    if is_type_keyword(token.kind) || is_contextual_type_keyword(tokens, index) {
         return token.text.to_lowercase();
     }
     if (token.keyword_kind == KeywordKind::ReservedKeyword || is_keyword_like(token.kind))
@@ -116,7 +116,9 @@ pub(in crate::formatter) fn is_type_modifier_syntax(tokens: &[SqlToken<'_>], ind
     tokens
         .get(index + 1)
         .is_some_and(|next| next.kind == Token::Ascii40)
-        && (tokens[index].kind == Token::Interval || is_type_keyword(tokens[index].kind))
+        && (tokens[index].kind == Token::Interval
+            || is_type_keyword(tokens[index].kind)
+            || is_contextual_type_keyword(tokens, index))
 }
 
 pub(in crate::formatter) fn is_uppercase_builtin(name: &str) -> bool {
@@ -356,6 +358,34 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::DataP
             | Token::YearP
     )
+}
+
+fn is_contextual_type_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    let previous = index
+        .checked_sub(1)
+        .and_then(|previous| tokens.get(previous));
+    let before_previous = index
+        .checked_sub(2)
+        .and_then(|before_previous| tokens.get(before_previous));
+    let next = tokens.get(index + 1);
+
+    match tokens[index].kind {
+        Token::DoubleP => next.is_some_and(|next| next.kind == Token::Precision),
+        Token::Precision => previous.is_some_and(|previous| previous.kind == Token::DoubleP),
+        Token::National => {
+            next.is_some_and(|next| matches!(next.kind, Token::CharP | Token::Character))
+        }
+        Token::Varying => previous.is_some_and(|previous| {
+            matches!(previous.kind, Token::Bit | Token::CharP | Token::Character)
+        }),
+        Token::Zone => {
+            previous.is_some_and(|previous| previous.kind == Token::Time)
+                && before_previous.is_some_and(|before_previous| {
+                    matches!(before_previous.kind, Token::With | Token::Without)
+                })
+        }
+        _ => false,
+    }
 }
 
 pub(in crate::formatter) fn is_type_keyword(kind: Token) -> bool {

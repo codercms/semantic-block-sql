@@ -68,6 +68,18 @@ FROM items;";
 }
 
 #[test]
+fn lowercases_multiword_type_names_without_reclassifying_time_zone_syntax() {
+    let source = "select cast(value as TIMESTAMP(3) with TIME ZONE) as timestamp_value, value::DOUBLE PRECISION as double_value, value::CHARACTER VARYING(20) as text_value, created_at at time zone 'UTC' as utc_value;";
+    let expected = "SELECT
+    CAST(value AS timestamp(3) WITH time zone) AS timestamp_value,
+    value::double precision AS double_value,
+    value::character varying(20) AS text_value,
+    created_at at time zone 'UTC' AS utc_value;";
+
+    assert_format(source, expected, &FormatOptions::default());
+}
+
+#[test]
 fn formats_postgresql_json_operators_across_owned_statements() {
     assert_format(
         include_str!("fixtures/batch7/json-operators.input.sql"),
