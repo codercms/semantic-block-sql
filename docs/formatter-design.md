@@ -696,3 +696,23 @@ configuration errors.
   already bounded by `--jobs`).
 
 No open decision authorizes bypassing the safety invariants.
+
+## Parser-backed PL/pgSQL routine bodies
+
+`DO` blocks and dollar-quoted PL/pgSQL function/procedure bodies use a dedicated
+nested parser boundary. The outer statement is parsed by PostgreSQL's ordinary
+parser; the body is independently parsed through the pinned
+`pg_query::parse_plpgsql` API. Formatting is admitted only when both parsers
+recognize a fixture-backed procedural node set.
+
+The supported subset covers declarations, nested blocks, ordinary SQL statements,
+assignments, `PERFORM`, returns, `IF`/`ELSIF`/`ELSE`, raises, diagnostics, and
+exception handlers. Embedded SQL reuses the normal formatter facade. The output
+is reparsed by both parsers and normalized expression/query trees are compared
+before the result is accepted.
+
+Dollar-quote tags are preserved exactly. Body-root constructs (`DECLARE`,
+`BEGIN`, `EXCEPTION`, and `END`) remain at SQL root indentation regardless of the
+outer host language. Unsupported procedural nodes such as loops, dynamic
+`EXECUTE`, cursor control, transaction control, procedural `CASE`, and labels
+return `syntax.unsupported` with unchanged source.
