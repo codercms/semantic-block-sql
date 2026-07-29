@@ -572,7 +572,7 @@ fn is_insert_target_list_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
     false
 }
 
-pub(super) fn needs_space(
+pub(in crate::formatter) fn needs_space(
     tokens: &[SqlToken<'_>],
     previous: Option<usize>,
     current: usize,

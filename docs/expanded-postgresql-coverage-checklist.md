@@ -1,6 +1,6 @@
 # Expanded PostgreSQL coverage — durable checklist
 
-Status: **Batch X3 complete; Batch X4 in progress**
+Status: **Batch X4 complete; Batch X5 in progress**
 
 This workstream is one PR-sized batch, split into durable internal checkpoints.
 Every checked implementation item requires fixtures, parser-backed capability
@@ -72,15 +72,15 @@ batch self-review.
 
 ## Batch X4 — PL/pgSQL control-flow and dynamic execution
 
-- [ ] Basic `LOOP`, `WHILE`, integer/query `FOR`, and `FOREACH`.
-- [ ] Procedural `CASE` searched and simple forms.
-- [ ] Dynamic `EXECUTE` with `INTO`, `STRICT`, and `USING`.
-- [ ] Cursor declaration, `OPEN`, `FETCH`, `MOVE`, and `CLOSE`.
-- [ ] `EXIT` / `CONTINUE` for reviewed unlabeled and labeled forms.
-- [ ] Nested-body indentation, comments, exception blocks, custom dollar tags,
+- [x] Basic `LOOP`, `WHILE`, integer/query `FOR`, and `FOREACH`.
+- [x] Procedural `CASE` searched and simple forms.
+- [x] Dynamic `EXECUTE` with `INTO`, `STRICT`, and `USING`.
+- [x] Cursor declaration, `OPEN`, `FETCH`, `MOVE`, and `CLOSE`.
+- [x] `EXIT` / `CONTINUE` for reviewed unlabeled and labeled forms.
+- [x] Nested-body indentation, comments, exception blocks, custom dollar tags,
   parser-normalized equivalence, and idempotence.
-- [ ] Unsupported adjacent procedural nodes remain byte-identical.
-- [ ] X4 self-review and checkpoint commit.
+- [x] Unsupported adjacent procedural nodes remain byte-identical.
+- [x] X4 self-review and checkpoint commit.
 
 ## Batch X5 — Integration, documentation, and full gate
 
