@@ -1,6 +1,6 @@
 # Go integration hardening — durable checklist
 
-Status: **Batch G0 complete; Batch G1 in progress**
+Status: **Batches G0-G1 complete; Batch G2 in progress**
 
 This workstream strengthens embedded-Go SQL support after PR 7. Update this
 file before every checkpoint commit. A checked item requires focused tests and
@@ -35,21 +35,21 @@ the batch self-review described in `AGENTS.md`.
 
 ## Batch G1 — Golden project harness and SQL-root envelopes
 
-- [ ] Add a realistic multi-package Go fixture project with adjacent golden
+- [x] Add a realistic multi-package Go fixture project with adjacent golden
   files.
-- [ ] Cover package-level const/var declarations, grouped declarations, local
+- [x] Cover package-level const/var declarations, grouped declarations, local
   declarations, assignments, nested calls, comments, directives, unchanged
   non-SQL literals, and representative supported PostgreSQL statements.
-- [ ] Compare every generated `.go` file byte-for-byte with its golden file.
-- [ ] Verify `check --list-different`, `fmt`, clean `check`, and idempotence.
-- [ ] Verify `--jobs 1` and `--jobs 4` produce byte-identical trees.
-- [ ] Run `gofmt -l` and require no output.
-- [ ] Run `go test ./...` and require success.
-- [ ] Change multiline raw envelopes to SQL-root indentation and update focused
+- [x] Compare every generated `.go` file byte-for-byte with its golden file.
+- [x] Verify `check --list-different`, `fmt`, clean `check`, and idempotence.
+- [x] Verify `--jobs 1` and `--jobs 4` produce byte-identical trees.
+- [x] Run `gofmt -l` and require no output.
+- [x] Run `go test ./...` and require success.
+- [x] Change multiline raw envelopes to SQL-root indentation and update focused
   legacy tests.
-- [ ] Preserve CRLF envelopes in a focused fixture.
-- [ ] Run focused tests and Batch G1 self-review.
-- [ ] Commit Batch G1.
+- [x] Preserve CRLF envelopes in a focused fixture.
+- [x] Run focused tests and Batch G1 self-review.
+- [x] Commit Batch G1.
 
 ## Batch G2 — Concatenated-fragment safety
 

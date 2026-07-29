@@ -4,7 +4,6 @@ use thiserror::Error;
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::config::GoConfig;
-use crate::formatter::INDENT_WIDTH;
 use crate::{Diagnostic, FormatDiagnostic, FormatOptions, FormatWarning, SourceRange, format_sql};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,7 +192,7 @@ pub fn format_go_source(
             let content_start = literal.start_byte() + 1;
             let content_end = literal.end_byte().saturating_sub(1);
             let content = &source[content_start..content_end];
-            let envelope = RawEnvelope::new(content, literal.start_position().column);
+            let envelope = RawEnvelope::new(content);
             if !explicit && !looks_like_complete_sql_prefix(&envelope.sql) {
                 continue;
             }
@@ -375,13 +374,11 @@ struct RawEnvelope {
     sql: String,
     newline: &'static str,
     multiline: bool,
-    content_indent: String,
     closing_indent: String,
-    continuation_indent: String,
 }
 
 impl RawEnvelope {
-    fn new(content: &str, start_column: usize) -> Self {
+    fn new(content: &str) -> Self {
         let newline = if content.contains("\r\n") {
             "\r\n"
         } else {
@@ -394,9 +391,7 @@ impl RawEnvelope {
                 sql: normalized,
                 newline,
                 multiline: false,
-                content_indent: String::new(),
                 closing_indent: String::new(),
-                continuation_indent: " ".repeat(start_column + INDENT_WIDTH),
             };
         }
 
@@ -409,8 +404,7 @@ impl RawEnvelope {
             .lines()
             .find(|line| !line.trim().is_empty())
             .map(leading_whitespace)
-            .filter(|indent| !indent.is_empty())
-            .unwrap_or_else(|| " ".repeat(closing_indent.chars().count() + INDENT_WIDTH));
+            .unwrap_or_default();
         let sql = body
             .lines()
             .map(|line| line.strip_prefix(&content_indent).unwrap_or(line))
@@ -420,9 +414,7 @@ impl RawEnvelope {
             sql,
             newline,
             multiline: true,
-            content_indent,
             closing_indent: closing_indent.into(),
-            continuation_indent: String::new(),
         }
     }
 
@@ -432,25 +424,13 @@ impl RawEnvelope {
             let mut output = String::new();
             output.push_str(self.newline);
             for line in formatted.lines() {
-                output.push_str(&self.content_indent);
                 output.push_str(line);
                 output.push_str(self.newline);
             }
             output.push_str(&self.closing_indent);
             output
         } else {
-            formatted
-                .lines()
-                .enumerate()
-                .map(|(index, line)| {
-                    if index == 0 {
-                        line.to_string()
-                    } else {
-                        format!("{}{}", self.continuation_indent, line)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(self.newline)
+            formatted.lines().collect::<Vec<_>>().join(self.newline)
         }
     }
 }
