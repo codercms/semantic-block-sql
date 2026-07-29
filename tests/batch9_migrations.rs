@@ -43,7 +43,6 @@ fn unreviewed_migration_neighbors_remain_fail_safe() {
         "DROP FUNCTION public.refresh_item(bigint);",
         "GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_user;",
         "CREATE TYPE public.amount_range AS RANGE (subtype = numeric);",
-        "ALTER SEQUENCE public.item_id_seq RESTART WITH 100;",
         "CREATE TRIGGER t AFTER INSERT ON items REFERENCING NEW TABLE AS inserted FOR EACH STATEMENT EXECUTE FUNCTION audit_items();",
     ] {
         let result = format_sql_result(source, &FormatOptions::default());

@@ -5,7 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{FormatOptions, NotEqualPolicy, SemicolonPolicy, SyntaxDiagnostics};
+use crate::{FormatOptions, NotEqualPolicy, SemicolonPolicy, SyntaxDiagnostics, UnsupportedPolicy};
 
 const DEFAULT_IGNORE_FILE: &str = ".semblockignore";
 
@@ -91,6 +91,7 @@ struct FileFormatConfig {
     semicolon_policy: Option<SemicolonPolicy>,
     not_equal_policy: Option<NotEqualPolicy>,
     syntax_diagnostics: Option<SyntaxDiagnostics>,
+    unsupported_policy: Option<UnsupportedPolicy>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -149,9 +150,10 @@ impl Config {
 
     pub fn to_toml(&self) -> String {
         format!(
-            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\n\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nraw_strings = {}\ninterpreted_strings = {}\n",
+            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\nunsupported_policy = \"{}\"\n\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nraw_strings = {}\ninterpreted_strings = {}\n",
             semicolon_policy_name(self.format.semicolon_policy),
             not_equal_policy_name(self.format.not_equal_policy),
+            unsupported_policy_name(self.format.unsupported_policy),
             self.format.soft_line_width,
             self.format.hard_line_width,
             self.discovery.respect_gitignore,
@@ -179,6 +181,9 @@ impl Config {
         }
         if let Some(value) = file.format.syntax_diagnostics {
             config.format.syntax_diagnostics = value;
+        }
+        if let Some(value) = file.format.unsupported_policy {
+            config.format.unsupported_policy = value;
         }
         if let Some(value) = file.layout.soft_line_width {
             config.format.soft_line_width = value;
@@ -267,4 +272,11 @@ fn not_equal_policy_name(policy: NotEqualPolicy) -> &'static str {
 
 fn toml_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn unsupported_policy_name(policy: UnsupportedPolicy) -> &'static str {
+    match policy {
+        UnsupportedPolicy::Skip => "skip",
+        UnsupportedPolicy::Error => "error",
+    }
 }

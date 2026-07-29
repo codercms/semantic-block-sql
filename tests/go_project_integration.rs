@@ -278,26 +278,41 @@ fn permanent_failure_projects_preserve_every_file() {
 }
 
 #[test]
-fn unsupported_plpgsql_prevents_every_project_write() {
+fn unsupported_plpgsql_is_skipped_by_default_and_strict_mode_is_atomic() {
     let project = TempDir::new().expect("create temporary Go project");
-    fs::write(
-        project.path().join("valid.go"),
-        "package fixture\n\nconst query = `select id,name from public.users;`\n",
-    )
-    .expect("write valid Go source");
-    fs::write(
-        project.path().join("routine.go"),
-        "package fixture\n\nconst routine = `\nDO $$\nBEGIN\n    ASSERT active, 'must be active';\nEND;\n$$;\n`\n",
-    )
-    .expect("write unsupported routine source");
-    let before = collect_tree(project.path());
+    let valid = "package fixture\n\nconst query = `select id,name from public.users;`\n";
+    let formatted_valid = "package fixture\n\nconst query = `SELECT id, name FROM public.users;`\n";
+    let routine = "package fixture\n\nconst routine = `\nDO $$\nBEGIN\n    ASSERT active, 'must be active';\nEND;\n$$;\n`\n";
+    fs::write(project.path().join("valid.go"), valid).expect("write valid Go source");
+    fs::write(project.path().join("routine.go"), routine)
+        .expect("write unsupported routine source");
 
     let output = semblock(project.path(), &["fmt", ".", "--jobs", "4"]);
 
-    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("PL/pgSQL node"),
+        String::from_utf8_lossy(&output.stderr).contains("warning[syntax.unsupported]"),
         "{output:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(project.path().join("valid.go")).expect("read formatted valid"),
+        formatted_valid
+    );
+    assert_eq!(
+        fs::read_to_string(project.path().join("routine.go")).expect("read preserved routine"),
+        routine
+    );
+
+    fs::write(project.path().join("valid.go"), valid).expect("restore valid Go source");
+    let before = collect_tree(project.path());
+    let strict = semblock(
+        project.path(),
+        &["--strict-unsupported", "fmt", ".", "--jobs", "4"],
+    );
+    assert_eq!(strict.status.code(), Some(3), "{strict:?}");
+    assert!(
+        String::from_utf8_lossy(&strict.stderr).contains("error[syntax.unsupported]"),
+        "{strict:?}"
     );
     assert_eq!(collect_tree(project.path()), before);
 }

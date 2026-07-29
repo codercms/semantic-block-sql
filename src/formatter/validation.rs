@@ -165,10 +165,236 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
             validate_policy(statement)?;
             Ok(StatementSpec::Utility(UtilityStatementKind::CreatePolicy))
         }
+        NodeEnum::CopyStmt(statement) => {
+            validate_copy(statement)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::Copy))
+        }
+        NodeEnum::CallStmt(statement) => {
+            let call = statement
+                .funccall
+                .as_ref()
+                .ok_or("CALL without function call")?;
+            for argument in &call.args {
+                validate_ddl_expression(argument)?;
+            }
+            Ok(StatementSpec::Utility(UtilityStatementKind::Call))
+        }
+        NodeEnum::ExplainStmt(statement) => {
+            validate_def_elements(&statement.options, "EXPLAIN option")?;
+            let query = statement
+                .query
+                .as_deref()
+                .ok_or("EXPLAIN without statement")?;
+            validate_nested_statement(query)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::Explain))
+        }
+        NodeEnum::VacuumStmt(statement) => {
+            validate_def_elements(&statement.options, "VACUUM/ANALYZE option")?;
+            for relation in &statement.rels {
+                let Some(NodeEnum::VacuumRelation(relation)) = relation.node.as_ref() else {
+                    return Err("unrecognized VACUUM/ANALYZE relation");
+                };
+                if relation.relation.is_none() {
+                    return Err("VACUUM/ANALYZE relation without target");
+                }
+                for column in &relation.va_cols {
+                    if !matches!(column.node.as_ref(), Some(NodeEnum::String(_))) {
+                        return Err("unrecognized VACUUM/ANALYZE column");
+                    }
+                }
+            }
+            Ok(StatementSpec::Utility(if statement.is_vacuumcmd {
+                UtilityStatementKind::Vacuum
+            } else {
+                UtilityStatementKind::Analyze
+            }))
+        }
+        NodeEnum::RefreshMatViewStmt(statement) => {
+            if statement.relation.is_none() {
+                return Err("REFRESH MATERIALIZED VIEW without relation");
+            }
+            Ok(StatementSpec::Utility(
+                UtilityStatementKind::RefreshMaterializedView,
+            ))
+        }
+        NodeEnum::ListenStmt(statement) if !statement.conditionname.is_empty() => {
+            Ok(StatementSpec::Utility(UtilityStatementKind::Listen))
+        }
+        NodeEnum::NotifyStmt(statement) if !statement.conditionname.is_empty() => {
+            Ok(StatementSpec::Utility(UtilityStatementKind::Notify))
+        }
+        NodeEnum::CreateExtensionStmt(statement) => {
+            if statement.extname.is_empty() {
+                return Err("CREATE EXTENSION without name");
+            }
+            validate_def_elements(&statement.options, "CREATE EXTENSION option")?;
+            Ok(StatementSpec::Utility(
+                UtilityStatementKind::CreateExtension,
+            ))
+        }
+        NodeEnum::AlterEnumStmt(statement) => {
+            if statement.type_name.is_empty() || statement.new_val.is_empty() {
+                return Err("incomplete ALTER TYPE enum action");
+            }
+            Ok(StatementSpec::Utility(UtilityStatementKind::AlterType))
+        }
+        NodeEnum::AlterDomainStmt(statement) => {
+            if statement.type_name.is_empty() || statement.subtype.is_empty() {
+                return Err("incomplete ALTER DOMAIN action");
+            }
+            if let Some(definition) = statement.def.as_deref() {
+                validate_ddl_expression(definition)?;
+            }
+            validate_drop_behavior(statement.behavior)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::AlterDomain))
+        }
+        NodeEnum::AlterPolicyStmt(statement) => {
+            if statement.policy_name.is_empty() || statement.table.is_none() {
+                return Err("incomplete ALTER POLICY");
+            }
+            if let Some(qual) = statement.qual.as_deref() {
+                validate_ddl_expression(qual)?;
+            }
+            if let Some(check) = statement.with_check.as_deref() {
+                validate_ddl_expression(check)?;
+            }
+            Ok(StatementSpec::Utility(UtilityStatementKind::AlterPolicy))
+        }
+        NodeEnum::RuleStmt(statement) => {
+            if statement.rulename.is_empty()
+                || statement.relation.is_none()
+                || statement.actions.is_empty()
+            {
+                return Err("incomplete CREATE RULE");
+            }
+            if let Some(predicate) = statement.where_clause.as_deref() {
+                validate_ddl_expression(predicate)?;
+            }
+            for action in &statement.actions {
+                validate_nested_statement(action)?;
+            }
+            Ok(StatementSpec::Utility(UtilityStatementKind::CreateRule))
+        }
+        NodeEnum::CreateStatsStmt(statement) => {
+            if statement.exprs.is_empty() || statement.relations.is_empty() || statement.transformed
+            {
+                return Err("incomplete or transformed CREATE STATISTICS");
+            }
+            for expression in &statement.exprs {
+                validate_ddl_expression(expression)?;
+            }
+            Ok(StatementSpec::Utility(
+                UtilityStatementKind::CreateStatistics,
+            ))
+        }
+        NodeEnum::DefineStmt(statement)
+            if ObjectType::try_from(statement.kind).unwrap_or(ObjectType::Undefined)
+                == ObjectType::ObjectCollation =>
+        {
+            if statement.defnames.is_empty() || statement.oldstyle {
+                return Err("incomplete or old-style CREATE COLLATION");
+            }
+            validate_def_elements(&statement.definition, "CREATE COLLATION option")?;
+            Ok(StatementSpec::Utility(
+                UtilityStatementKind::CreateCollation,
+            ))
+        }
+        NodeEnum::CreateCastStmt(statement) => {
+            if statement.sourcetype.is_none() || statement.targettype.is_none() {
+                return Err("CREATE CAST without source or target type");
+            }
+            if !statement.inout && statement.func.is_none() {
+                return Err("CREATE CAST without function or INOUT");
+            }
+            Ok(StatementSpec::Utility(UtilityStatementKind::CreateCast))
+        }
+        NodeEnum::CreateSchemaStmt(statement) => {
+            if statement.schemaname.is_empty() && statement.authrole.is_none() {
+                return Err("CREATE SCHEMA without name or authorization");
+            }
+            if !statement.schema_elts.is_empty() {
+                return Err("CREATE SCHEMA with nested elements");
+            }
+            Ok(StatementSpec::Utility(UtilityStatementKind::CreateSchema))
+        }
+        NodeEnum::AlterSeqStmt(statement) => {
+            if statement.sequence.is_none() {
+                return Err("ALTER SEQUENCE without sequence");
+            }
+            validate_def_elements(&statement.options, "ALTER SEQUENCE option")?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::AlterSequence))
+        }
+        NodeEnum::RenameStmt(statement) => {
+            validate_rename(statement)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::RenameObject))
+        }
         NodeEnum::CreateFunctionStmt(_) => Err("function or procedure definition"),
         NodeEnum::DoStmt(_) => Err("DO block"),
         _ => Err("unimplemented PostgreSQL statement family"),
     }
+}
+
+fn validate_copy(statement: &pg_query::protobuf::CopyStmt) -> Result<(), &'static str> {
+    match (&statement.relation, statement.query.as_deref()) {
+        (Some(relation), None) if relation.alias.is_none() => {}
+        (None, Some(query)) if !statement.is_from => validate_nested_statement(query)?,
+        _ => return Err("unreviewed COPY source/target form"),
+    }
+    for column in &statement.attlist {
+        if !matches!(column.node.as_ref(), Some(NodeEnum::String(_))) {
+            return Err("unrecognized COPY column");
+        }
+    }
+    validate_def_elements(&statement.options, "COPY option")?;
+    if let Some(predicate) = statement.where_clause.as_deref() {
+        validate_ddl_expression(predicate)?;
+    }
+    Ok(())
+}
+
+fn validate_nested_statement(statement: &Node) -> Result<(), &'static str> {
+    match statement.node.as_ref() {
+        Some(NodeEnum::SelectStmt(select)) => {
+            let _ = validate_select(select, false)?;
+            Ok(())
+        }
+        Some(NodeEnum::InsertStmt(insert)) => {
+            let _ = validate_insert(insert)?;
+            Ok(())
+        }
+        Some(NodeEnum::UpdateStmt(update)) => {
+            let _ = validate_update(update)?;
+            Ok(())
+        }
+        Some(NodeEnum::DeleteStmt(delete)) => {
+            let _ = validate_delete(delete)?;
+            Ok(())
+        }
+        Some(NodeEnum::MergeStmt(merge)) => {
+            let _ = validate_merge(merge)?;
+            Ok(())
+        }
+        Some(NodeEnum::NotifyStmt(notify)) if !notify.conditionname.is_empty() => Ok(()),
+        _ => Err("unsupported nested utility statement"),
+    }
+}
+
+fn validate_rename(statement: &pg_query::protobuf::RenameStmt) -> Result<(), &'static str> {
+    if statement.newname.is_empty() {
+        return Err("ALTER ... RENAME without new name");
+    }
+    let kind = ObjectType::try_from(statement.rename_type).unwrap_or(ObjectType::Undefined);
+    if !matches!(
+        kind,
+        ObjectType::ObjectType
+            | ObjectType::ObjectAttribute
+            | ObjectType::ObjectIndex
+            | ObjectType::ObjectMatview
+            | ObjectType::ObjectTrigger
+    ) {
+        return Err("unreviewed ALTER ... RENAME object kind");
+    }
+    validate_drop_behavior(statement.behavior)
 }
 
 fn validate_drop(statement: &DropStmt) -> Result<(), &'static str> {

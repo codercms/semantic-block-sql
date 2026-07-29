@@ -17,5 +17,5 @@ mod formatter;
 pub use formatter::{
     CheckResult, Diagnostic, FormatDiagnostic, FormatOptions, FormatResult, FormatWarning,
     FormattedSql, NotEqualPolicy, SemicolonPolicy, Severity, SourceRange, Style, SyntaxDiagnostics,
-    check_sql, format_sql, format_sql_result, validate_equivalent,
+    UnsupportedPolicy, check_sql, format_sql, format_sql_result, validate_equivalent,
 };

@@ -311,3 +311,76 @@ pub(super) fn plan_insert_statements(
     }
     query_starts
 }
+
+pub(super) fn plan_utility_statements(
+    context: &PlanningContext<'_, '_>,
+    utilities: &[crate::formatter::layout_ir::UtilityBlock],
+    plan: &mut LayoutPlan,
+) {
+    use crate::formatter::ownership::UtilityStatementKind;
+
+    for utility in utilities {
+        let span = utility.span;
+        let authored = context.tokens[span.start + 1..span.end]
+            .iter()
+            .any(|token| token.line_breaks_before > 0);
+        let width = span.base_depth * INDENT_WIDTH
+            + compact_width(context.tokens, span.start, span.end, context.options);
+        let expanded = authored || width > context.options.soft_line_width;
+
+        match utility.kind {
+            UtilityStatementKind::Explain => {
+                if let Some(statement) = (span.start + 1..span.end).find(|index| {
+                    context.depths[*index] == span.base_depth
+                        && matches!(
+                            context.tokens[*index].kind,
+                            Token::Select
+                                | Token::Insert
+                                | Token::Update
+                                | Token::DeleteP
+                                | Token::Merge
+                                | Token::With
+                        )
+                }) {
+                    plan.break_before(statement, 1, span.base_depth);
+                }
+            }
+            UtilityStatementKind::CreateRule => {
+                for index in span.start + 1..span.end {
+                    if context.depths[index] == span.base_depth
+                        && matches!(context.tokens[index].kind, Token::Where | Token::Do)
+                    {
+                        plan.break_before(index, 1, span.base_depth);
+                    }
+                }
+            }
+            UtilityStatementKind::AlterPolicy if expanded => {
+                for index in span.start + 1..span.end {
+                    if context.depths[index] == span.base_depth
+                        && matches!(context.tokens[index].kind, Token::Using | Token::With)
+                    {
+                        plan.break_before(index, 1, span.base_depth);
+                    }
+                }
+            }
+            UtilityStatementKind::CreateStatistics if expanded => {
+                for index in span.start + 1..span.end {
+                    if context.depths[index] == span.base_depth
+                        && matches!(context.tokens[index].kind, Token::On | Token::From)
+                    {
+                        plan.break_before(index, 1, span.base_depth);
+                    }
+                }
+            }
+            UtilityStatementKind::Copy if expanded => {
+                if let Some(to_or_from) = (span.start + 1..span.end).find(|index| {
+                    context.depths[*index] == span.base_depth
+                        && matches!(context.tokens[*index].kind, Token::To | Token::From)
+                }) {
+                    plan.break_before(to_or_from, 1, span.base_depth);
+                }
+            }
+            _ => {}
+        }
+    }
+}

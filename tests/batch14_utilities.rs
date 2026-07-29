@@ -1,0 +1,59 @@
+use pretty_assertions::assert_eq;
+use semblock::{FormatOptions, Severity, check_sql, format_sql, format_sql_result};
+
+fn assert_fixture(source: &str, expected: &str) {
+    let options = FormatOptions::default();
+    let formatted = format_sql(source, &options).expect("utility formatting succeeds");
+    assert_eq!(formatted.output, expected);
+    assert_eq!(
+        format_sql(expected, &options)
+            .expect("utility formatting is idempotent")
+            .output,
+        expected
+    );
+    assert!(check_sql(expected, &options).compliant);
+}
+
+#[test]
+fn formats_common_operational_and_migration_utilities() {
+    assert_fixture(
+        include_str!("fixtures/batch14/utilities.input.sql"),
+        include_str!("fixtures/batch14/utilities.expected.sql"),
+    );
+}
+
+#[test]
+fn formats_copy_stdin_header_and_preserves_payload_byte_for_byte() {
+    let source = "copy public.items(id,name) from stdin with(format csv);\n1,Alice\n2,\"Bob, Jr.\"\n\\.\nselect id,name from public.items;\n";
+    let expected = "COPY public.items(id, name) FROM STDIN WITH (FORMAT csv);\n1,Alice\n2,\"Bob, Jr.\"\n\\.\nSELECT id, name FROM public.items;\n";
+
+    assert_fixture(source, expected);
+    let payload = "1,Alice\n2,\"Bob, Jr.\"\n\\.\n";
+    assert!(
+        format_sql(source, &FormatOptions::default())
+            .expect("format copy payload")
+            .output
+            .contains(payload)
+    );
+}
+
+#[test]
+fn unreviewed_utility_neighbors_are_preserved_and_non_fatal() {
+    for source in [
+        "CREATE SCHEMA app CREATE TABLE nested(id bigint);",
+        "ALTER EXTENSION pg_trgm UPDATE;",
+        "CREATE CAST(text AS uuid) WITHOUT FUNCTION;",
+    ] {
+        let result = format_sql_result(source, &FormatOptions::default());
+        assert_eq!(result.output, source, "{source}");
+        assert!(!result.changed, "{source}");
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.rule_id == "syntax.unsupported"
+                    && diagnostic.severity == Severity::Warning
+            }),
+            "{source}: {:?}",
+            result.diagnostics
+        );
+    }
+}

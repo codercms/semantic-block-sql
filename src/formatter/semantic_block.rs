@@ -30,7 +30,7 @@ pub(super) use render::{
 };
 use statements::{
     plan_delete_statements, plan_insert_statements, plan_merge_statements, plan_relation_source,
-    plan_update_statements,
+    plan_update_statements, plan_utility_statements,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +152,7 @@ pub(super) fn format(
     let create_tables = layout.create_tables().cloned().collect::<Vec<_>>();
     let create_indexes = layout.create_indexes().cloned().collect::<Vec<_>>();
     let alter_tables = layout.alter_tables().cloned().collect::<Vec<_>>();
+    let utilities = layout.utilities().copied().collect::<Vec<_>>();
     let parenthesized_lists =
         parenthesized_lists(&tokens, depths, parens, &cases, &inserts, &merges, options);
     let boolean_ranges = boolean_ranges(&tokens, depths, layout.predicates(), options);
@@ -220,6 +221,7 @@ pub(super) fn format(
     plan_create_tables(&context, &create_tables, &mut plan);
     plan_create_indexes(&context, &create_indexes, &mut plan);
     plan_alter_tables(&context, &alter_tables, &mut plan);
+    plan_utility_statements(&context, &utilities, &mut plan);
     plan_parenthesized_lists(
         &tokens,
         depths,

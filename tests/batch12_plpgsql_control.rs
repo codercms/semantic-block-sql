@@ -52,7 +52,8 @@ fn unreviewed_procedural_neighbors_remain_fail_safe() {
         assert!(!result.changed, "{source}");
         assert!(
             result.diagnostics.iter().any(|diagnostic| {
-                diagnostic.rule_id == "syntax.unsupported" && diagnostic.severity == Severity::Error
+                diagnostic.rule_id == "syntax.unsupported"
+                    && diagnostic.severity == Severity::Warning
             }),
             "{source}: {:?}",
             result.diagnostics,

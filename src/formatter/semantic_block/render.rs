@@ -19,6 +19,8 @@ pub(in crate::formatter) fn render_token(
     }
     if is_on_conflict_excluded(tokens, index)
         || is_overriding_value_keyword(tokens, index)
+        || is_domain_value_keyword(tokens, index)
+        || is_enum_value_keyword(tokens, index)
         || is_merge_match_side_keyword(tokens, index)
         || is_with_ordinality_keyword(tokens, index)
         || is_partition_strategy_keyword(tokens, index)
@@ -204,6 +206,35 @@ fn is_overriding_value_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
         }),
         _ => false,
     }
+}
+
+fn is_domain_value_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if tokens[index].kind != Token::ValueP {
+        return false;
+    }
+    let start = tokens[..index]
+        .iter()
+        .rposition(|token| token.kind == Token::Ascii59)
+        .map_or(0, |semicolon| semicolon + 1);
+    let statement = &tokens[start..index];
+    statement.iter().any(|token| token.kind == Token::DomainP)
+        && statement
+            .iter()
+            .any(|token| matches!(token.kind, Token::Create | Token::Alter))
+}
+
+fn is_enum_value_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if tokens[index].kind != Token::ValueP {
+        return false;
+    }
+    let start = tokens[..index]
+        .iter()
+        .rposition(|token| token.kind == Token::Ascii59)
+        .map_or(0, |semicolon| semicolon + 1);
+    let statement = &tokens[start..index];
+    statement.iter().any(|token| token.kind == Token::Alter)
+        && statement.iter().any(|token| token.kind == Token::TypeP)
+        && statement.iter().any(|token| token.kind == Token::AddP)
 }
 
 fn is_merge_match_side_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
@@ -410,6 +441,33 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Truncate
             | Token::TypeP
             | Token::Unlogged
+            | Token::Also
+            | Token::Analyze
+            | Token::Assignment
+            | Token::Authorization
+            | Token::Call
+            | Token::Collation
+            | Token::Copy
+            | Token::Explain
+            | Token::Extension
+            | Token::Force
+            | Token::Format
+            | Token::Freeze
+            | Token::Instead
+            | Token::Listen
+            | Token::Notify
+            | Token::Program
+            | Token::Refresh
+            | Token::Rename
+            | Token::Rule
+            | Token::Schema
+            | Token::Statistics
+            | Token::Stdin
+            | Token::Stdout
+            | Token::Valid
+            | Token::Vacuum
+            | Token::Verbose
+            | Token::VersionP
             | Token::YearP
     )
 }

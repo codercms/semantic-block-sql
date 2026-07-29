@@ -113,6 +113,17 @@ pub enum NotEqualPolicy {
 /// Syntax-diagnostic capability selected by callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum UnsupportedPolicy {
+    /// Preserve unsupported syntax, emit warnings, and continue formatting.
+    #[default]
+    Skip,
+    /// Preserve the complete input and emit unsupported syntax as errors.
+    Error,
+}
+
+/// Syntax-diagnostic capability selected by callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SyntaxDiagnostics {
     /// Surface diagnostics from the already-required PostgreSQL parser.
     #[default]
@@ -128,6 +139,7 @@ pub struct FormatOptions {
     pub semicolon_policy: SemicolonPolicy,
     pub not_equal_policy: NotEqualPolicy,
     pub syntax_diagnostics: SyntaxDiagnostics,
+    pub unsupported_policy: UnsupportedPolicy,
 }
 
 impl Default for FormatOptions {
@@ -139,6 +151,7 @@ impl Default for FormatOptions {
             semicolon_policy: SemicolonPolicy::Preserve,
             not_equal_policy: NotEqualPolicy::Preserve,
             syntax_diagnostics: SyntaxDiagnostics::ParserAvailable,
+            unsupported_policy: UnsupportedPolicy::Skip,
         }
     }
 }
@@ -212,49 +225,400 @@ pub enum FormatDiagnostic {
 /// Formats one or more complete PostgreSQL statements without touching files.
 pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql, FormatDiagnostic> {
     options.validate()?;
-    if procedural::contains_routine(source)? {
-        let mut formatted = procedural::format_routine_document(source, options)?;
-        let second = procedural::format_routine_document(&formatted.output, options)?;
-        if second.output != formatted.output {
-            return Err(FormatDiagnostic::NotIdempotent);
-        }
-        let warnings = semantic_block::validate_hard_width(&formatted.output, options)?;
-        formatted.warnings = warnings;
-        formatted.diagnostics = diagnostics::style_diagnostics(source, &formatted.output, options)?;
-        formatted
+    let first = format_document_once(source, options)?;
+    if options.unsupported_policy == UnsupportedPolicy::Error
+        && first
             .diagnostics
-            .extend(diagnostics::warning_diagnostics(
-                source,
-                &formatted.warnings,
-            ));
-        return Ok(formatted);
+            .iter()
+            .any(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
+    {
+        return Ok(FormattedSql {
+            output: source.to_owned(),
+            changed: false,
+            warnings: first.warnings,
+            diagnostics: first.diagnostics,
+        });
     }
-    let document = validation::parse_supported_postgresql(source)?;
 
+    let second = format_document_once(&first.output, options)?;
+    if first.output != second.output {
+        return Err(FormatDiagnostic::NotIdempotent);
+    }
+    Ok(first)
+}
+
+fn format_document_once(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<FormattedSql, FormatDiagnostic> {
+    let (output, mut diagnostics) = format_document_content(source, options)?;
+    let warnings = semantic_block::validate_hard_width(&output, options)?;
+    let unsupported_ranges = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
+        .map(|diagnostic| diagnostic.source_range)
+        .collect::<Vec<_>>();
+    let mut style_diagnostics = diagnostics::style_diagnostics(source, &output, options)?;
+    style_diagnostics.retain(|diagnostic| {
+        !unsupported_ranges.iter().any(|range| {
+            diagnostic.source_range.start >= range.start && diagnostic.source_range.end <= range.end
+        })
+    });
+    diagnostics.extend(style_diagnostics);
+    diagnostics.extend(diagnostics::warning_diagnostics(source, &warnings));
+
+    Ok(FormattedSql {
+        changed: output != source,
+        output,
+        warnings,
+        diagnostics,
+    })
+}
+
+fn format_document_content(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<(String, Vec<Diagnostic>), FormatDiagnostic> {
+    let Some(region) = find_copy_stdin_region(source)? else {
+        return format_regular_document_content(source, options);
+    };
+
+    let (prefix, mut diagnostics) =
+        format_document_content(&source[..region.header_start], options)?;
+    let (header, header_diagnostics) =
+        format_regular_document_content(&source[region.header_start..region.header_end], options)?;
+    diagnostics.extend(
+        header_diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.shifted(region.header_start)),
+    );
+    let (suffix, suffix_diagnostics) =
+        format_document_content(&source[region.payload_end..], options)?;
+    diagnostics.extend(
+        suffix_diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.shifted(region.payload_end)),
+    );
+
+    let mut output = String::with_capacity(source.len() + header.len());
+    output.push_str(&prefix);
+    output.push_str(&header);
+    output.push_str(&source[region.header_end..region.payload_end]);
+    output.push_str(&suffix);
+    Ok((output, diagnostics))
+}
+
+fn format_regular_document_content(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<(String, Vec<Diagnostic>), FormatDiagnostic> {
+    let parsed = pg_query::parse(source)
+        .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
+    let split = pg_query::split_with_parser(source)
+        .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
+    if parsed.protobuf.stmts.is_empty() {
+        let formatted = format_supported_statement(source, options)?;
+        return Ok((formatted.output, Vec::new()));
+    }
+    if split.len() != parsed.protobuf.stmts.len() {
+        return Err(FormatDiagnostic::Ownership(
+            "PostgreSQL parser and splitter disagree on statement count".into(),
+        ));
+    }
+    let mut output = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+    let mut diagnostics = Vec::new();
+
+    for raw in &parsed.protobuf.stmts {
+        let (start, end) = statement_span(source, raw);
+        if start < cursor || end < start {
+            return Err(FormatDiagnostic::Ownership(
+                "PostgreSQL statement ranges overlap or are out of order".into(),
+            ));
+        }
+        output.push_str(&normalize_document_gap(&source[cursor..start], false));
+        let statement = &source[start..end];
+        match format_statement_once(statement, raw, options) {
+            Ok(formatted) => output.push_str(&formatted.output),
+            Err(error @ FormatDiagnostic::UnsupportedSyntax { .. }) => {
+                output.push_str(statement);
+                diagnostics.push(
+                    diagnostics::unsupported_diagnostic(
+                        statement,
+                        &error,
+                        options.unsupported_policy,
+                    )
+                    .shifted(start),
+                );
+            }
+            Err(error) => return Err(error),
+        }
+        cursor = end;
+    }
+    output.push_str(&normalize_document_gap(&source[cursor..], true));
+    Ok((output, diagnostics))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CopyStdinRegion {
+    header_start: usize,
+    header_end: usize,
+    payload_end: usize,
+}
+
+fn find_copy_stdin_region(source: &str) -> Result<Option<CopyStdinRegion>, FormatDiagnostic> {
+    use pg_query::protobuf::node::Node;
+
+    let mut statement_start = 0usize;
+    for semicolon in top_level_semicolons(source) {
+        let candidate = &source[statement_start..=semicolon];
+        let leading = candidate
+            .char_indices()
+            .find(|(_, character)| !character.is_whitespace())
+            .map_or(candidate.len(), |(index, _)| index);
+        let header_start = statement_start + leading;
+        if header_start <= semicolon {
+            let header = &source[header_start..=semicolon];
+            if let Ok(parsed) = pg_query::parse(header)
+                && parsed.protobuf.stmts.len() == 1
+                && matches!(
+                    parsed.protobuf.stmts[0]
+                        .stmt
+                        .as_deref()
+                        .and_then(|node| node.node.as_ref()),
+                    Some(Node::CopyStmt(copy))
+                        if copy.is_from && !copy.is_program && copy.filename.is_empty()
+                )
+            {
+                let header_end = semicolon + 1;
+                if let Some(payload_end) = copy_stdin_payload_end(source, header_end) {
+                    return Ok(Some(CopyStdinRegion {
+                        header_start,
+                        header_end,
+                        payload_end,
+                    }));
+                }
+            }
+        }
+        statement_start = semicolon + 1;
+    }
+    Ok(None)
+}
+
+fn copy_stdin_payload_end(source: &str, header_end: usize) -> Option<usize> {
+    let mut cursor = header_end;
+    while cursor < source.len() {
+        let line_end = source[cursor..]
+            .find('\n')
+            .map_or(source.len(), |offset| cursor + offset + 1);
+        let line = source[cursor..line_end].trim_end_matches(['\n', '\r']);
+        if line == r"\." {
+            return Some(line_end);
+        }
+        cursor = line_end;
+    }
+    None
+}
+
+fn top_level_semicolons(source: &str) -> Vec<usize> {
+    #[derive(Clone, Copy)]
+    enum State<'a> {
+        Normal,
+        Single,
+        Double,
+        Dollar(&'a str),
+        LineComment,
+        BlockComment(usize),
+    }
+
+    let bytes = source.as_bytes();
+    let mut semicolons = Vec::new();
+    let mut state = State::Normal;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match state {
+            State::Normal => match bytes[index] {
+                b'\'' => {
+                    state = State::Single;
+                    index += 1;
+                }
+                b'"' => {
+                    state = State::Double;
+                    index += 1;
+                }
+                b'-' if bytes.get(index + 1) == Some(&b'-') => {
+                    state = State::LineComment;
+                    index += 2;
+                }
+                b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                    state = State::BlockComment(1);
+                    index += 2;
+                }
+                b'$' => {
+                    if let Some((tag, end)) = dollar_tag_at(source, index) {
+                        state = State::Dollar(tag);
+                        index = end;
+                    } else {
+                        index += 1;
+                    }
+                }
+                b';' => {
+                    semicolons.push(index);
+                    index += 1;
+                }
+                _ => index += 1,
+            },
+            State::Single => {
+                if bytes[index] == b'\'' {
+                    if bytes.get(index + 1) == Some(&b'\'') {
+                        index += 2;
+                    } else {
+                        state = State::Normal;
+                        index += 1;
+                    }
+                } else {
+                    index += 1;
+                }
+            }
+            State::Double => {
+                if bytes[index] == b'"' {
+                    if bytes.get(index + 1) == Some(&b'"') {
+                        index += 2;
+                    } else {
+                        state = State::Normal;
+                        index += 1;
+                    }
+                } else {
+                    index += 1;
+                }
+            }
+            State::Dollar(tag) => {
+                if source[index..].starts_with(tag) {
+                    state = State::Normal;
+                    index += tag.len();
+                } else {
+                    index += 1;
+                }
+            }
+            State::LineComment => {
+                if bytes[index] == b'\n' {
+                    state = State::Normal;
+                }
+                index += 1;
+            }
+            State::BlockComment(depth) => {
+                if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
+                    state = State::BlockComment(depth + 1);
+                    index += 2;
+                } else if bytes[index] == b'*' && bytes.get(index + 1) == Some(&b'/') {
+                    state = if depth == 1 {
+                        State::Normal
+                    } else {
+                        State::BlockComment(depth - 1)
+                    };
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+        }
+    }
+    semicolons
+}
+
+fn dollar_tag_at(source: &str, start: usize) -> Option<(&str, usize)> {
+    let bytes = source.as_bytes();
+    let mut end = start + 1;
+    while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+        end += 1;
+    }
+    if bytes.get(end) == Some(&b'$') {
+        let tag = &source[start..=end];
+        Some((tag, end + 1))
+    } else {
+        None
+    }
+}
+
+fn format_statement_once(
+    source: &str,
+    raw: &pg_query::protobuf::RawStmt,
+    options: &FormatOptions,
+) -> Result<FormattedSql, FormatDiagnostic> {
+    use pg_query::protobuf::node::Node;
+    let routine = matches!(
+        raw.stmt.as_deref().and_then(|node| node.node.as_ref()),
+        Some(Node::DoStmt(_) | Node::CreateFunctionStmt(_))
+    );
+    if routine {
+        return procedural::format_single_routine(source, options);
+    }
+    format_supported_statement(source, options)
+}
+
+fn format_supported_statement(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<FormattedSql, FormatDiagnostic> {
+    let document = validation::parse_supported_postgresql(source)?;
     let output = match options.style {
         Style::SemanticBlock => semantic_block::format(source, options, &document)?,
     };
-
     let output_document = validation::parse_supported_postgresql(&output)?;
     validation::validate_equivalent(source, &output)?;
-
     let second_pass = match options.style {
         Style::SemanticBlock => semantic_block::format(&output, options, &output_document)?,
     };
     if output != second_pass {
         return Err(FormatDiagnostic::NotIdempotent);
     }
-
     let warnings = semantic_block::validate_hard_width(&output, options)?;
     let mut result_diagnostics = diagnostics::style_diagnostics(source, &output, options)?;
     result_diagnostics.extend(diagnostics::warning_diagnostics(source, &warnings));
-
     Ok(FormattedSql {
         changed: output != source,
         output,
         warnings,
         diagnostics: result_diagnostics,
     })
+}
+
+fn normalize_document_gap(source: &str, final_gap: bool) -> String {
+    let mut output = String::with_capacity(source.len());
+    for segment in source.split_inclusive('\n') {
+        if let Some(line) = segment.strip_suffix('\n') {
+            output.push_str(line.trim_end_matches([' ', '\t', '\r']));
+            output.push('\n');
+        } else if final_gap {
+            output.push_str(segment.trim_end_matches([' ', '\t', '\r']));
+        } else {
+            output.push_str(segment);
+        }
+    }
+    output
+}
+
+fn statement_span(source: &str, raw: &pg_query::protobuf::RawStmt) -> (usize, usize) {
+    let raw_start = usize::try_from(raw.stmt_location)
+        .unwrap_or(0)
+        .min(source.len());
+    let leading_whitespace = source[raw_start..]
+        .char_indices()
+        .find(|(_, character)| !character.is_whitespace())
+        .map_or(source.len() - raw_start, |(index, _)| index);
+    let start = raw_start
+        .saturating_add(leading_whitespace)
+        .min(source.len());
+    let length = usize::try_from(raw.stmt_len).unwrap_or(0);
+    let mut end = if length == 0 {
+        source.len()
+    } else {
+        raw_start.saturating_add(length).min(source.len())
+    };
+    if source.as_bytes().get(end) == Some(&b';') {
+        end += 1;
+    }
+    (start, end)
 }
 
 /// Formats SQL without exposing an error-only partial-result path.
