@@ -1,6 +1,6 @@
 # Real-world formatter readiness — durable three-PR checklist
 
-Status: **PR 1 and PR 2 implementation complete; PR 2 bundle pending**
+Status: **PR 1 and PR 2 complete; PR 3 in progress**
 
 This roadmap is intentionally split into three stacked pull requests. Each PR
 must pass the complete repository quality gate and remain independently
@@ -174,8 +174,8 @@ PR 1 validation on 2026-07-30:
 - [x] Add mixed ordinary SQL/routine and mixed supported/unsupported routine tests.
 - [x] Update documentation and remove obsolete renderer helpers.
 - [x] Run the complete offline quality gate and self-review.
-- [ ] Produce a verified PR 2 git bundle and SHA-256 file.
-- [ ] Record stacked Windows apply/push/PR instructions.
+- [x] Produce a verified PR 2 git bundle and SHA-256 file.
+- [x] Record stacked Windows apply/push/PR instructions.
 
 
 PR 2 validation on 2026-07-30:
@@ -183,6 +183,7 @@ PR 2 validation on 2026-07-30:
 - The line-oriented frame renderer was removed and replaced by typed parser adaptation, span-bearing procedural IR, and a separate layout pass.
 - Compact bodies, `ASSERT`, `RETURN QUERY`, and opaque transaction-control siblings are covered.
 - Existing blocks, loops, CASE, cursors, dynamic execution, comments, dollar tags, CRLF, equivalence, and idempotence remain covered.
+- The full offline gate passed with 177 tests, Clippy warnings denied, Rustdoc, formatting, and `git diff --check`.
 
 # PR 3 — Real Go string-expression coverage
 
