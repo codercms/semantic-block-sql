@@ -256,6 +256,9 @@ fn bind_query_clauses(
             continue;
         }
         match tokens[index].kind {
+            Token::Into => {
+                clauses.into.get_or_insert(index);
+            }
             Token::From => {
                 clauses.from.get_or_insert(index);
             }
@@ -454,7 +457,8 @@ pub(super) fn bind_predicates(
             | StatementLayout::View(_)
             | StatementLayout::MaterializedView(_)
             | StatementLayout::CreateTable(_)
-            | StatementLayout::AlterTable(_) => {}
+            | StatementLayout::AlterTable(_)
+            | StatementLayout::Utility(_) => {}
         }
     }
 
@@ -503,7 +507,8 @@ fn push_predicate(
 
 fn is_query_clause_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
     match tokens[index].kind {
-        Token::From
+        Token::Into
+        | Token::From
         | Token::Where
         | Token::Having
         | Token::Window

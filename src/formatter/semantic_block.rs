@@ -23,13 +23,14 @@ use ddl::{
     plan_values_statements, plan_views,
 };
 use lists::{parenthesized_lists, plan_keyword_list, plan_parenthesized_lists, plan_select_lists};
-use render::needs_space;
+pub(in crate::formatter) use render::needs_space;
 pub(super) use render::{
     is_compact_grammar_parenthesis, is_function_call_name, is_function_call_syntax,
     is_type_keyword, is_type_modifier_syntax, is_uppercase_builtin, render_token,
 };
 use statements::{
-    plan_delete_statements, plan_insert_statements, plan_merge_statements, plan_update_statements,
+    plan_delete_statements, plan_insert_statements, plan_merge_statements, plan_relation_source,
+    plan_update_statements,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,6 +141,7 @@ pub(super) fn format(
     let parens = structure.parenthesis_pairs();
     let layout = LayoutDocument::bind(document, &tokens, &structure)?;
     let cases = case_ranges(&tokens, options);
+    let selects = layout.selects().cloned().collect::<Vec<_>>();
     let inserts = layout.inserts().cloned().collect::<Vec<_>>();
     let updates = layout.updates().cloned().collect::<Vec<_>>();
     let deletes = layout.deletes().cloned().collect::<Vec<_>>();
@@ -193,6 +195,20 @@ pub(super) fn format(
     }
     expanded_selects.extend(views.iter().map(|view| view.query_start));
     expanded_selects.extend(materialized_views.iter().map(|view| view.query_start));
+    for select in &selects {
+        if let Some(source) = &select.from {
+            if source.items.len() > 1
+                || !source.joins.is_empty()
+                || source
+                    .item_kinds
+                    .iter()
+                    .any(|kind| *kind != crate::formatter::ownership::RelationItemSpec::Relation)
+            {
+                expanded_selects.insert(select.query_start);
+            }
+            plan_relation_source(source, &mut plan);
+        }
+    }
     let insert_query_starts = plan_insert_statements(&context, &inserts, &mut plan);
     expanded_selects.extend(insert_query_starts);
     plan_update_statements(&context, &boolean_ranges, &updates, &mut plan);
@@ -453,9 +469,19 @@ fn plan_query_clauses(
         .iter()
         .flat_map(|with| {
             with.definitions.iter().filter_map(|&(open, close)| {
+                let body_depth = depths[open] + 1;
+                let body_start = (open + 1..close)
+                    .find(|index| depths[*index] == body_depth && !tokens[*index].is_comment())?;
+                if !matches!(tokens[body_start].kind, Token::Select | Token::With) {
+                    return None;
+                }
                 queries
                     .iter()
-                    .find(|query| query.select > open && query.select < close)
+                    .find(|query| {
+                        query.select > open
+                            && query.select < close
+                            && query.base_depth == body_depth
+                    })
                     .map(|query| query.select)
             })
         })
@@ -491,6 +517,13 @@ fn plan_query_clauses(
         for boundary in query.clauses.ordered_boundaries(end) {
             if boundary < end {
                 plan.break_before(boundary, 1, base_depth);
+            }
+        }
+        if query.clauses.locking.is_some() {
+            for index in select + 1..end {
+                if depths[index] == base_depth && tokens[index].kind == Token::For {
+                    plan.break_before(index, 1, base_depth);
+                }
             }
         }
         for (index, depth) in depths.iter().enumerate().take(end).skip(select + 1) {
@@ -648,6 +681,16 @@ fn plan_ctes(
                     plan.break_before(after_close + 1, usize::from(blank) + 1, base_indent);
                 }
             } else if position + 1 == block.definitions.len() {
+                for (clause, token) in tokens
+                    .iter()
+                    .enumerate()
+                    .take(block.body_start)
+                    .skip(close + 1)
+                {
+                    if matches!(token.kind, Token::Search | Token::Cycle) {
+                        plan.break_before(clause, 1, base_indent);
+                    }
+                }
                 plan.break_before(block.body_start, 1, base_indent);
             }
 

@@ -132,18 +132,19 @@ Interpreted Go strings and incomplete fragments such as a standalone `WHERE` cla
 
 The formatter has fixture-backed structural support for substantial PostgreSQL syntax, including:
 
-- `SELECT`, CTEs, recursive and general set operations;
-- result, argument, grouping, sorting, pagination, and window layouts;
-- booleans, joins, `CASE`, filtered and ordered aggregates;
-- top-level `VALUES`;
-- `INSERT` with `VALUES`, query sources, `DEFAULT VALUES`, `OVERRIDING`, `RETURNING`, and `ON CONFLICT`;
-- `UPDATE ... FROM`, `DELETE ... USING`, and shared DML `WITH`;
-- PostgreSQL 17 `MERGE` with matched and not-matched actions;
-- multiple, joined, derived, function, lateral, and parenthesized relation sources;
-- basic `CREATE TABLE`, feature-rich `CREATE INDEX`, and multi-action `ALTER TABLE`;
-- `CREATE VIEW` and `CREATE MATERIALIZED VIEW`.
+- `SELECT`, `SELECT INTO`, recursive/general set operations, data-modifying CTEs, `SEARCH` / `CYCLE`, and every PostgreSQL row-lock strength;
+- result, argument, grouping, sorting, pagination, window, boolean, `CASE`, filtered aggregate, and ordered aggregate layouts;
+- top-level `VALUES`, scalar and predicate subqueries, and subqueries in reviewed `UPDATE`, `DELETE`, and `MERGE` expressions;
+- `INSERT` with query sources, `DEFAULT VALUES`, `OVERRIDING`, `RETURNING`, and `ON CONFLICT`;
+- `UPDATE ... FROM`, `DELETE ... USING`, and PostgreSQL 17 `MERGE` with matched and not-matched actions;
+- multiple, joined, derived, function, lateral, parenthesized, `ROWS FROM`, and `TABLESAMPLE` relation sources, including alias column/definition lists and derived queries containing `WITH`;
+- `DROP`, `TRUNCATE`, object and role `GRANT` / `REVOKE`, and `COMMENT ON`;
+- enum/composite types, domains, sequences, triggers, and row-security policies;
+- `CREATE TABLE` with inheritance, typed tables, access/storage/tablespace/on-commit options, partition keys, `PARTITION OF`, and range/list/hash/default partition bounds;
+- feature-rich `CREATE INDEX`, multi-action `ALTER TABLE`, `CREATE VIEW`, and `CREATE MATERIALIZED VIEW`;
+- parser-backed PL/pgSQL declarations, SQL statements, conditionals, exception handlers, loops, `FOREACH`, procedural `CASE`, dynamic `EXECUTE`, cursor operations, and reviewed `EXIT` / `CONTINUE` forms.
 
-Important remaining areas include routines, PL/pgSQL, richer table and partition DDL, and several advanced relation-source variants.
+Important remaining areas include advanced SQL/JSON (`JSON_TABLE`, SQL-standard JSON query/value/aggregate forms), `CREATE TABLE AS` / `LIKE`, `XMLTABLE`, and unreviewed PL/pgSQL nodes such as `ASSERT`, `RETURN QUERY`, and transaction control.
 
 A PostgreSQL statement may be valid while still being unsupported by the formatter. In that case, `semblock` preserves the statement and emits `syntax.unsupported`. This is a deliberate safety boundary, not a parser error.
 

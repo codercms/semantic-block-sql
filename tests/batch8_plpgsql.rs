@@ -30,8 +30,8 @@ fn formats_parser_backed_plpgsql_and_preserves_dollar_tags() {
 }
 
 #[test]
-fn rejects_unsupported_procedural_nodes_without_changes() {
-    let source = "DO $$\nBEGIN\n    FOR item_id IN 1..3 LOOP\n        PERFORM refresh_item(item_id);\n    END LOOP;\nEND;\n$$;";
+fn rejects_unreviewed_procedural_nodes_without_changes() {
+    let source = "DO $$\nBEGIN\n    ASSERT active, 'must be active';\nEND;\n$$;";
     let result = format_sql_result(source, &FormatOptions::default());
     assert_eq!(result.output, source);
     assert!(!result.changed);

@@ -191,3 +191,23 @@ Before committing, confirm:
 - no document-wide statement discovery was introduced;
 - no existing statement planner was rewritten merely to add another family;
 - dead capability fields and duplicate helpers were removed.
+
+
+## Extension paths after the expanded coverage tranche
+
+Three extension paths now exist and must remain distinct:
+
+1. **Layout-bearing statement or query syntax** extends `StatementSpec` or a
+   query/relation capability record, then updates binding and planning.
+2. **Simple migration utilities** may extend `UtilityStatementKind` only when
+   the exact protobuf node and every accepted option shape are validated; this
+   path must never become a generic utility fallback.
+3. **PL/pgSQL syntax** extends the `parse_plpgsql` node allowlist and the explicit
+   frame/line renderer in `procedural.rs`, with fixtures for nested indentation,
+   comments, protected literals, normalized parser equivalence, and idempotence.
+
+When adding CTEs or subqueries, tests must prove that the binder identifies the
+owned root statement rather than the first nested SELECT. When adding relation
+or table variants, include an adjacent parsed-but-unowned form. When adding a
+procedural node, include both nested control flow and a still-unsupported sibling
+node so the allowlist cannot broaden accidentally.

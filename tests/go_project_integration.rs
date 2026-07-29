@@ -119,6 +119,7 @@ fn formats_a_realistic_go_project_deterministically_and_compiles_it() {
     assert_eq!(
         normalized_lines(&check.stdout),
         [
+            "internal/migrations/schema.go",
             "internal/orders/repository.go",
             "internal/users/repository.go",
         ]
@@ -286,7 +287,7 @@ fn unsupported_plpgsql_prevents_every_project_write() {
     .expect("write valid Go source");
     fs::write(
         project.path().join("routine.go"),
-        "package fixture\n\nconst routine = `\nDO $$\nBEGIN\n    FOR item_id IN 1..3 LOOP\n        PERFORM refresh_item(item_id);\n    END LOOP;\nEND;\n$$;\n`\n",
+        "package fixture\n\nconst routine = `\nDO $$\nBEGIN\n    ASSERT active, 'must be active';\nEND;\n$$;\n`\n",
     )
     .expect("write unsupported routine source");
     let before = collect_tree(project.path());

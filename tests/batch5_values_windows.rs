@@ -1,5 +1,5 @@
 use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, check_sql, format_sql, format_sql_result, validate_equivalent};
+use semblock::{FormatOptions, check_sql, format_sql, validate_equivalent};
 
 fn assert_format(source: &str, expected: &str, options: &FormatOptions) {
     let formatted = format_sql(source, options).expect("format succeeds");
@@ -65,7 +65,8 @@ fn formats_lateral_derived_tables_with_owned_query_wrappers() {
 fn supports_lateral_functions_and_preserves_alias_identifiers() {
     assert_format(
         "select * from lateral generate_series(1,10) with ordinality as value(n,ordinality);",
-        "SELECT * FROM LATERAL generate_series(1, 10) WITH ORDINALITY AS value (n, ordinality);",
+        "SELECT *
+FROM LATERAL generate_series(1, 10) WITH ORDINALITY AS value (n, ordinality);",
         &FormatOptions::default(),
     );
 }
@@ -80,12 +81,11 @@ fn supports_window_functions_inside_insert_select() {
 }
 
 #[test]
-fn nested_data_modifying_ctes_remain_fail_safe_unsupported() {
-    let source = "SELECT * FROM LATERAL (WITH moved AS (DELETE FROM items RETURNING id) SELECT * FROM moved) source;";
-    let formatted = format_sql_result(source, &FormatOptions::default());
-
-    assert_eq!(formatted.output, source);
-    assert!(!formatted.changed);
-    assert_eq!(formatted.diagnostics.len(), 1);
-    assert_eq!(formatted.diagnostics[0].rule_id, "syntax.unsupported");
+fn supports_nested_data_modifying_ctes_in_derived_relations() {
+    assert_format(
+        "SELECT * FROM LATERAL (WITH moved AS (DELETE FROM items RETURNING id) SELECT * FROM moved) source;",
+        "SELECT *
+FROM LATERAL (WITH moved AS (DELETE FROM items RETURNING id) SELECT * FROM moved) source;",
+        &FormatOptions::default(),
+    );
 }

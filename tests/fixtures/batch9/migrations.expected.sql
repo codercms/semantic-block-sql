@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS public.old_items, public.old_events CASCADE;
+TRUNCATE TABLE public.items, public.events RESTART IDENTITY CASCADE;
+GRANT SELECT, INSERT (id, name) ON TABLE public.items TO app_user, readonly WITH GRANT OPTION;
+REVOKE GRANT OPTION FOR UPDATE ON TABLE public.items FROM app_user CASCADE;
+GRANT app_reader, app_writer TO app_user WITH ADMIN OPTION;
+REVOKE ADMIN OPTION FOR app_reader FROM app_user CASCADE;
+COMMENT ON TABLE public.items IS 'items';
+COMMENT ON COLUMN public.items.payload IS NULL;
+CREATE TYPE public.status AS ENUM ('new', 'active', 'done');
+CREATE TYPE public.point AS (x double precision, y double precision);
+CREATE DOMAIN public.email AS text DEFAULT '' NOT NULL CHECK (value <> '');
+CREATE SEQUENCE IF NOT EXISTS public.item_id_seq AS bigint INCREMENT BY 2 START WITH 10 CACHE 5 CYCLE;
+CREATE TRIGGER items_audit BEFORE INSERT OR UPDATE ON public.items FOR EACH ROW EXECUTE FUNCTION public.audit_item();
+CREATE POLICY item_visibility ON public.items FOR SELECT TO app_user USING (owner_id = current_user_id());

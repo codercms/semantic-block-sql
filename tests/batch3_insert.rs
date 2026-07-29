@@ -52,20 +52,35 @@ fn long_ungrouped_insert_lists_expand_one_item_per_line() {
 }
 
 #[test]
-fn unsupported_insert_variants_remain_unchanged() {
-    for source in [
+fn insert_supports_data_modifying_ctes_and_locked_query_sources() {
+    assert_format(
         "WITH changed AS (DELETE FROM staging.items RETURNING id) INSERT INTO public.items (id) SELECT id FROM changed;",
+        "WITH changed AS (
+    DELETE FROM staging.items RETURNING id
+)
+INSERT INTO public.items (id)
+SELECT id
+FROM changed;",
+        &FormatOptions::default(),
+    );
+    assert_format(
         "INSERT INTO public.items (id) SELECT id FROM staging.items FOR UPDATE;",
-    ] {
-        let formatted = format_sql_result(source, &FormatOptions::default());
-        assert_eq!(formatted.output, source, "{source}");
-        assert!(!formatted.changed, "{source}");
-        assert_eq!(formatted.diagnostics.len(), 1, "{source}");
-        assert_eq!(
-            formatted.diagnostics[0].rule_id, "syntax.unsupported",
-            "{source}"
-        );
-    }
+        "INSERT INTO public.items (id)
+SELECT id
+FROM staging.items
+FOR UPDATE;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn unsupported_insert_variants_remain_unchanged() {
+    let source = "INSERT INTO public.items (payload) VALUES (JSON_QUERY(payload, '$.a'));";
+    let formatted = format_sql_result(source, &FormatOptions::default());
+    assert_eq!(formatted.output, source);
+    assert!(!formatted.changed);
+    assert_eq!(formatted.diagnostics.len(), 1);
+    assert_eq!(formatted.diagnostics[0].rule_id, "syntax.unsupported");
 }
 
 #[test]

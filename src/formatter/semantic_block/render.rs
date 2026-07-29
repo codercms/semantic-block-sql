@@ -21,6 +21,7 @@ pub(in crate::formatter) fn render_token(
         || is_overriding_value_keyword(tokens, index)
         || is_merge_match_side_keyword(tokens, index)
         || is_with_ordinality_keyword(tokens, index)
+        || is_partition_strategy_keyword(tokens, index)
     {
         return token.text.to_uppercase();
     }
@@ -227,6 +228,17 @@ fn is_with_ordinality_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
             .is_some_and(|previous| previous.kind == Token::With)
 }
 
+fn is_partition_strategy_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    tokens[index].kind == Token::Ident
+        && matches!(
+            tokens[index].text.to_ascii_lowercase().as_str(),
+            "range" | "list" | "hash"
+        )
+        && index >= 2
+        && tokens[index - 1].kind == Token::By
+        && tokens[index - 2].kind == Token::Partition
+}
+
 fn is_string_literal(kind: Token) -> bool {
     matches!(kind, Token::Sconst | Token::Usconst)
 }
@@ -288,6 +300,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::IfP
             | Token::Include
             | Token::Index
+            | Token::Inherits
             | Token::InnerP
             | Token::Insert
             | Token::Intersect
@@ -338,6 +351,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::SessionUser
             | Token::Set
             | Token::Table
+            | Token::Tablesample
             | Token::Tablespace
             | Token::Then
             | Token::Ties
@@ -356,6 +370,46 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Within
             | Token::With
             | Token::DataP
+            | Token::Admin
+            | Token::After
+            | Token::Before
+            | Token::Breadth
+            | Token::Cache
+            | Token::Commit
+            | Token::Comment
+            | Token::Cycle
+            | Token::Depth
+            | Token::DomainP
+            | Token::Each
+            | Token::EnumP
+            | Token::Execute
+            | Token::Function
+            | Token::Grant
+            | Token::Increment
+            | Token::Locked
+            | Token::Maxvalue
+            | Token::Minvalue
+            | Token::Nowait
+            | Token::Of
+            | Token::Options
+            | Token::Owned
+            | Token::Policy
+            | Token::Preserve
+            | Token::Range
+            | Token::Repeatable
+            | Token::Restart
+            | Token::Revoke
+            | Token::Search
+            | Token::Share
+            | Token::Skip
+            | Token::Sequence
+            | Token::Start
+            | Token::Temp
+            | Token::Temporary
+            | Token::Trigger
+            | Token::Truncate
+            | Token::TypeP
+            | Token::Unlogged
             | Token::YearP
     )
 }
@@ -497,7 +551,18 @@ fn is_insert_target_list_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
     {
         return false;
     }
-    for token in tokens[..open].iter().rev() {
+    let statement_start = tokens[..open]
+        .iter()
+        .rposition(|token| token.kind == Token::Ascii59)
+        .map_or(0, |semicolon| semicolon + 1);
+    let first = tokens[statement_start..open]
+        .iter()
+        .find(|token| !token.is_comment())
+        .map(|token| token.kind);
+    if !matches!(first, Some(Token::Insert | Token::With)) {
+        return false;
+    }
+    for token in tokens[statement_start..open].iter().rev() {
         match token.kind {
             Token::Ascii59 | Token::Values | Token::Select => return false,
             Token::Insert => return true,
@@ -507,7 +572,7 @@ fn is_insert_target_list_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
     false
 }
 
-pub(super) fn needs_space(
+pub(in crate::formatter) fn needs_space(
     tokens: &[SqlToken<'_>],
     previous: Option<usize>,
     current: usize,

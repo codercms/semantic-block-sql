@@ -2,7 +2,7 @@ use semblock::{FormatDiagnostic, FormatOptions, Severity, format_sql, format_sql
 
 #[test]
 fn unsupported_statement_family_returns_original_source() {
-    let source = "CREATE TABLE child (id bigint) INHERITS (parent);";
+    let source = "CREATE TABLE child (LIKE parent INCLUDING ALL);";
     let formatted = format_sql_result(source, &FormatOptions::default());
 
     assert_eq!(formatted.output, source);
@@ -23,8 +23,8 @@ fn unsupported_statement_family_returns_original_source() {
 #[test]
 fn unowned_select_layouts_are_explicitly_unsupported() {
     for source in [
-        "SELECT id INTO archived_items FROM items;",
-        "SELECT id FROM items FOR UPDATE;",
+        "SELECT id FROM ONLY items;",
+        "SELECT * FROM XMLTABLE('/items/item' PASSING payload COLUMNS id bigint PATH '@id') AS item;",
     ] {
         let formatted = format_sql_result(source, &FormatOptions::default());
         assert_eq!(formatted.output, source, "{source}");

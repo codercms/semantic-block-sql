@@ -154,11 +154,7 @@ fn comments_remain_attached_across_source_and_view_boundaries() {
 #[test]
 fn neighboring_unowned_source_and_view_shapes_remain_unchanged() {
     for source in [
-        "UPDATE items SET title = source.title FROM ROWS FROM (jsonb_each_text(payload)) source;",
-        "DELETE FROM items USING staging.items source TABLESAMPLE SYSTEM (10) WHERE items.id = source.id;",
         "UPDATE items SET title = source.title FROM source_items source JOIN batches batch USING (batch_id) AS matched WHERE items.id = source.item_id;",
-        "MERGE INTO items target USING LATERAL jsonb_each_text(target.payload) AS source(key, value) ON TRUE WHEN MATCHED THEN DELETE;",
-        "UPDATE items SET title = source.title FROM (WITH source AS (SELECT 1 AS id) SELECT id FROM source) source;",
         "CREATE VIEW v AS WITH source AS (SELECT 1 AS id) SELECT id FROM source;",
         "CREATE MATERIALIZED VIEW mv AS WITH source AS (SELECT 1 AS id) SELECT id FROM source WITH DATA;",
         "CREATE TABLE copy AS SELECT id FROM items;",

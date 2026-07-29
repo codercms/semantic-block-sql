@@ -4,11 +4,14 @@ use super::tokens::SqlToken;
 use super::{FormatDiagnostic, SourceRange};
 
 /// Exact top-level SELECT capabilities proven by PostgreSQL AST validation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SelectSpec {
     pub has_with: bool,
+    pub has_into: bool,
     pub set_operations: usize,
     pub named_windows: usize,
+    pub locking_clauses: usize,
+    pub from: RelationListSpec,
 }
 
 /// Top-level VALUES capabilities proven by PostgreSQL AST validation.
@@ -65,6 +68,8 @@ pub(super) enum RelationItemSpec {
     Relation,
     Subquery,
     Function,
+    RowsFrom,
+    TableSample,
     Join,
 }
 
@@ -195,6 +200,14 @@ pub(super) enum CreateTableElementSpec {
 pub(super) struct CreateTableSpec {
     pub if_not_exists: bool,
     pub elements: Vec<CreateTableElementSpec>,
+    pub inheritance_relations: usize,
+    pub has_partition_spec: bool,
+    pub has_partition_bound: bool,
+    pub typed_table: bool,
+    pub options: usize,
+    pub has_on_commit: bool,
+    pub has_tablespace: bool,
+    pub has_access_method: bool,
 }
 
 /// Exact CREATE INDEX capabilities proven by PostgreSQL AST validation.
@@ -227,6 +240,60 @@ pub(super) struct AlterTableSpec {
     pub action_groups: Vec<AlterTableActionGroup>,
 }
 
+/// Reviewed top-level migration/utility statement family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum UtilityStatementKind {
+    Drop,
+    Truncate,
+    Grant,
+    Revoke,
+    GrantRole,
+    RevokeRole,
+    Comment,
+    CreateEnum,
+    CreateCompositeType,
+    CreateDomain,
+    CreateSequence,
+    CreateTrigger,
+    CreatePolicy,
+}
+
+impl UtilityStatementKind {
+    pub fn expected_token(self) -> Token {
+        match self {
+            Self::Drop => Token::Drop,
+            Self::Truncate => Token::Truncate,
+            Self::Grant | Self::GrantRole => Token::Grant,
+            Self::Revoke | Self::RevokeRole => Token::Revoke,
+            Self::Comment => Token::Comment,
+            Self::CreateEnum
+            | Self::CreateCompositeType
+            | Self::CreateDomain
+            | Self::CreateSequence
+            | Self::CreateTrigger
+            | Self::CreatePolicy => Token::Create,
+        }
+    }
+
+    pub fn family_name(self) -> &'static str {
+        match self {
+            Self::Drop => "DROP",
+            Self::Truncate => "TRUNCATE",
+            Self::Grant => "GRANT",
+            Self::Revoke => "REVOKE",
+            Self::GrantRole => "GRANT ROLE",
+            Self::RevokeRole => "REVOKE ROLE",
+            Self::Comment => "COMMENT ON",
+            Self::CreateEnum => "CREATE TYPE AS ENUM",
+            Self::CreateCompositeType => "CREATE TYPE AS",
+            Self::CreateDomain => "CREATE DOMAIN",
+            Self::CreateSequence => "CREATE SEQUENCE",
+            Self::CreateTrigger => "CREATE TRIGGER",
+            Self::CreatePolicy => "CREATE POLICY",
+        }
+    }
+}
+
 /// Exact statement shape accepted by the PostgreSQL AST support gate.
 ///
 /// This is deliberately a closed sum type. Adding a statement family requires
@@ -247,6 +314,7 @@ pub(super) enum StatementSpec {
     CreateTable(CreateTableSpec),
     CreateIndex(CreateIndexSpec),
     AlterTable(AlterTableSpec),
+    Utility(UtilityStatementKind),
 }
 
 impl StatementSpec {
@@ -263,6 +331,7 @@ impl StatementSpec {
             | Self::CreateTable(_)
             | Self::CreateIndex(_) => Token::Create,
             Self::AlterTable(_) => Token::Alter,
+            Self::Utility(kind) => kind.expected_token(),
         }
     }
 
@@ -279,6 +348,7 @@ impl StatementSpec {
             Self::CreateTable(_) => "CREATE TABLE",
             Self::CreateIndex(_) => "CREATE INDEX",
             Self::AlterTable(_) => "ALTER TABLE",
+            Self::Utility(kind) => kind.family_name(),
         }
     }
 
@@ -294,7 +364,8 @@ impl StatementSpec {
             | Self::MaterializedView(_)
             | Self::CreateTable(_)
             | Self::CreateIndex(_)
-            | Self::AlterTable(_) => false,
+            | Self::AlterTable(_)
+            | Self::Utility(_) => false,
         }
     }
 }
@@ -451,8 +522,11 @@ mod tests {
             SourceStatement {
                 spec: StatementSpec::Select(SelectSpec {
                     has_with: false,
+                    has_into: false,
                     set_operations: 0,
                     named_windows: 0,
+                    locking_clauses: 0,
+                    from: RelationListSpec::default(),
                 }),
                 range: SourceRange::new(0, 9),
             },
@@ -485,8 +559,11 @@ mod tests {
         let document = SupportedDocument::new(vec![SourceStatement {
             spec: StatementSpec::Select(SelectSpec {
                 has_with: false,
+                has_into: false,
                 set_operations: 0,
                 named_windows: 0,
+                locking_clauses: 0,
+                from: RelationListSpec::default(),
             }),
             range: SourceRange::new(0, source.len()),
         }]);

@@ -1,5 +1,5 @@
 use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, check_sql, format_sql, format_sql_result, validate_equivalent};
+use semblock::{FormatOptions, check_sql, format_sql, validate_equivalent};
 
 fn assert_format(source: &str, expected: &str, options: &FormatOptions) {
     let formatted = format_sql(source, options).expect("format succeeds");
@@ -66,18 +66,4 @@ fn preserves_merge_comments_and_authored_branch_groups() {
     let source = "MERGE INTO items target\nUSING incoming source ON source.id = target.id\n\n-- remove stale rows\nWHEN MATCHED AND source.deleted_at IS NOT NULL THEN DELETE\n\n-- update live rows\nWHEN MATCHED THEN UPDATE SET\n    title = source.title, -- visible title\n    updated_at = NOW();\n";
 
     assert_format(source, source, &FormatOptions::default());
-}
-
-#[test]
-fn unsupported_merge_sources_remain_unchanged() {
-    for source in [
-        "MERGE INTO items target USING LATERAL jsonb_each_text(target.payload) AS source(key, value) ON TRUE WHEN MATCHED THEN DELETE;",
-        "WITH changed AS (DELETE FROM incoming RETURNING id) MERGE INTO items target USING changed source ON source.id = target.id WHEN MATCHED THEN DELETE;",
-    ] {
-        let formatted = format_sql_result(source, &FormatOptions::default());
-        assert_eq!(formatted.output, source);
-        assert!(!formatted.changed);
-        assert_eq!(formatted.diagnostics.len(), 1);
-        assert_eq!(formatted.diagnostics[0].rule_id, "syntax.unsupported");
-    }
 }
