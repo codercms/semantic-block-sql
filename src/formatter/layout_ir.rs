@@ -175,6 +175,13 @@ pub(super) enum InsertSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SelectBlock {
+    pub span: TokenSpan,
+    pub query_start: usize,
+    pub from: Option<RelationSourceBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct InsertBlock {
     pub span: TokenSpan,
     pub body_start: usize,
@@ -287,9 +294,10 @@ pub(super) struct CreateTableItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CreateTableBlock {
     pub span: TokenSpan,
-    pub open: usize,
-    pub close: usize,
+    pub open: Option<usize>,
+    pub close: Option<usize>,
     pub items: Vec<CreateTableItem>,
+    pub clauses: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,7 +327,7 @@ pub(super) struct AlterTableBlock {
 /// Exhaustive top-level layout dispatcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum StatementLayout {
-    Select(TokenSpan),
+    Select(SelectBlock),
     Values(ValuesBlock),
     Insert(InsertBlock),
     Update(UpdateBlock),
@@ -368,11 +376,7 @@ impl LayoutDocument {
             }
             statements.push(match &statement.spec {
                 StatementSpec::Select(spec) => StatementLayout::Select(bind_select(
-                    tokens,
-                    structure.depths(),
-                    statement,
-                    body_start,
-                    spec,
+                    tokens, structure, statement, body_start, spec,
                 )?),
                 StatementSpec::Values(spec) => StatementLayout::Values(bind_values(
                     tokens, structure, statement, body_start, spec,
@@ -435,6 +439,15 @@ impl LayoutDocument {
         &self.queries
     }
 
+    pub fn selects(&self) -> impl Iterator<Item = &SelectBlock> {
+        self.statements
+            .iter()
+            .filter_map(|statement| match statement {
+                StatementLayout::Select(block) => Some(block),
+                _ => None,
+            })
+    }
+
     pub fn with_blocks(&self) -> &[WithBlock] {
         &self.with_blocks
     }
@@ -453,7 +466,7 @@ impl LayoutDocument {
 
     pub fn statement_spans(&self) -> impl Iterator<Item = TokenSpan> + '_ {
         self.statements.iter().map(|statement| match statement {
-            StatementLayout::Select(span) => *span,
+            StatementLayout::Select(block) => block.span,
             StatementLayout::Values(block) => block.span,
             StatementLayout::Insert(block) => block.span,
             StatementLayout::Update(block) => block.span,

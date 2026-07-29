@@ -21,6 +21,7 @@ pub(in crate::formatter) fn render_token(
         || is_overriding_value_keyword(tokens, index)
         || is_merge_match_side_keyword(tokens, index)
         || is_with_ordinality_keyword(tokens, index)
+        || is_partition_strategy_keyword(tokens, index)
     {
         return token.text.to_uppercase();
     }
@@ -227,6 +228,17 @@ fn is_with_ordinality_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
             .is_some_and(|previous| previous.kind == Token::With)
 }
 
+fn is_partition_strategy_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    tokens[index].kind == Token::Ident
+        && matches!(
+            tokens[index].text.to_ascii_lowercase().as_str(),
+            "range" | "list" | "hash"
+        )
+        && index >= 2
+        && tokens[index - 1].kind == Token::By
+        && tokens[index - 2].kind == Token::Partition
+}
+
 fn is_string_literal(kind: Token) -> bool {
     matches!(kind, Token::Sconst | Token::Usconst)
 }
@@ -288,6 +300,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::IfP
             | Token::Include
             | Token::Index
+            | Token::Inherits
             | Token::InnerP
             | Token::Insert
             | Token::Intersect
@@ -338,6 +351,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::SessionUser
             | Token::Set
             | Token::Table
+            | Token::Tablesample
             | Token::Tablespace
             | Token::Then
             | Token::Ties
@@ -361,6 +375,7 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Before
             | Token::Breadth
             | Token::Cache
+            | Token::Commit
             | Token::Comment
             | Token::Cycle
             | Token::Depth
@@ -376,8 +391,12 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Minvalue
             | Token::Nowait
             | Token::Of
+            | Token::Options
             | Token::Owned
             | Token::Policy
+            | Token::Preserve
+            | Token::Range
+            | Token::Repeatable
             | Token::Restart
             | Token::Revoke
             | Token::Search

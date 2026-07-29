@@ -27,24 +27,60 @@ pub(super) fn bind_body_start(
 
 pub(super) fn bind_select(
     tokens: &[SqlToken<'_>],
-    depths: &[usize],
+    structure: &TokenStructure,
     statement: &StatementTokens,
     body_start: usize,
     spec: &SelectSpec,
-) -> Result<TokenSpan, FormatDiagnostic> {
-    verify_select_shape(
-        tokens,
-        depths,
-        body_start,
-        statement.range.end,
-        statement.base_depth,
-        spec,
+) -> Result<SelectBlock, FormatDiagnostic> {
+    let depths = structure.depths();
+    let end = statement.range.end;
+    let base = statement.base_depth;
+    verify_select_shape(tokens, depths, body_start, end, base, spec, "SELECT")?;
+    let from_index = find_kind(tokens, depths, body_start + 1, end, base, Token::From);
+    require_presence(
         "SELECT",
+        "FROM clause",
+        from_index.is_some(),
+        !spec.from.items.is_empty(),
     )?;
-    Ok(TokenSpan {
-        start: statement.range.start,
-        end: statement.range.end,
-        base_depth: statement.base_depth,
+    let from = from_index
+        .map(|from| {
+            let source_end = (from + 1..end)
+                .find(|index| {
+                    depths[*index] == base
+                        && matches!(
+                            tokens[*index].kind,
+                            Token::Where
+                                | Token::GroupP
+                                | Token::Having
+                                | Token::Window
+                                | Token::Order
+                                | Token::Limit
+                                | Token::Offset
+                                | Token::Fetch
+                                | Token::For
+                        )
+                })
+                .unwrap_or(end);
+            bind_relation_source(
+                tokens,
+                structure,
+                from,
+                source_end,
+                base,
+                &spec.from,
+                "SELECT FROM",
+            )
+        })
+        .transpose()?;
+    Ok(SelectBlock {
+        span: TokenSpan {
+            start: statement.range.start,
+            end,
+            base_depth: base,
+        },
+        query_start: body_start,
+        from,
     })
 }
 
@@ -423,15 +459,10 @@ pub(super) fn bind_create_table(
     spec: &CreateTableSpec,
 ) -> Result<CreateTableBlock, FormatDiagnostic> {
     let depths = structure.depths();
-    let table = find_kind(
-        tokens,
-        depths,
-        body_start + 1,
-        statement.range.end,
-        statement.base_depth,
-        Token::Table,
-    )
-    .ok_or_else(|| FormatDiagnostic::Ownership("CREATE TABLE has no TABLE token".into()))?;
+    let base = statement.base_depth;
+    let end = statement.range.end;
+    let table = find_kind(tokens, depths, body_start + 1, end, base, Token::Table)
+        .ok_or_else(|| FormatDiagnostic::Ownership("CREATE TABLE has no TABLE token".into()))?;
     require_presence(
         "CREATE TABLE",
         "IF NOT EXISTS clause",
@@ -439,41 +470,159 @@ pub(super) fn bind_create_table(
             tokens,
             depths,
             table + 1,
-            statement.range.end,
-            statement.base_depth,
+            end,
+            base,
             &[Token::IfP, Token::Not, Token::Exists],
         ),
         spec.if_not_exists,
     )?;
-    let open = (table + 1..statement.range.end)
-        .find(|index| {
-            depths[*index] == statement.base_depth && tokens[*index].kind == Token::Ascii40
-        })
-        .ok_or_else(|| FormatDiagnostic::Ownership("CREATE TABLE has no element list".into()))?;
-    let close = structure.matching_parenthesis(open).ok_or_else(|| {
-        FormatDiagnostic::Ownership("CREATE TABLE element list is unclosed".into())
-    })?;
-    let ranges = split_item_ranges(tokens, depths, open + 1, close, statement.base_depth + 1)?;
-    require_count(
+    require_presence(
         "CREATE TABLE",
-        "element count",
-        ranges.len(),
-        spec.elements.len(),
+        "OF type clause",
+        (table + 1..end).any(|index| {
+            depths[index] == base
+                && tokens[index].kind == Token::Of
+                && tokens
+                    .get(index.wrapping_sub(1))
+                    .is_none_or(|previous| previous.kind != Token::Partition)
+        }),
+        spec.typed_table,
     )?;
-    let items = ranges
-        .into_iter()
-        .zip(spec.elements.iter().copied())
-        .map(|(range, kind)| CreateTableItem { range, kind })
-        .collect();
+    require_presence(
+        "CREATE TABLE",
+        "PARTITION BY clause",
+        (table + 1..end).any(|index| {
+            depths[index] == base
+                && tokens[index].kind == Token::Partition
+                && tokens
+                    .get(index + 1)
+                    .is_some_and(|next| next.kind == Token::By)
+        }),
+        spec.has_partition_spec,
+    )?;
+    require_presence(
+        "CREATE TABLE",
+        "PARTITION OF clause",
+        (table + 1..end).any(|index| {
+            depths[index] == base
+                && tokens[index].kind == Token::Partition
+                && tokens
+                    .get(index + 1)
+                    .is_some_and(|next| next.kind == Token::Of)
+        }),
+        spec.has_partition_bound,
+    )?;
+    require_presence(
+        "CREATE TABLE",
+        "INHERITS clause",
+        find_kind(tokens, depths, table + 1, end, base, Token::Inherits).is_some(),
+        spec.inheritance_relations > 0 && !spec.has_partition_bound,
+    )?;
+    require_presence(
+        "CREATE TABLE",
+        "USING access method",
+        find_kind(tokens, depths, table + 1, end, base, Token::Using).is_some(),
+        spec.has_access_method,
+    )?;
+    require_presence(
+        "CREATE TABLE",
+        "ON COMMIT clause",
+        (table + 1..end).any(|index| {
+            depths[index] == base
+                && tokens[index].kind == Token::On
+                && tokens
+                    .get(index + 1)
+                    .is_some_and(|next| next.kind == Token::Commit)
+        }),
+        spec.has_on_commit,
+    )?;
+    require_presence(
+        "CREATE TABLE",
+        "TABLESPACE clause",
+        find_kind(tokens, depths, table + 1, end, base, Token::Tablespace).is_some(),
+        spec.has_tablespace,
+    )?;
+
+    let (open, close, items) = if spec.elements.is_empty() {
+        (None, None, Vec::new())
+    } else {
+        let open = (table + 1..end)
+            .find(|index| depths[*index] == base && tokens[*index].kind == Token::Ascii40)
+            .ok_or_else(|| {
+                FormatDiagnostic::Ownership("CREATE TABLE has no element list".into())
+            })?;
+        let close = structure.matching_parenthesis(open).ok_or_else(|| {
+            FormatDiagnostic::Ownership("CREATE TABLE element list is unclosed".into())
+        })?;
+        let ranges = split_item_ranges(tokens, depths, open + 1, close, base + 1)?;
+        require_count(
+            "CREATE TABLE",
+            "element count",
+            ranges.len(),
+            spec.elements.len(),
+        )?;
+        let items = ranges
+            .into_iter()
+            .zip(spec.elements.iter().copied())
+            .map(|(range, kind)| CreateTableItem { range, kind })
+            .collect();
+        (Some(open), Some(close), items)
+    };
+
+    let search_start = close.map_or(table + 1, |close| close + 1);
+    let mut clauses = Vec::new();
+    let mut with_candidates = Vec::new();
+    for index in search_start..end {
+        if depths[index] != base {
+            continue;
+        }
+        let is_clause = match tokens[index].kind {
+            Token::Partition => spec.has_partition_spec,
+            Token::For => spec.has_partition_bound,
+            Token::Inherits => true,
+            Token::Using => true,
+            Token::With
+                if tokens
+                    .get(index + 1)
+                    .is_some_and(|next| next.kind == Token::Ascii40) =>
+            {
+                with_candidates.push(index);
+                false
+            }
+            Token::On => tokens
+                .get(index + 1)
+                .is_some_and(|next| next.kind == Token::Commit),
+            Token::Tablespace => true,
+            _ => false,
+        };
+        if is_clause {
+            clauses.push(index);
+        }
+    }
+    let storage_with = (spec.options > 0)
+        .then(|| with_candidates.last().copied())
+        .flatten();
+    if let Some(storage_with) = storage_with {
+        clauses.push(storage_with);
+        clauses.sort_unstable();
+    }
+    require_presence(
+        "CREATE TABLE",
+        "storage parameters",
+        storage_with.is_some(),
+        spec.options > 0,
+    )?;
+
     Ok(CreateTableBlock {
         span: TokenSpan {
             start: statement.range.start,
-            end: statement.range.end,
-            base_depth: statement.base_depth,
+            end,
+            base_depth: base,
         },
         open,
         close,
         items,
+        clauses,
     })
 }
 
@@ -1389,7 +1538,7 @@ pub(super) fn bind_merge(
     })
 }
 
-fn bind_relation_source(
+pub(super) fn bind_relation_source(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
     introducer: usize,
@@ -1430,13 +1579,27 @@ fn bind_relation_source(
             .any(|start| item.start <= *start && *start < item.end);
         let contains_select =
             (item.start..item.end).any(|index| tokens[index].kind == Token::Select);
+        let contains_rows_from = (item.start..item.end).any(|index| {
+            tokens[index].kind == Token::Rows
+                && tokens
+                    .get(index + 1)
+                    .is_some_and(|next| next.kind == Token::From)
+        });
+        let contains_table_sample =
+            (item.start..item.end).any(|index| tokens[index].kind == Token::Tablesample);
         let contains_call = (item.start..item.end)
             .any(|index| tokens[index].kind == Token::Ascii40 && !contains_select);
         let agrees = match expected {
             RelationItemSpec::Join => contains_join,
             RelationItemSpec::Subquery => contains_select && !contains_join,
-            RelationItemSpec::Function => contains_call && !contains_join,
-            RelationItemSpec::Relation => !contains_select && !contains_call && !contains_join,
+            RelationItemSpec::RowsFrom => contains_rows_from && !contains_join,
+            RelationItemSpec::TableSample => contains_table_sample && !contains_join,
+            RelationItemSpec::Function => {
+                contains_call && !contains_rows_from && !contains_table_sample && !contains_join
+            }
+            RelationItemSpec::Relation => {
+                !contains_select && !contains_rows_from && !contains_table_sample && !contains_join
+            }
         };
         if !agrees {
             return Err(FormatDiagnostic::Ownership(format!(

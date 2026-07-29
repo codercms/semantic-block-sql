@@ -199,7 +199,7 @@ pub(super) fn plan_merge_statements(
     }
 }
 
-fn plan_relation_source(source: &RelationSourceBlock, plan: &mut LayoutPlan) {
+pub(super) fn plan_relation_source(source: &RelationSourceBlock, plan: &mut LayoutPlan) {
     let item_indent = source.base_depth + 1;
     if source.items.len() > 1 {
         for item in &source.items {

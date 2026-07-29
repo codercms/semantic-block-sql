@@ -5,8 +5,8 @@ use pg_query::protobuf::{
     CreatePolicyStmt, CreateSeqStmt, CreateStmt, CreateTableAsStmt, CreateTrigStmt, DeleteStmt,
     DropBehavior, DropStmt, GrantRoleStmt, GrantStmt, GrantTargetType, IndexStmt, InsertStmt,
     JoinExpr, JoinType, LockClauseStrength, LockWaitPolicy, MergeMatchKind, MergeStmt, Node,
-    ObjectType, OnCommitAction, OnConflictAction, OverridingKind, RawStmt, SelectStmt,
-    SetOperation, TruncateStmt, UpdateStmt, ViewCheckOption, ViewStmt,
+    ObjectType, OnCommitAction, OnConflictAction, OverridingKind, PartitionStrategy, RawStmt,
+    SelectStmt, SetOperation, TruncateStmt, UpdateStmt, ViewCheckOption, ViewStmt,
 };
 use pg_query::{Context, NodeRef};
 mod equivalence;
@@ -502,45 +502,67 @@ fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'stati
     if create.relation.is_none() {
         return Err("CREATE TABLE without a relation");
     }
-    if !create.inh_relations.is_empty() {
-        return Err("CREATE TABLE INHERITS clause");
-    }
-    if create.partbound.is_some() || create.partspec.is_some() {
-        return Err("partitioned CREATE TABLE");
-    }
-    if create.of_typename.is_some() {
-        return Err("CREATE TABLE OF type");
-    }
     if !create.constraints.is_empty() {
         return Err("transformed CREATE TABLE constraints");
     }
-    if !create.options.is_empty() {
-        return Err("CREATE TABLE storage parameters");
+    if create.partspec.is_some() && create.partbound.is_some() {
+        return Err("CREATE TABLE with both PARTITION BY and PARTITION OF bound");
     }
-    if OnCommitAction::try_from(create.oncommit).unwrap_or(OnCommitAction::Undefined)
-        != OnCommitAction::OncommitNoop
+
+    let typed_table = create.of_typename.is_some();
+    if typed_table
+        && (!create.inh_relations.is_empty()
+            || create.partspec.is_some()
+            || create.partbound.is_some())
     {
-        return Err("CREATE TABLE ON COMMIT clause");
+        return Err("typed table combined with inheritance or partitioning");
     }
-    if !create.tablespacename.is_empty() || !create.access_method.is_empty() {
-        return Err("CREATE TABLE access method or tablespace");
+
+    for relation in &create.inh_relations {
+        match relation.node.as_ref() {
+            Some(NodeEnum::RangeVar(relation)) if relation.inh && relation.alias.is_none() => {}
+            _ => return Err("unrecognized CREATE TABLE parent relation"),
+        }
     }
-    if create.table_elts.is_empty() {
-        return Err("CREATE TABLE without columns or constraints");
+    if create.partbound.is_some() && create.inh_relations.len() != 1 {
+        return Err("PARTITION OF without exactly one parent relation");
+    }
+    if let Some(spec) = &create.partspec {
+        validate_partition_spec(spec)?;
+    }
+    if let Some(bound) = &create.partbound {
+        validate_partition_bound(bound)?;
+    }
+    validate_def_elements(&create.options, "CREATE TABLE storage parameter")?;
+    match OnCommitAction::try_from(create.oncommit).unwrap_or(OnCommitAction::Undefined) {
+        OnCommitAction::OncommitNoop
+        | OnCommitAction::OncommitPreserveRows
+        | OnCommitAction::OncommitDeleteRows
+        | OnCommitAction::OncommitDrop => {}
+        OnCommitAction::Undefined => return Err("unknown CREATE TABLE ON COMMIT action"),
+    }
+
+    if create.table_elts.is_empty() && create.partbound.is_none() && !typed_table {
+        return Err("CREATE TABLE without columns, constraints, type, or partition parent");
     }
 
     let mut elements = Vec::with_capacity(create.table_elts.len());
     for element in &create.table_elts {
         match element.node.as_ref() {
             Some(NodeEnum::ColumnDef(column)) => {
-                validate_column_def(column)?;
+                if typed_table {
+                    validate_typed_column_def(column)?;
+                } else {
+                    validate_column_def(column)?;
+                }
                 elements.push(CreateTableElementSpec::Column);
             }
-            Some(NodeEnum::Constraint(constraint)) => {
+            Some(NodeEnum::Constraint(constraint)) if !typed_table => {
                 validate_constraint(constraint)?;
                 elements.push(CreateTableElementSpec::Constraint);
             }
             Some(NodeEnum::TableLikeClause(_)) => return Err("CREATE TABLE LIKE clause"),
+            Some(NodeEnum::Constraint(_)) => return Err("typed table-level constraint"),
             _ => return Err("unrecognized CREATE TABLE element"),
         }
     }
@@ -548,7 +570,108 @@ fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'stati
     Ok(CreateTableSpec {
         if_not_exists: create.if_not_exists,
         elements,
+        inheritance_relations: create.inh_relations.len(),
+        has_partition_spec: create.partspec.is_some(),
+        has_partition_bound: create.partbound.is_some(),
+        typed_table,
+        options: create.options.len(),
+        has_on_commit: OnCommitAction::try_from(create.oncommit)
+            .is_ok_and(|action| action != OnCommitAction::OncommitNoop),
+        has_tablespace: !create.tablespacename.is_empty(),
+        has_access_method: !create.access_method.is_empty(),
     })
+}
+
+fn validate_typed_column_def(column: &ColumnDef) -> Result<(), &'static str> {
+    if column.colname.is_empty() || column.type_name.is_some() {
+        return Err("typed-table column option must name an inherited column without a type");
+    }
+    if !column.fdwoptions.is_empty() || column.cooked_default.is_some() {
+        return Err("unreviewed typed-table column option");
+    }
+    if let Some(default) = column.raw_default.as_deref() {
+        validate_ddl_expression(default)?;
+    }
+    for constraint in &column.constraints {
+        let constraint = match constraint.node.as_ref() {
+            Some(NodeEnum::Constraint(constraint)) => constraint,
+            _ => return Err("unrecognized typed-table column constraint"),
+        };
+        validate_constraint(constraint)?;
+    }
+    Ok(())
+}
+
+fn validate_partition_spec(spec: &pg_query::protobuf::PartitionSpec) -> Result<(), &'static str> {
+    if matches!(
+        PartitionStrategy::try_from(spec.strategy).unwrap_or(PartitionStrategy::Undefined),
+        PartitionStrategy::Undefined
+    ) || spec.part_params.is_empty()
+    {
+        return Err("invalid PARTITION BY specification");
+    }
+    for parameter in &spec.part_params {
+        let parameter = match parameter.node.as_ref() {
+            Some(NodeEnum::PartitionElem(parameter)) => parameter,
+            _ => return Err("unrecognized partition key"),
+        };
+        if parameter.name.is_empty() == parameter.expr.is_none() {
+            return Err("partition key must contain exactly one column or expression");
+        }
+        if let Some(expression) = parameter.expr.as_deref() {
+            validate_ddl_expression(expression)?;
+        }
+        if parameter
+            .collation
+            .iter()
+            .chain(parameter.opclass.iter())
+            .any(|node| !matches!(node.node.as_ref(), Some(NodeEnum::String(_))))
+        {
+            return Err("unrecognized partition-key collation or operator class");
+        }
+    }
+    Ok(())
+}
+
+fn validate_partition_bound(
+    bound: &pg_query::protobuf::PartitionBoundSpec,
+) -> Result<(), &'static str> {
+    if bound.is_default {
+        if bound.modulus != 0
+            || bound.remainder != 0
+            || !bound.listdatums.is_empty()
+            || !bound.lowerdatums.is_empty()
+            || !bound.upperdatums.is_empty()
+        {
+            return Err("DEFAULT partition with explicit bound data");
+        }
+        return Ok(());
+    }
+    match bound.strategy.as_str() {
+        "l" => {
+            if bound.listdatums.is_empty() {
+                return Err("empty LIST partition bound");
+            }
+            for datum in &bound.listdatums {
+                validate_ddl_expression(datum)?;
+            }
+        }
+        "r" => {
+            if bound.lowerdatums.is_empty() || bound.upperdatums.is_empty() {
+                return Err("incomplete RANGE partition bound");
+            }
+            for datum in bound.lowerdatums.iter().chain(bound.upperdatums.iter()) {
+                validate_ddl_expression(datum)?;
+            }
+        }
+        "h" => {
+            if bound.modulus <= 0 || bound.remainder < 0 || bound.remainder >= bound.modulus {
+                return Err("invalid HASH partition bound");
+            }
+        }
+        _ => return Err("unknown partition-bound strategy"),
+    }
+    Ok(())
 }
 
 fn validate_create_index(index: &IndexStmt) -> Result<CreateIndexSpec, &'static str> {
@@ -1078,24 +1201,12 @@ fn validate_relation_source(
 ) -> Result<RelationItemSpec, &'static str> {
     match source.node.as_ref() {
         Some(NodeEnum::RangeVar(range)) if range.inh => {
-            if range
-                .alias
-                .as_ref()
-                .is_some_and(|alias| !alias.colnames.is_empty())
-            {
-                return Err("relation alias column list");
-            }
+            validate_alias_columns(range.alias.as_ref(), "relation alias column list")?;
             Ok(RelationItemSpec::Relation)
         }
         Some(NodeEnum::RangeVar(_)) => Err("ONLY relation source"),
         Some(NodeEnum::RangeSubselect(source)) => {
-            if source
-                .alias
-                .as_ref()
-                .is_some_and(|alias| !alias.colnames.is_empty())
-            {
-                return Err("subquery alias column list");
-            }
+            validate_alias_columns(source.alias.as_ref(), "subquery alias column list")?;
             let query = match source
                 .subquery
                 .as_deref()
@@ -1104,29 +1215,57 @@ fn validate_relation_source(
                 Some(NodeEnum::SelectStmt(query)) => query,
                 _ => return Err(feature),
             };
-            let query = validate_select(query, false)?;
-            if query.has_with {
-                return Err("relation subquery with WITH clause");
-            }
+            let _ = validate_select(query, false)?;
             Ok(RelationItemSpec::Subquery)
         }
         Some(NodeEnum::RangeFunction(source)) => {
-            if source.is_rowsfrom
-                || !source.coldeflist.is_empty()
-                || source.functions.len() != 1
-                || source
-                    .alias
-                    .as_ref()
-                    .is_some_and(|alias| !alias.colnames.is_empty())
-            {
-                return Err("complex relation function source");
+            validate_alias_columns(source.alias.as_ref(), "function alias column list")?;
+            if source.functions.is_empty() {
+                return Err("relation function without calls");
             }
-            let function = match source.functions[0].node.as_ref() {
-                Some(NodeEnum::List(list)) if list.items.len() == 2 => &list.items[0],
-                _ => return Err("unrecognized relation function source"),
-            };
-            validate_dml_expression(function)?;
-            Ok(RelationItemSpec::Function)
+            if source.is_rowsfrom {
+                if !source.coldeflist.is_empty() {
+                    return Err("ROWS FROM with outer column definition list");
+                }
+                for function in &source.functions {
+                    validate_range_function_entry(function, true)?;
+                }
+                Ok(RelationItemSpec::RowsFrom)
+            } else {
+                if source.functions.len() != 1 {
+                    return Err("multiple relation functions without ROWS FROM");
+                }
+                validate_range_function_entry(&source.functions[0], false)?;
+                validate_column_definition_list(&source.coldeflist)?;
+                Ok(RelationItemSpec::Function)
+            }
+        }
+        Some(NodeEnum::RangeTableSample(sample)) => {
+            let relation = sample
+                .relation
+                .as_deref()
+                .ok_or("TABLESAMPLE without a relation")?;
+            if !matches!(
+                validate_relation_source(relation, result, feature)?,
+                RelationItemSpec::Relation
+            ) {
+                return Err("TABLESAMPLE on a non-relation source");
+            }
+            if sample.method.is_empty()
+                || !sample
+                    .method
+                    .iter()
+                    .all(|node| matches!(node.node.as_ref(), Some(NodeEnum::String(_))))
+            {
+                return Err("unrecognized TABLESAMPLE method");
+            }
+            for argument in &sample.args {
+                validate_dml_expression(argument)?;
+            }
+            if let Some(repeatable) = sample.repeatable.as_deref() {
+                validate_dml_expression(repeatable)?;
+            }
+            Ok(RelationItemSpec::TableSample)
         }
         Some(NodeEnum::JoinExpr(join)) => {
             validate_join_source(join, result, feature)?;
@@ -1134,6 +1273,54 @@ fn validate_relation_source(
         }
         _ => Err(feature),
     }
+}
+
+fn validate_alias_columns(
+    alias: Option<&pg_query::protobuf::Alias>,
+    feature: &'static str,
+) -> Result<(), &'static str> {
+    let Some(alias) = alias else {
+        return Ok(());
+    };
+    if alias.aliasname.is_empty() {
+        return Err("empty relation alias");
+    }
+    if alias
+        .colnames
+        .iter()
+        .any(|column| !matches!(column.node.as_ref(), Some(NodeEnum::String(_))))
+    {
+        return Err(feature);
+    }
+    Ok(())
+}
+
+fn validate_range_function_entry(entry: &Node, rows_from: bool) -> Result<(), &'static str> {
+    let list = match entry.node.as_ref() {
+        Some(NodeEnum::List(list)) if list.items.len() == 2 => list,
+        _ => return Err("unrecognized relation function source"),
+    };
+    validate_dml_expression(&list.items[0])?;
+    let definitions = match list.items[1].node.as_ref() {
+        None => &[][..],
+        Some(NodeEnum::List(definitions)) => definitions.items.as_slice(),
+        _ => return Err("unrecognized relation function column definitions"),
+    };
+    if !rows_from && !definitions.is_empty() {
+        return Err("inline function column definitions outside ROWS FROM");
+    }
+    validate_column_definition_list(definitions)
+}
+
+fn validate_column_definition_list(definitions: &[Node]) -> Result<(), &'static str> {
+    for definition in definitions {
+        let column = match definition.node.as_ref() {
+            Some(NodeEnum::ColumnDef(column)) => column,
+            _ => return Err("unrecognized relation column definition"),
+        };
+        validate_column_def(column)?;
+    }
+    Ok(())
 }
 
 fn validate_join_source(
@@ -1313,6 +1500,7 @@ fn validate_select(
     allow_recursive_union: bool,
 ) -> Result<SelectSpec, &'static str> {
     validate_select_fields(select, false)?;
+    let from = validate_relation_list(&select.from_clause, "SELECT FROM source")?;
 
     if let Some(with_clause) = &select.with_clause {
         validate_with_clause(with_clause)?;
@@ -1340,6 +1528,7 @@ fn validate_select(
         set_operations,
         named_windows: select.window_clause.len(),
         locking_clauses: select.locking_clause.len(),
+        from,
     })
 }
 
@@ -1443,6 +1632,7 @@ fn validate_nested_select(select: &SelectStmt) -> Result<(), &'static str> {
         return validate_values_select(select);
     }
     validate_select_fields(select, false)?;
+    let _ = validate_relation_list(&select.from_clause, "nested SELECT FROM source")?;
     if !select.values_lists.is_empty() {
         return Err("invalid VALUES expression");
     }

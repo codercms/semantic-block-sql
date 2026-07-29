@@ -4,13 +4,14 @@ use super::tokens::SqlToken;
 use super::{FormatDiagnostic, SourceRange};
 
 /// Exact top-level SELECT capabilities proven by PostgreSQL AST validation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SelectSpec {
     pub has_with: bool,
     pub has_into: bool,
     pub set_operations: usize,
     pub named_windows: usize,
     pub locking_clauses: usize,
+    pub from: RelationListSpec,
 }
 
 /// Top-level VALUES capabilities proven by PostgreSQL AST validation.
@@ -67,6 +68,8 @@ pub(super) enum RelationItemSpec {
     Relation,
     Subquery,
     Function,
+    RowsFrom,
+    TableSample,
     Join,
 }
 
@@ -197,6 +200,14 @@ pub(super) enum CreateTableElementSpec {
 pub(super) struct CreateTableSpec {
     pub if_not_exists: bool,
     pub elements: Vec<CreateTableElementSpec>,
+    pub inheritance_relations: usize,
+    pub has_partition_spec: bool,
+    pub has_partition_bound: bool,
+    pub typed_table: bool,
+    pub options: usize,
+    pub has_on_commit: bool,
+    pub has_tablespace: bool,
+    pub has_access_method: bool,
 }
 
 /// Exact CREATE INDEX capabilities proven by PostgreSQL AST validation.
@@ -515,6 +526,7 @@ mod tests {
                     set_operations: 0,
                     named_windows: 0,
                     locking_clauses: 0,
+                    from: RelationListSpec::default(),
                 }),
                 range: SourceRange::new(0, 9),
             },
@@ -551,6 +563,7 @@ mod tests {
                 set_operations: 0,
                 named_windows: 0,
                 locking_clauses: 0,
+                from: RelationListSpec::default(),
             }),
             range: SourceRange::new(0, source.len()),
         }]);

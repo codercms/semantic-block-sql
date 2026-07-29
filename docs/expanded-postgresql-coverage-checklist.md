@@ -1,6 +1,6 @@
 # Expanded PostgreSQL coverage — durable checklist
 
-Status: **Batch X2 complete; Batch X3 in progress**
+Status: **Batch X3 complete; Batch X4 in progress**
 
 This workstream is one PR-sized batch, split into durable internal checkpoints.
 Every checked implementation item requires fixtures, parser-backed capability
@@ -59,16 +59,16 @@ batch self-review.
 
 ## Batch X3 — Relation sources and richer table DDL
 
-- [ ] `ROWS FROM` relation sources.
-- [ ] `TABLESAMPLE` with optional `REPEATABLE`.
-- [ ] Relation alias column-name and column-definition lists.
-- [ ] Derived relation sources whose query contains `WITH`.
-- [ ] Partitioned `CREATE TABLE`, partition bounds, and `PARTITION OF`.
-- [ ] Table inheritance.
-- [ ] Reviewed storage/access-method/tablespace/on-commit options.
-- [ ] Typed-table forms and reviewed typed-table column options.
+- [x] `ROWS FROM` relation sources.
+- [x] `TABLESAMPLE` with optional `REPEATABLE`.
+- [x] Relation alias column-name and column-definition lists.
+- [x] Derived relation sources whose query contains `WITH`.
+- [x] Partitioned `CREATE TABLE`, partition bounds, and `PARTITION OF`.
+- [x] Table inheritance.
+- [x] Reviewed storage/access-method/tablespace/on-commit options.
+- [x] Typed-table forms and reviewed typed-table column options.
 - [x] Golden, comment, equivalence, idempotence, and fail-closed fixtures.
-- [ ] X3 self-review and checkpoint commit.
+- [x] X3 self-review and checkpoint commit.
 
 ## Batch X4 — PL/pgSQL control-flow and dynamic execution
 

@@ -64,8 +64,6 @@ fn preserves_ddl_comments_at_element_and_action_boundaries() {
 #[test]
 fn neighboring_unowned_ddl_remains_unchanged() {
     for source in [
-        "CREATE TABLE child (id bigint) INHERITS (parent);",
-        "CREATE TABLE partitioned (id bigint) PARTITION BY RANGE (id);",
         "CREATE TABLE copied (LIKE source INCLUDING ALL);",
         "ALTER TABLE users RENAME COLUMN email TO primary_email;",
     ] {

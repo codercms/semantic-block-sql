@@ -84,7 +84,12 @@ pub(super) fn plan_create_tables(
                 && item.kind == crate::formatter::ownership::CreateTableElementSpec::Constraint;
             plan.break_before(item.range.start, if blank_line { 2 } else { 1 }, indent);
         }
-        plan.break_before(table.close, 1, table.span.base_depth);
+        if let Some(close) = table.close {
+            plan.break_before(close, 1, table.span.base_depth);
+        }
+        for clause in &table.clauses {
+            plan.break_before(*clause, 1, table.span.base_depth);
+        }
     }
 }
 

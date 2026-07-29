@@ -29,7 +29,8 @@ pub(super) use render::{
     is_type_keyword, is_type_modifier_syntax, is_uppercase_builtin, render_token,
 };
 use statements::{
-    plan_delete_statements, plan_insert_statements, plan_merge_statements, plan_update_statements,
+    plan_delete_statements, plan_insert_statements, plan_merge_statements, plan_relation_source,
+    plan_update_statements,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,6 +141,7 @@ pub(super) fn format(
     let parens = structure.parenthesis_pairs();
     let layout = LayoutDocument::bind(document, &tokens, &structure)?;
     let cases = case_ranges(&tokens, options);
+    let selects = layout.selects().cloned().collect::<Vec<_>>();
     let inserts = layout.inserts().cloned().collect::<Vec<_>>();
     let updates = layout.updates().cloned().collect::<Vec<_>>();
     let deletes = layout.deletes().cloned().collect::<Vec<_>>();
@@ -193,6 +195,20 @@ pub(super) fn format(
     }
     expanded_selects.extend(views.iter().map(|view| view.query_start));
     expanded_selects.extend(materialized_views.iter().map(|view| view.query_start));
+    for select in &selects {
+        if let Some(source) = &select.from {
+            if source.items.len() > 1
+                || !source.joins.is_empty()
+                || source
+                    .item_kinds
+                    .iter()
+                    .any(|kind| *kind != crate::formatter::ownership::RelationItemSpec::Relation)
+            {
+                expanded_selects.insert(select.query_start);
+            }
+            plan_relation_source(source, &mut plan);
+        }
+    }
     let insert_query_starts = plan_insert_statements(&context, &inserts, &mut plan);
     expanded_selects.extend(insert_query_starts);
     plan_update_statements(&context, &boolean_ranges, &updates, &mut plan);
@@ -665,8 +681,13 @@ fn plan_ctes(
                     plan.break_before(after_close + 1, usize::from(blank) + 1, base_indent);
                 }
             } else if position + 1 == block.definitions.len() {
-                for clause in close + 1..block.body_start {
-                    if matches!(tokens[clause].kind, Token::Search | Token::Cycle) {
+                for (clause, token) in tokens
+                    .iter()
+                    .enumerate()
+                    .take(block.body_start)
+                    .skip(close + 1)
+                {
+                    if matches!(token.kind, Token::Search | Token::Cycle) {
                         plan.break_before(clause, 1, base_indent);
                     }
                 }
