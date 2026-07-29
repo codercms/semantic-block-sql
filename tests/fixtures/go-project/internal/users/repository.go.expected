@@ -1,0 +1,49 @@
+package users
+
+import (
+	"context"
+	"database/sql"
+)
+
+const FindByIDQuery = `SELECT id, name, email FROM public.users WHERE id = $1;`
+
+var ActiveUsersQuery = `
+    SELECT id, name, email
+    FROM public.users
+    WHERE deleted_at IS NULL
+    ORDER BY id;
+`
+
+type Repository struct {
+	DB *sql.DB
+}
+
+func (repository Repository) FindByID(ctx context.Context, id int64) (*sql.Rows, error) {
+	const auditQuery = `
+        SELECT id, created_at FROM public.user_audit WHERE user_id = $1 ORDER BY created_at DESC;
+    `
+	_ = auditQuery
+
+	return repository.DB.QueryContext(ctx, `
+        SELECT id, name, email FROM public.users WHERE id = $1 AND deleted_at IS NULL;
+    `, id)
+}
+
+func (repository Repository) ListActive(ctx context.Context) (*sql.Rows, error) {
+	rows, err := repository.DB.QueryContext(ctx, `
+        SELECT id, name, email FROM public.users WHERE deleted_at IS NULL ORDER BY id;
+    `)
+	return rows, err
+}
+
+func (repository Repository) Disable(ctx context.Context, id int64) {
+	repository.DB.ExecContext(ctx, `
+        UPDATE public.users SET disabled_at = NOW() WHERE id = $1;
+    `, id)
+}
+
+func (repository Repository) DeleteExpired(ctx context.Context) {
+	repository.DB.ExecContext(ctx, `
+        DELETE FROM public.users WHERE disabled_at IS NOT NULL RETURNING id;
+    `)
+}
