@@ -275,3 +275,43 @@ fn permanent_failure_projects_preserve_every_file() {
         );
     }
 }
+
+#[test]
+fn unsupported_plpgsql_prevents_every_project_write() {
+    let project = TempDir::new().expect("create temporary Go project");
+    fs::write(
+        project.path().join("valid.go"),
+        "package fixture\n\nconst query = `select id,name from public.users;`\n",
+    )
+    .expect("write valid Go source");
+    fs::write(
+        project.path().join("routine.go"),
+        "package fixture\n\nconst routine = `\nDO $$\nBEGIN\n    FOR item_id IN 1..3 LOOP\n        PERFORM refresh_item(item_id);\n    END LOOP;\nEND;\n$$;\n`\n",
+    )
+    .expect("write unsupported routine source");
+    let before = collect_tree(project.path());
+
+    let output = semblock(project.path(), &["fmt", ".", "--jobs", "4"]);
+
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("PL/pgSQL node"),
+        "{output:?}"
+    );
+    assert_eq!(collect_tree(project.path()), before);
+}
+
+#[test]
+fn preserves_crlf_and_custom_dollar_tags_in_plpgsql_files() {
+    let project = TempDir::new().expect("create temporary SQL project");
+    let source = b"DO $custom$\r\ndeclare\r\n    item_id bigint:=1;\r\nbegin\r\n    perform refresh_item(item_id);\r\nend;\r\n$custom$;\r\n";
+    fs::write(project.path().join("routine.sql"), source).expect("write CRLF routine");
+
+    let output = semblock(project.path(), &["fmt", "routine.sql"]);
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        fs::read(project.path().join("routine.sql")).expect("read formatted routine"),
+        b"DO $custom$\r\nDECLARE\r\n    item_id bigint := 1;\r\nBEGIN\r\n    PERFORM refresh_item(item_id);\r\nEND;\r\n$custom$;\r\n"
+    );
+}

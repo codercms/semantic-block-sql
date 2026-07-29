@@ -1,6 +1,6 @@
 # PL/pgSQL and dollar-quoted coverage — durable checklist
 
-Status: **Batch P2 complete; Batch P3 pending**
+Status: **Batch P3 complete; Batch P4 pending**
 
 This workstream completes the remaining Batch 3 routine-body tranche after the
 PostgreSQL scalar-expression coverage. Update this file before every checkpoint
@@ -48,11 +48,11 @@ in `AGENTS.md`.
 
 ## Batch P3 — CLI and host-language integration
 
-- [ ] Add malformed and unsupported project fixtures proving whole-project atomicity.
-- [ ] Add a realistic Go raw-string PL/pgSQL routine golden fixture.
-- [ ] Verify `gofmt`, offline `go test ./...`, custom dollar tags, and CRLF.
-- [ ] Add explicit CLI diagnostic assertions.
-- [ ] Run focused tests and self-review.
+- [x] Add malformed and unsupported project fixtures proving whole-project atomicity.
+- [x] Add a realistic Go raw-string PL/pgSQL routine golden fixture.
+- [x] Verify `gofmt`, offline `go test ./...`, custom dollar tags, and CRLF.
+- [x] Add explicit CLI diagnostic assertions.
+- [x] Run focused tests and self-review.
 
 ## Batch P4 — Reconciliation and final gate
 
