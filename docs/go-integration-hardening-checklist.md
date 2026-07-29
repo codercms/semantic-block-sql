@@ -1,6 +1,6 @@
 # Go integration hardening — durable checklist
 
-Status: **Implementation complete; publication handoff in progress**
+Status: **Implementation complete; portable bundle verified; GitHub push blocked by sandbox DNS**
 
 This workstream strengthens embedded-Go SQL support after PR 7. Update this
 file before every checkpoint commit. A checked item requires focused tests and
@@ -88,8 +88,11 @@ the batch self-review described in `AGENTS.md`.
 - [x] Run `cargo doc --locked --no-deps`.
 - [x] Run `git diff --check`.
 - [x] Perform final dead-code and architecture self-review.
-- [ ] Commit the final Batch G4 checkpoint and verify a portable git bundle.
-- [ ] Push the branch and open a draft PR when authentication is available.
+- [x] Commit the final Batch G4 checkpoint and verify a portable git bundle.
+- [x] Attempt to push `agent/go-golden-project-integration`; the sandbox could
+  not resolve `github.com`, so no remote branch was created.
+- [ ] Push the verified bundle branch and open a draft PR from a networked
+  environment.
 
 Final validation on 2026-07-29:
 
