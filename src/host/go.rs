@@ -56,6 +56,30 @@ enum GoLiteralUsage {
     ConcatenatedFragment,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GoSqlOwnerKind {
+    ConstDeclaration,
+    VarDeclaration,
+    ShortVarDeclaration,
+    Assignment,
+    Return,
+    ExpressionStatement,
+}
+
+impl GoSqlOwnerKind {
+    fn from_node_kind(kind: &str) -> Option<Self> {
+        match kind {
+            "const_declaration" => Some(Self::ConstDeclaration),
+            "var_declaration" => Some(Self::VarDeclaration),
+            "short_var_declaration" => Some(Self::ShortVarDeclaration),
+            "assignment_statement" => Some(Self::Assignment),
+            "return_statement" => Some(Self::Return),
+            "expression_statement" => Some(Self::ExpressionStatement),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct CommentDirective {
     kind: GoDirective,
@@ -314,13 +338,7 @@ fn literal_usage(mut literal: Node<'_>, owner: Node<'_>) -> GoLiteralUsage {
 
 fn supported_owner(mut node: Node<'_>) -> Option<Node<'_>> {
     while let Some(parent) = node.parent() {
-        if matches!(
-            parent.kind(),
-            "const_declaration"
-                | "var_declaration"
-                | "short_var_declaration"
-                | "assignment_statement"
-        ) {
+        if GoSqlOwnerKind::from_node_kind(parent.kind()).is_some() {
             return Some(parent);
         }
         node = parent;

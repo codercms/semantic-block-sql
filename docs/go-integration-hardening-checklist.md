@@ -1,6 +1,6 @@
 # Go integration hardening — durable checklist
 
-Status: **Batches G0-G2 complete; Batch G3 in progress**
+Status: **Batches G0-G3 complete; Batch G4 in progress**
 
 This workstream strengthens embedded-Go SQL support after PR 7. Update this
 file before every checkpoint commit. A checked item requires focused tests and
@@ -65,16 +65,16 @@ the batch self-review described in `AGENTS.md`.
 
 ## Batch G3 — Direct return and expression-statement owners
 
-- [ ] Introduce a closed `GoSqlOwnerKind` model.
-- [ ] Support complete raw SQL literals nested in `return_statement`.
-- [ ] Support complete raw SQL literals nested in `expression_statement`.
-- [ ] Cover direct `return db.QueryContext(...)` and standalone
+- [x] Introduce a closed `GoSqlOwnerKind` model.
+- [x] Support complete raw SQL literals nested in `return_statement`.
+- [x] Support complete raw SQL literals nested in `expression_statement`.
+- [x] Cover direct `return db.QueryContext(...)` and standalone
   `db.ExecContext(...)` in the golden project.
-- [ ] Keep `defer_statement` and `go_statement` unsupported unless separately
+- [x] Keep `defer_statement` and `go_statement` unsupported unless separately
   fixture-backed.
-- [ ] Keep directive attachment deterministic and reject misplaced markers.
-- [ ] Run focused tests and Batch G3 self-review.
-- [ ] Commit Batch G3.
+- [x] Keep directive attachment deterministic and reject misplaced markers.
+- [x] Run focused tests and Batch G3 self-review.
+- [x] Commit Batch G3.
 
 ## Batch G4 — Failure projects, CI, and final gate
 

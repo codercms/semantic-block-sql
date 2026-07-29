@@ -196,3 +196,47 @@ fn explicit_marker_rejects_concatenated_fragments_without_project_writes() {
         "preflight failure must prevent every project write"
     );
 }
+
+#[test]
+fn directives_attach_to_direct_return_and_expression_statement_owners() {
+    let project = TempDir::new().expect("create temporary Go project");
+    fs::write(
+        project.path().join("queries.go"),
+        r#"package fixture
+
+func identity(query string) string { return query }
+func consume(query string) {}
+
+func returned() string {
+	// semblock:sql
+	return identity(`
+        /* injected */ select id,name from public.users;
+	`)
+}
+
+func executed() {
+	// language=SQL
+	consume(`
+        /* injected */ update public.users set active=false where id=$1;
+	`)
+}
+"#,
+    )
+    .expect("write direct-owner Go source");
+
+    let output = semblock(project.path(), &["fmt", "queries.go"]);
+
+    assert!(output.status.success(), "{output:?}");
+    let formatted = fs::read_to_string(project.path().join("queries.go"))
+        .expect("read formatted direct-owner Go source");
+    assert!(
+        formatted.contains("`\n/* injected */ SELECT id, name FROM public.users;\n\t`"),
+        "formatted Go:\n{formatted}"
+    );
+    assert!(
+        formatted.contains(
+            "`\n/* injected */ UPDATE public.users SET active = FALSE WHERE id = $1;\n\t`"
+        ),
+        "formatted Go:\n{formatted}"
+    );
+}

@@ -47,6 +47,22 @@ ORDER BY id;
 	return rows, err
 }
 
+func (repository Repository) ReturnActive(ctx context.Context, minimumID int64) (*sql.Rows, error) {
+	return repository.DB.QueryContext(ctx, `
+SELECT id, name
+FROM public.users
+WHERE
+    active = TRUE
+    AND id >= $1;
+	`, minimumID)
+}
+
+func (repository Repository) Deactivate(ctx context.Context, id int64) {
+	repository.DB.ExecContext(ctx, `
+UPDATE public.users SET active = FALSE WHERE id = $1;
+	`, id)
+}
+
 func FindByID() string {
 	return findByID
 }

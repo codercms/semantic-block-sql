@@ -42,6 +42,18 @@ func (repository Repository) Load(ctx context.Context, id int64) (*sql.Rows, err
 	return rows, err
 }
 
+func (repository Repository) ReturnActive(ctx context.Context, minimumID int64) (*sql.Rows, error) {
+	return repository.DB.QueryContext(ctx, `
+        select id,name from public.users where active=true and id>=$1;
+	`, minimumID)
+}
+
+func (repository Repository) Deactivate(ctx context.Context, id int64) {
+	repository.DB.ExecContext(ctx, `
+        update public.users set active=false where id=$1;
+	`, id)
+}
+
 func FindByID() string {
 	return findByID
 }
