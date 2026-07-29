@@ -1,0 +1,60 @@
+package orders
+
+const (
+	ListQuery = `
+        SELECT order_item.id, order_item.customer_id, order_item.total
+        FROM public.orders order_item
+        WHERE order_item.cancelled_at IS NULL
+        ORDER BY order_item.id;
+    `
+
+	UpsertQuery = `
+        INSERT INTO public.orders (id, customer_id, total)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (id)
+        DO UPDATE
+        SET
+            total = EXCLUDED.total
+        RETURNING id;
+    `
+)
+
+const DeleteQuery = `DELETE FROM public.orders WHERE id = $1 RETURNING id;`
+
+const CommentedUpdateQuery = `
+    UPDATE public.orders
+    SET
+        total = $1, -- chosen total
+        updated_at = NOW()
+    WHERE id = $2;
+`
+
+var PreparedQuery = mustPrepare(`
+    SELECT id, customer_id, total FROM public.orders WHERE id = $1;
+`)
+
+const WindowsPathQuery = `SELECT 'C:\tmp\orders' AS path, 'line\nbreak' AS escaped;`
+const QuotedIdentifierQuery = `SELECT "select", "CamelCase" FROM "Order";`
+const WhereFragment = `WHERE cancelled_at IS NULL`
+const InterpretedQuery = "select id from public.orders;"
+
+// semblock:ignore
+const DynamicQuery = `select ` + "id" + ` from public.orders`
+
+func mustPrepare(query string) string {
+	return query
+}
+
+func ReassignedQuery() string {
+	query := `
+        SELECT id, total FROM public.orders WHERE customer_id = $1;
+    `
+	query = `
+        SELECT id, total
+        FROM public.orders
+        WHERE
+            customer_id = $1
+            AND cancelled_at IS NULL;
+    `
+	return query
+}

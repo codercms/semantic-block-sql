@@ -116,9 +116,15 @@ Directory discovery includes `.sql` and `.go` files by default. It respects `.gi
 
 Go support formats raw backtick literals that:
 
-- belong to a `const`, `var`, regular assignment, or short assignment;
+- belong to a `const`, `var`, regular assignment, short assignment, direct
+  `return`, or standalone expression statement;
 - begin with a supported SQL statement keyword; and
 - contain one or more complete PostgreSQL statements.
+
+This covers common database calls such as raw SQL passed directly to
+`QueryContext` from a `return` statement or to `ExecContext` as a standalone
+call. Semblock classifies the Go syntax structurally and does not depend on a
+specific database library or function name.
 
 Interpreted Go strings and incomplete fragments such as a standalone `WHERE` clause are skipped.
 
@@ -225,7 +231,8 @@ Requirements:
 - Rust 1.88;
 - a C/C++ build toolchain;
 - CMake;
-- Clang and `libclang`.
+- Clang and `libclang`;
+- Go 1.22+ when running the complete test suite.
 
 The native toolchain is required because `pg_query` compiles PostgreSQL parser sources.
 

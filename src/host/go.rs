@@ -286,6 +286,8 @@ fn supported_owner(mut node: Node<'_>) -> Option<Node<'_>> {
                 | "var_declaration"
                 | "short_var_declaration"
                 | "assignment_statement"
+                | "return_statement"
+                | "expression_statement"
         ) {
             return Some(parent);
         }
