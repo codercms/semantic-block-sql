@@ -78,8 +78,8 @@ the batch self-review described in `AGENTS.md`.
 
 ## Batch G4 — Failure projects, CI, and final gate
 
-- [ ] Add invalid-SQL, invalid-Go, and directive-error fixture projects.
-- [ ] Verify a failure prevents every project write.
+- [x] Add invalid-SQL, invalid-Go, and directive-error fixture projects.
+- [x] Verify a failure prevents every project write.
 - [ ] Add explicit pinned Go setup to CI before Rust tests invoke Go tooling.
 - [ ] Document the host integration suite and supported owner boundary.
 - [ ] Run `cargo fmt --all -- --check`.

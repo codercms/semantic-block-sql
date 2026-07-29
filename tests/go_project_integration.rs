@@ -5,8 +5,10 @@ use std::process::{Command, Output};
 
 use tempfile::TempDir;
 
-fn fixture_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/go-project")
+fn fixture_root(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
 }
 
 fn copy_tree(source: &Path, destination: &Path) {
@@ -23,10 +25,14 @@ fn copy_tree(source: &Path, destination: &Path) {
     }
 }
 
-fn project_copy() -> TempDir {
+fn fixture_copy(name: &str) -> TempDir {
     let project = TempDir::new().expect("create temporary Go project");
-    copy_tree(&fixture_root(), project.path());
+    copy_tree(&fixture_root(name), project.path());
     project
+}
+
+fn project_copy() -> TempDir {
+    fixture_copy("go-project")
 }
 
 fn semblock(root: &Path, args: &[&str]) -> Output {
@@ -239,4 +245,33 @@ func executed() {
         ),
         "formatted Go:\n{formatted}"
     );
+}
+
+#[test]
+fn permanent_failure_projects_preserve_every_file() {
+    for (fixture, expected_error) in [
+        ("go-project-invalid-sql", "PostgreSQL parse failed"),
+        ("go-project-invalid-go", "Go parse failed"),
+        ("go-project-directive-error", "misplaced Go directive"),
+    ] {
+        let project = fixture_copy(fixture);
+        let before = collect_tree(project.path());
+
+        let output = semblock(project.path(), &["fmt", ".", "--jobs", "4"]);
+
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "fixture {fixture}: {output:?}"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(expected_error),
+            "fixture {fixture}: {output:?}"
+        );
+        assert_eq!(
+            collect_tree(project.path()),
+            before,
+            "fixture {fixture}: preflight failure must prevent every project write"
+        );
+    }
 }
