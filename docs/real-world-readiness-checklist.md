@@ -1,6 +1,6 @@
 # Real-world formatter readiness — durable three-PR checklist
 
-Status: **PR 1 complete; PR 2 in progress**
+Status: **PR 1 and PR 2 implementation complete; PR 2 bundle pending**
 
 This roadmap is intentionally split into three stacked pull requests. Each PR
 must pass the complete repository quality gate and remain independently
@@ -134,48 +134,55 @@ PR 1 validation on 2026-07-30:
 
 ## P0 — Typed parser model
 
-- [ ] Replace JSON-name allowlisting as the primary renderer model with typed
+- [x] Replace JSON-name allowlisting as the primary renderer model with typed
   deserialization/adaptation into `PlpgsqlRoutine`, declarations, blocks,
   statements, branches, expressions, SQL units, cursors, and exception handlers.
-- [ ] Preserve parser source locations and exact source spans for every owned node.
-- [ ] Represent unmapped parser nodes as `Unsupported` only when a trustworthy
+- [x] Preserve parser source locations and exact source spans for every owned node.
+- [x] Represent unmapped parser nodes as `Unsupported` only when a trustworthy
   source span exists; otherwise preserve the complete routine.
-- [ ] Keep outer SQL routine extraction and exact dollar-tag ownership separate.
-- [ ] Commit P0.
+- [x] Keep outer SQL routine extraction and exact dollar-tag ownership separate.
+- [x] Commit P0.
 
 ## P1 — Procedural token binding and layout IR
 
-- [ ] Add procedural tokenization/binding independent from original source lines.
-- [ ] Build a dedicated layout IR for sequences, declarations, branches, labels,
+- [x] Add procedural tokenization/binding independent from original source lines.
+- [x] Build a dedicated layout IR for sequences, declarations, branches, labels,
   nested blocks, embedded SQL, comments, and opaque unsupported spans.
-- [ ] Preserve comment attachment, protected literals, authored blank-line groups,
+- [x] Preserve comment attachment, protected literals, authored blank-line groups,
   custom dollar tags, and CRLF.
-- [ ] Remove the line-oriented frame renderer after parity fixtures pass.
-- [ ] Commit P1.
+- [x] Remove the line-oriented frame renderer after parity fixtures pass.
+- [x] Commit P1.
 
 ## P2 — Formatter coverage
 
-- [ ] Format compact and multi-statement single-line bodies.
-- [ ] Format multiline declarations, assignments, conditions, and dynamic execute
+- [x] Format compact and multi-statement single-line bodies.
+- [x] Format multiline declarations, assignments, conditions, and dynamic execute
   arguments structurally.
-- [ ] Support `ASSERT`.
-- [ ] Support `RETURN QUERY` and reviewed `RETURN QUERY EXECUTE` forms.
-- [ ] Preserve unsupported procedural statements while formatting safely bound
+- [x] Support `ASSERT`.
+- [x] Support `RETURN QUERY` and reviewed `RETURN QUERY EXECUTE` forms.
+- [x] Preserve unsupported procedural statements while formatting safely bound
   supported siblings under default policy.
-- [ ] Strict policy makes unsupported routine nodes fatal without writes.
-- [ ] Retain existing blocks, IF/CASE, loops, FOREACH, cursors, RAISE, diagnostics,
+- [x] Strict policy makes unsupported routine nodes fatal without writes.
+- [x] Retain existing blocks, IF/CASE, loops, FOREACH, cursors, RAISE, diagnostics,
   exceptions, EXIT/CONTINUE, and dynamic EXECUTE behavior through the new IR.
-- [ ] Add nested control-flow, comments, compact-body, equivalence, and idempotence
+- [x] Add nested control-flow, comments, compact-body, equivalence, and idempotence
   fixtures.
-- [ ] Commit P2.
+- [x] Commit P2.
 
 ## P3 — PR 2 reconciliation
 
-- [ ] Add mixed ordinary SQL/routine and mixed supported/unsupported routine tests.
-- [ ] Update documentation and remove obsolete renderer helpers.
-- [ ] Run the complete offline quality gate and self-review.
+- [x] Add mixed ordinary SQL/routine and mixed supported/unsupported routine tests.
+- [x] Update documentation and remove obsolete renderer helpers.
+- [x] Run the complete offline quality gate and self-review.
 - [ ] Produce a verified PR 2 git bundle and SHA-256 file.
 - [ ] Record stacked Windows apply/push/PR instructions.
+
+
+PR 2 validation on 2026-07-30:
+
+- The line-oriented frame renderer was removed and replaced by typed parser adaptation, span-bearing procedural IR, and a separate layout pass.
+- Compact bodies, `ASSERT`, `RETURN QUERY`, and opaque transaction-control siblings are covered.
+- Existing blocks, loops, CASE, cursors, dynamic execution, comments, dollar tags, CRLF, equivalence, and idempotence remain covered.
 
 # PR 3 — Real Go string-expression coverage
 

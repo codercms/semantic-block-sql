@@ -143,9 +143,9 @@ The formatter has fixture-backed structural support for substantial PostgreSQL s
 - `CREATE TABLE` with inheritance, typed tables, access/storage/tablespace/on-commit options, partition keys, `PARTITION OF`, and range/list/hash/default partition bounds;
 - feature-rich `CREATE INDEX`, multi-action `ALTER TABLE`, `CREATE VIEW`, and `CREATE MATERIALIZED VIEW`;
 - reviewed operational and migration utilities: `COPY` (including protected `FROM STDIN` payloads), `CALL`, `EXPLAIN`, `VACUUM`, `ANALYZE`, `REFRESH MATERIALIZED VIEW`, `LISTEN`, `NOTIFY`, extension/schema/statistics/collation/cast creation, and reviewed `ALTER TYPE` / domain / policy / rename forms;
-- parser-backed PL/pgSQL declarations, SQL statements, conditionals, exception handlers, loops, `FOREACH`, procedural `CASE`, dynamic `EXECUTE`, cursor operations, and reviewed `EXIT` / `CONTINUE` forms.
+- parser-backed PL/pgSQL declarations, SQL statements, conditionals, exception handlers, loops, `FOREACH`, procedural `CASE`, dynamic `EXECUTE`, cursor operations, `ASSERT`, `RETURN QUERY`, compact bodies, and reviewed `EXIT` / `CONTINUE` forms.
 
-Important remaining areas include advanced SQL/JSON (`JSON_TABLE`, SQL-standard JSON query/value/aggregate forms), `CREATE TABLE AS` / `LIKE`, `XMLTABLE`, and unreviewed PL/pgSQL nodes such as `ASSERT`, `RETURN QUERY`, and transaction control.
+Important remaining areas include advanced SQL/JSON (`JSON_TABLE`, SQL-standard JSON query/value/aggregate forms), `CREATE TABLE AS` / `LIKE`, `XMLTABLE`, and procedural transaction control. PL/pgSQL transaction statements are preserved as unsupported units by default while supported siblings continue formatting.
 
 A PostgreSQL statement may be valid while still being unsupported by the formatter. By default, `semblock` preserves that statement byte-for-byte, emits a `syntax.unsupported` warning, and continues formatting supported statements in the same file or project. Set `format.unsupported_policy = "error"` or pass `--strict-unsupported` to make unsupported syntax fatal and retain project-wide no-write preflight. Malformed SQL and formatter safety failures are always errors.
 

@@ -215,3 +215,7 @@ node so the allowlist cannot broaden accidentally.
 ## Unsupported-policy requirements
 
 Every new syntax family must distinguish valid-but-unowned syntax from malformed input. Valid unsupported units must be preserved exactly and reported as warnings under the default policy; tests must also prove strict-policy error elevation and no writes. Add mixed-document fixtures showing that unsupported units do not suppress supported siblings. Utilities may share a renderer only through a closed AST-validated capability enum, with explicit ownership for nested SQL and protected payloads.
+
+## Extending PL/pgSQL after the IR rewrite
+
+A new procedural feature must first be mapped from its exact `parse_plpgsql` node name into a typed parser category, then classified into a source-span `BodyNodeKind`, and finally rendered by the procedural layout/leaf layers. Include compact and multiline fixtures, nested control flow, comment/protected-literal cases, parser-alignment tests, equivalence, idempotence, and an unsupported sibling. Do not reintroduce line-prefix syntax discovery.

@@ -746,3 +746,9 @@ with unchanged source.
 The formatter classifies every parser-proven top-level statement independently. A supported statement is formatted through the normal validation, ownership, equivalence, protected-token, and idempotence gates. A valid but unsupported statement is copied byte-for-byte and receives `syntax.unsupported`. The default `UnsupportedPolicy::Skip` reports that diagnostic as a warning and continues with supported siblings. `UnsupportedPolicy::Error` collects all unsupported statements, elevates them to errors, and returns the complete original document unchanged. PostgreSQL parse errors and formatter safety failures remain fatal under both policies.
 
 `COPY ... FROM STDIN` is split into an AST-validated header plus a protected payload ending at `\.`. Only the header is formatted; payload bytes are never scanned or rewritten.
+
+## Typed PL/pgSQL semantic and layout IR
+
+Routine bodies are no longer formatted from authored lines. `parse_plpgsql` is adapted into typed parser capability categories, while PostgreSQL scanner tokens are bound into a span-bearing `RoutineBody` IR containing declarations, control headers, statements, comments, and opaque units. A separate procedural layout pass owns indentation and blank-line policy. This enables compact and multi-statement single-line bodies without weakening the outer PostgreSQL parser boundary.
+
+`ASSERT` and `RETURN QUERY` are formatter-owned. Trustworthy opaque transaction-control spans are preserved and diagnosed per statement, so supported routine siblings still format under the default unsupported policy; strict policy restores the complete routine/document.
