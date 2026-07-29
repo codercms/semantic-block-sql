@@ -3,8 +3,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use thiserror::Error;
 use tree_sitter::{Node, Parser, Tree};
 
-use crate::config::GoConfig;
-use crate::{Diagnostic, FormatDiagnostic, FormatOptions, FormatWarning, SourceRange, format_sql};
+use super::go_string::{
+    GoStringError, can_encode_raw, decode_literal, encode_interpreted, encode_raw,
+};
+use crate::config::{GoConfig, GoMultilineStringStyle};
+use crate::{
+    Diagnostic, FormatDiagnostic, FormatOptions, FormatWarning, Severity, SourceRange,
+    UnsupportedPolicy, format_sql,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormattedGo {
@@ -23,22 +29,24 @@ pub enum GoError {
     MisplacedDirective { directive: String, line: usize },
     #[error("conflicting semblock:ignore and SQL marker at line {line}")]
     ConflictingDirectives { line: usize },
-    #[error(
-        "explicit SQL marker targets an interpreted Go string at line {line}; interpreted strings are disabled in the MVP"
-    )]
-    InterpretedString { line: usize },
-    #[error("raw Go SQL strings are disabled by configuration")]
-    RawStringsDisabled,
-    #[error(
-        "explicit SQL marker targets a concatenated Go raw-string fragment at line {line}; fragment formatting is not supported"
-    )]
-    ConcatenatedFragment { line: usize },
+    #[error("explicit SQL marker targets a disabled interpreted Go string at line {line}")]
+    InterpretedStringsDisabled { line: usize },
+    #[error("explicit SQL marker targets a disabled raw Go string at line {line}")]
+    RawStringsDisabled { line: usize },
+    #[error("invalid Go string literal at line {line}: {source}")]
+    StringLiteral {
+        line: usize,
+        #[source]
+        source: GoStringError,
+    },
     #[error("embedded SQL at Go line {line}: {source}")]
     EmbeddedSql {
         line: usize,
         #[source]
         source: FormatDiagnostic,
     },
+    #[error("rewritten Go string does not preserve its formatted runtime value at line {line}")]
+    RuntimeValueMismatch { line: usize },
     #[error("rewritten Go source does not parse")]
     Reparse,
 }
@@ -51,9 +59,28 @@ enum GoDirective {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GoLiteralUsage {
-    CompleteCandidate,
-    ConcatenatedFragment,
+enum GoStringKind {
+    Raw,
+    Interpreted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GoStringExpressionKind {
+    RawLiteral,
+    InterpretedLiteral,
+    StaticConcat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GoSqlContext {
+    DeclarationInitializer,
+    AssignmentValue,
+    CallArgument,
+    ReturnValue,
+    CompositeLiteralValue,
+    DeferCall,
+    GoCall,
+    ExpressionStatement,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +91,8 @@ enum GoSqlOwnerKind {
     Assignment,
     Return,
     ExpressionStatement,
+    Defer,
+    Go,
 }
 
 impl GoSqlOwnerKind {
@@ -75,7 +104,20 @@ impl GoSqlOwnerKind {
             "assignment_statement" => Some(Self::Assignment),
             "return_statement" => Some(Self::Return),
             "expression_statement" => Some(Self::ExpressionStatement),
+            "defer_statement" => Some(Self::Defer),
+            "go_statement" => Some(Self::Go),
             _ => None,
+        }
+    }
+
+    fn default_context(self) -> GoSqlContext {
+        match self {
+            Self::ConstDeclaration | Self::VarDeclaration => GoSqlContext::DeclarationInitializer,
+            Self::ShortVarDeclaration | Self::Assignment => GoSqlContext::AssignmentValue,
+            Self::Return => GoSqlContext::ReturnValue,
+            Self::ExpressionStatement => GoSqlContext::ExpressionStatement,
+            Self::Defer => GoSqlContext::DeferCall,
+            Self::Go => GoSqlContext::GoCall,
         }
     }
 }
@@ -87,11 +129,21 @@ struct CommentDirective {
     line: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct GoStringExpression<'tree> {
+    node: Node<'tree>,
+    owner: Node<'tree>,
+    context: GoSqlContext,
+    kind: GoStringExpressionKind,
+    has_raw: bool,
+    has_interpreted: bool,
+}
+
 #[derive(Debug)]
 struct Owner<'tree> {
     node: Node<'tree>,
-    raw: Vec<Node<'tree>>,
-    interpreted: Vec<Node<'tree>>,
+    expressions: Vec<GoStringExpression<'tree>>,
+    dynamic_ranges: Vec<SourceRange>,
 }
 
 #[derive(Debug)]
@@ -112,10 +164,10 @@ pub fn format_go_source(
         return Err(GoError::Parse);
     }
 
-    let mut raw = Vec::new();
-    let mut interpreted = Vec::new();
+    let mut expressions = Vec::new();
+    let mut dynamic = Vec::new();
     let mut comments = Vec::new();
-    collect_nodes(root, &mut raw, &mut interpreted, &mut comments);
+    collect_source_nodes(root, source, &mut expressions, &mut dynamic, &mut comments);
 
     let directives = comments
         .iter()
@@ -145,31 +197,27 @@ pub fn format_go_source(
     }
 
     let mut owners = BTreeMap::<(usize, usize), Owner<'_>>::new();
-    for node in raw {
-        if let Some(owner) = supported_owner(node) {
-            owners
-                .entry((owner.start_byte(), owner.end_byte()))
-                .or_insert_with(|| Owner {
-                    node: owner,
-                    raw: Vec::new(),
-                    interpreted: Vec::new(),
-                })
-                .raw
-                .push(node);
-        }
+    for expression in expressions {
+        owners
+            .entry((expression.owner.start_byte(), expression.owner.end_byte()))
+            .or_insert_with(|| Owner {
+                node: expression.owner,
+                expressions: Vec::new(),
+                dynamic_ranges: Vec::new(),
+            })
+            .expressions
+            .push(expression);
     }
-    for node in interpreted {
-        if let Some(owner) = supported_owner(node) {
-            owners
-                .entry((owner.start_byte(), owner.end_byte()))
-                .or_insert_with(|| Owner {
-                    node: owner,
-                    raw: Vec::new(),
-                    interpreted: Vec::new(),
-                })
-                .interpreted
-                .push(node);
-        }
+    for (owner, range) in dynamic {
+        owners
+            .entry((owner.start_byte(), owner.end_byte()))
+            .or_insert_with(|| Owner {
+                node: owner,
+                expressions: Vec::new(),
+                dynamic_ranges: Vec::new(),
+            })
+            .dynamic_ranges
+            .push(range);
     }
 
     let directive_by_start = directives
@@ -204,59 +252,85 @@ pub fn format_go_source(
         if ignored {
             continue;
         }
-        if explicit && !owner.interpreted.is_empty() {
-            return Err(GoError::InterpretedString {
-                line: owner.node.start_position().row + 1,
-            });
-        }
-        if owner.raw.is_empty() {
-            continue;
-        }
-        if !config.raw_strings {
-            if explicit {
-                return Err(GoError::RawStringsDisabled);
-            }
-            continue;
-        }
         if !explicit && !config.auto_detect {
             continue;
         }
+
         if explicit {
-            if let Some(literal) = owner.raw.iter().find(|literal| {
-                literal_usage(**literal, owner.node) == GoLiteralUsage::ConcatenatedFragment
-            }) {
-                return Err(GoError::ConcatenatedFragment {
-                    line: literal.start_position().row + 1,
-                });
-            }
+            diagnostics.extend(owner.dynamic_ranges.iter().map(|range| {
+                unsupported_go_diagnostic(
+                    *range,
+                    options,
+                    "dynamic Go string expression containing SQL fragments",
+                )
+            }));
         }
 
-        for literal in &owner.raw {
-            if literal_usage(*literal, owner.node) == GoLiteralUsage::ConcatenatedFragment {
+        for expression in &owner.expressions {
+            let _context = expression.context;
+            if expression.has_raw && !config.raw_strings {
+                if explicit {
+                    return Err(GoError::RawStringsDisabled {
+                        line: expression.node.start_position().row + 1,
+                    });
+                }
                 continue;
             }
-            let content_start = literal.start_byte() + 1;
-            let content_end = literal.end_byte().saturating_sub(1);
-            let content = &source[content_start..content_end];
-            let envelope = RawEnvelope::new(content);
-            if !explicit && !looks_like_complete_sql_prefix(&envelope.sql) {
+            if expression.has_interpreted && !config.interpreted_strings {
+                if explicit {
+                    return Err(GoError::InterpretedStringsDisabled {
+                        line: expression.node.start_position().row + 1,
+                    });
+                }
                 continue;
             }
 
-            let formatted =
-                format_sql(&envelope.sql, options).map_err(|source| GoError::EmbeddedSql {
-                    line: literal.start_position().row + 1,
-                    source,
-                })?;
+            let prepared = prepare_expression(*expression, source)?;
+            if !explicit && !looks_like_complete_sql_prefix(&prepared.sql) {
+                continue;
+            }
+
+            let formatted = match format_sql(&prepared.sql, options) {
+                Ok(formatted) => formatted,
+                Err(error) if !explicit && is_candidate_parse_failure(&error) => continue,
+                Err(source) => {
+                    return Err(GoError::EmbeddedSql {
+                        line: expression.node.start_position().row + 1,
+                        source,
+                    });
+                }
+            };
             warnings.extend(formatted.warnings);
+            let diagnostic_range = expression_diagnostic_range(*expression);
             diagnostics.extend(formatted.diagnostics.into_iter().map(|mut diagnostic| {
                 diagnostic.message = format!("embedded SQL: {}", diagnostic.message);
-                diagnostic.with_source_range(SourceRange::new(content_start, content_end))
+                diagnostic.with_source_range(diagnostic_range)
             }));
+
+            if formatted.output == prepared.sql
+                && matches!(
+                    expression.kind,
+                    GoStringExpressionKind::RawLiteral | GoStringExpressionKind::InterpretedLiteral
+                )
+            {
+                continue;
+            }
+
+            let rendered = render_expression(*expression, &prepared, &formatted.output, config)?;
+            let decoded = decode_literal(&rendered).map_err(|source| GoError::StringLiteral {
+                line: expression.node.start_position().row + 1,
+                source,
+            })?;
+            let expected = prepared.expected_runtime(&formatted.output);
+            if decoded != expected {
+                return Err(GoError::RuntimeValueMismatch {
+                    line: expression.node.start_position().row + 1,
+                });
+            }
             replacements.push(Replacement {
-                start: content_start,
-                end: content_end,
-                text: envelope.wrap(&formatted.output),
+                start: expression.node.start_byte(),
+                end: expression.node.end_byte(),
+                text: rendered,
             });
         }
     }
@@ -272,9 +346,15 @@ pub fn format_go_source(
     }
 
     replacements.sort_by_key(|replacement| replacement.start);
+    let strict_unsupported = options.unsupported_policy == UnsupportedPolicy::Error
+        && diagnostics.iter().any(|diagnostic| {
+            diagnostic.rule_id == "syntax.unsupported" && diagnostic.severity == Severity::Error
+        });
     let mut output = source.to_string();
-    for replacement in replacements.iter().rev() {
-        output.replace_range(replacement.start..replacement.end, &replacement.text);
+    if !strict_unsupported {
+        for replacement in replacements.iter().rev() {
+            output.replace_range(replacement.start..replacement.end, &replacement.text);
+        }
     }
 
     let reparsed = parse_go(&output)?;
@@ -288,30 +368,331 @@ pub fn format_go_source(
     })
 }
 
+fn expression_diagnostic_range(expression: GoStringExpression<'_>) -> SourceRange {
+    match expression.kind {
+        GoStringExpressionKind::RawLiteral | GoStringExpressionKind::InterpretedLiteral => {
+            SourceRange::new(
+                expression.node.start_byte().saturating_add(1),
+                expression.node.end_byte().saturating_sub(1),
+            )
+        }
+        GoStringExpressionKind::StaticConcat => {
+            SourceRange::new(expression.node.start_byte(), expression.node.end_byte())
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PreparedExpression {
+    sql: String,
+    raw_envelope: Option<RawEnvelope>,
+}
+
+impl PreparedExpression {
+    fn expected_runtime(&self, formatted: &str) -> String {
+        self.raw_envelope.as_ref().map_or_else(
+            || formatted.to_owned(),
+            |envelope| envelope.wrap(formatted).replace('\r', ""),
+        )
+    }
+}
+
+fn prepare_expression(
+    expression: GoStringExpression<'_>,
+    source: &str,
+) -> Result<PreparedExpression, GoError> {
+    if expression.kind == GoStringExpressionKind::RawLiteral {
+        let text = &source[expression.node.start_byte()..expression.node.end_byte()];
+        let content = text
+            .strip_prefix('`')
+            .and_then(|text| text.strip_suffix('`'))
+            .ok_or_else(|| GoError::StringLiteral {
+                line: expression.node.start_position().row + 1,
+                source: GoStringError::Delimiters,
+            })?;
+        let envelope = RawEnvelope::new(content);
+        return Ok(PreparedExpression {
+            sql: envelope.sql.clone(),
+            raw_envelope: Some(envelope),
+        });
+    }
+
+    let sql = decode_static_expression(expression.node, source).map_err(|source| {
+        GoError::StringLiteral {
+            line: expression.node.start_position().row + 1,
+            source,
+        }
+    })?;
+    Ok(PreparedExpression {
+        sql,
+        raw_envelope: None,
+    })
+}
+
+fn render_expression(
+    expression: GoStringExpression<'_>,
+    prepared: &PreparedExpression,
+    formatted: &str,
+    config: &GoConfig,
+) -> Result<String, GoError> {
+    if expression.kind == GoStringExpressionKind::RawLiteral {
+        let content = prepared
+            .raw_envelope
+            .as_ref()
+            .expect("raw literal has an envelope")
+            .wrap(formatted);
+        return Ok(format!("`{content}`"));
+    }
+
+    if formatted.contains('\n')
+        && config.multiline_string_style == GoMultilineStringStyle::PreferRaw
+        && can_encode_raw(formatted)
+    {
+        return encode_raw(formatted).map_err(|source| GoError::StringLiteral {
+            line: expression.node.start_position().row + 1,
+            source,
+        });
+    }
+    Ok(encode_interpreted(formatted))
+}
+
+fn collect_source_nodes<'tree>(
+    node: Node<'tree>,
+    source: &str,
+    expressions: &mut Vec<GoStringExpression<'tree>>,
+    dynamic: &mut Vec<(Node<'tree>, SourceRange)>,
+    comments: &mut Vec<Node<'tree>>,
+) {
+    if node.kind() == "comment" {
+        comments.push(node);
+        return;
+    }
+
+    if matches!(
+        node.kind(),
+        "binary_expression" | "parenthesized_expression"
+    ) {
+        if is_static_string_expression(node, source) {
+            if let Some(expression) = classify_string_expression(node, source) {
+                expressions.push(expression);
+            }
+            return;
+        }
+        if node.kind() == "binary_expression" && subtree_contains_string(node) {
+            if let Some((owner, _)) = classify_context(node) {
+                dynamic.push((owner, SourceRange::new(node.start_byte(), node.end_byte())));
+            }
+            return;
+        }
+    }
+
+    if let Some(kind) = literal_kind(node) {
+        if let Some(mut expression) = classify_string_expression(node, source) {
+            expression.kind = match kind {
+                GoStringKind::Raw => GoStringExpressionKind::RawLiteral,
+                GoStringKind::Interpreted => GoStringExpressionKind::InterpretedLiteral,
+            };
+            expressions.push(expression);
+        }
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_source_nodes(child, source, expressions, dynamic, comments);
+    }
+}
+
+fn classify_string_expression<'tree>(
+    node: Node<'tree>,
+    source: &str,
+) -> Option<GoStringExpression<'tree>> {
+    let (owner, context) = classify_context(node)?;
+    let mut kinds = Vec::new();
+    collect_literal_kinds(node, source, &mut kinds)?;
+    let has_raw = kinds.contains(&GoStringKind::Raw);
+    let has_interpreted = kinds.contains(&GoStringKind::Interpreted);
+    let kind = match literal_kind(node) {
+        Some(GoStringKind::Raw) => GoStringExpressionKind::RawLiteral,
+        Some(GoStringKind::Interpreted) => GoStringExpressionKind::InterpretedLiteral,
+        None => GoStringExpressionKind::StaticConcat,
+    };
+    Some(GoStringExpression {
+        node,
+        owner,
+        context,
+        kind,
+        has_raw,
+        has_interpreted,
+    })
+}
+
+fn classify_context(node: Node<'_>) -> Option<(Node<'_>, GoSqlContext)> {
+    let expression_start = node.start_byte();
+    let expression_end = node.end_byte();
+    let mut current = node;
+    let mut context = None;
+    while let Some(parent) = current.parent() {
+        match parent.kind() {
+            "import_spec" | "import_declaration" | "field_declaration" | "package_clause" => {
+                return None;
+            }
+            "keyed_element" => {
+                let value = parent.child_by_field_name("value")?;
+                if expression_start < value.start_byte() || expression_end > value.end_byte() {
+                    return None;
+                }
+                context.get_or_insert(GoSqlContext::CompositeLiteralValue);
+            }
+            "literal_element" => {
+                context.get_or_insert(GoSqlContext::CompositeLiteralValue);
+            }
+            "argument_list" => {
+                context.get_or_insert(GoSqlContext::CallArgument);
+            }
+            kind => {
+                if let Some(owner_kind) = GoSqlOwnerKind::from_node_kind(kind) {
+                    let context = match owner_kind {
+                        GoSqlOwnerKind::Defer => GoSqlContext::DeferCall,
+                        GoSqlOwnerKind::Go => GoSqlContext::GoCall,
+                        _ => context.unwrap_or_else(|| owner_kind.default_context()),
+                    };
+                    return Some((parent, context));
+                }
+            }
+        }
+        current = parent;
+    }
+    None
+}
+
+fn is_static_string_expression(node: Node<'_>, source: &str) -> bool {
+    if literal_kind(node).is_some() {
+        return true;
+    }
+    match node.kind() {
+        "parenthesized_expression" => named_children(node)
+            .into_iter()
+            .next()
+            .is_some_and(|child| is_static_string_expression(child, source)),
+        "binary_expression" => {
+            let left = node.child_by_field_name("left");
+            let right = node.child_by_field_name("right");
+            let operator = node.child_by_field_name("operator");
+            matches!(
+                (left, right, operator),
+                (Some(left), Some(right), Some(operator))
+                    if &source[operator.start_byte()..operator.end_byte()] == "+"
+                        && is_static_string_expression(left, source)
+                        && is_static_string_expression(right, source)
+            )
+        }
+        _ => false,
+    }
+}
+
+fn collect_literal_kinds(
+    node: Node<'_>,
+    source: &str,
+    kinds: &mut Vec<GoStringKind>,
+) -> Option<()> {
+    if let Some(kind) = literal_kind(node) {
+        kinds.push(kind);
+        return Some(());
+    }
+    if !is_static_string_expression(node, source) {
+        return None;
+    }
+    match node.kind() {
+        "parenthesized_expression" => {
+            collect_literal_kinds(named_children(node).into_iter().next()?, source, kinds)
+        }
+        "binary_expression" => {
+            collect_literal_kinds(node.child_by_field_name("left")?, source, kinds)?;
+            collect_literal_kinds(node.child_by_field_name("right")?, source, kinds)
+        }
+        _ => None,
+    }
+}
+
+fn decode_static_expression(node: Node<'_>, source: &str) -> Result<String, GoStringError> {
+    if literal_kind(node).is_some() {
+        return decode_literal(&source[node.start_byte()..node.end_byte()]);
+    }
+    match node.kind() {
+        "parenthesized_expression" => {
+            let child = named_children(node)
+                .into_iter()
+                .next()
+                .ok_or(GoStringError::Delimiters)?;
+            decode_static_expression(child, source)
+        }
+        "binary_expression" => {
+            let left = node
+                .child_by_field_name("left")
+                .ok_or(GoStringError::Delimiters)?;
+            let right = node
+                .child_by_field_name("right")
+                .ok_or(GoStringError::Delimiters)?;
+            let mut output = decode_static_expression(left, source)?;
+            output.push_str(&decode_static_expression(right, source)?);
+            Ok(output)
+        }
+        _ => Err(GoStringError::Delimiters),
+    }
+}
+
+fn literal_kind(node: Node<'_>) -> Option<GoStringKind> {
+    match node.kind() {
+        "raw_string_literal" => Some(GoStringKind::Raw),
+        "interpreted_string_literal" => Some(GoStringKind::Interpreted),
+        _ => None,
+    }
+}
+
+fn subtree_contains_string(node: Node<'_>) -> bool {
+    if literal_kind(node).is_some() {
+        return true;
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor).any(subtree_contains_string)
+}
+
+fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).collect()
+}
+
+fn unsupported_go_diagnostic(
+    range: SourceRange,
+    options: &FormatOptions,
+    feature: &str,
+) -> Diagnostic {
+    Diagnostic {
+        rule_id: "syntax.unsupported".into(),
+        severity: match options.unsupported_policy {
+            UnsupportedPolicy::Skip => Severity::Warning,
+            UnsupportedPolicy::Error => Severity::Error,
+        },
+        message: format!("unsupported embedded SQL host expression: {feature}"),
+        source_range: range,
+        fix_available: false,
+    }
+}
+
+fn is_candidate_parse_failure(error: &FormatDiagnostic) -> bool {
+    matches!(
+        error,
+        FormatDiagnostic::PostgreSqlParse(_) | FormatDiagnostic::PostgreSqlScan(_)
+    )
+}
+
 fn parse_go(source: &str) -> Result<Tree, GoError> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_go::LANGUAGE.into())
         .map_err(|error| GoError::Parser(error.to_string()))?;
     parser.parse(source, None).ok_or(GoError::Parse)
-}
-
-fn collect_nodes<'tree>(
-    node: Node<'tree>,
-    raw: &mut Vec<Node<'tree>>,
-    interpreted: &mut Vec<Node<'tree>>,
-    comments: &mut Vec<Node<'tree>>,
-) {
-    match node.kind() {
-        "raw_string_literal" => raw.push(node),
-        "interpreted_string_literal" => interpreted.push(node),
-        "comment" => comments.push(node),
-        _ => {}
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_nodes(child, raw, interpreted, comments);
-    }
 }
 
 fn find_first_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
@@ -321,29 +702,6 @@ fn find_first_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> 
     let mut cursor = node.walk();
     node.children(&mut cursor)
         .find_map(|child| find_first_kind(child, kind))
-}
-
-fn literal_usage(mut literal: Node<'_>, owner: Node<'_>) -> GoLiteralUsage {
-    while let Some(parent) = literal.parent() {
-        if parent == owner {
-            break;
-        }
-        if parent.kind() == "binary_expression" {
-            return GoLiteralUsage::ConcatenatedFragment;
-        }
-        literal = parent;
-    }
-    GoLiteralUsage::CompleteCandidate
-}
-
-fn supported_owner(mut node: Node<'_>) -> Option<Node<'_>> {
-    while let Some(parent) = node.parent() {
-        if GoSqlOwnerKind::from_node_kind(parent.kind()).is_some() {
-            return Some(parent);
-        }
-        node = parent;
-    }
-    None
 }
 
 fn parse_comment_directive(node: Node<'_>, source: &str) -> Option<CommentDirective> {
@@ -420,9 +778,17 @@ fn looks_like_complete_sql_prefix(source: &str) -> bool {
             | "REVOKE"
             | "TRUNCATE"
             | "COMMENT"
+            | "COPY"
+            | "EXPLAIN"
+            | "VACUUM"
+            | "ANALYZE"
+            | "REFRESH"
+            | "LISTEN"
+            | "NOTIFY"
     )
 }
 
+#[derive(Debug)]
 struct RawEnvelope {
     sql: String,
     newline: &'static str,
@@ -490,6 +856,6 @@ impl RawEnvelope {
 
 fn leading_whitespace(line: &str) -> String {
     line.chars()
-        .take_while(|char| char.is_whitespace())
+        .take_while(|character| character.is_whitespace())
         .collect()
 }

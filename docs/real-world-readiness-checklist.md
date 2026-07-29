@@ -187,41 +187,55 @@ PR 2 validation on 2026-07-30:
 
 # PR 3 — Real Go string-expression coverage
 
+Status: **G0–G2 durable checkpoint complete. G3–G4 pending.**
+
 ## G0 — Go string codec and expression IR
 
-- [ ] Add a complete interpreted-string decoder for Go escapes.
-- [ ] Add deterministic interpreted-string encoding and round-trip tests against
+- [x] Add a complete interpreted-string decoder for Go escapes.
+- [x] Add deterministic interpreted-string encoding and round-trip tests against
   Go `strconv.Unquote` / `strconv.Quote` in the test toolchain.
-- [ ] Add `GoStringExpression` IR for raw literals, interpreted literals, and
+- [x] Add `GoStringExpression` IR for raw literals, interpreted literals, and
   static literal-only concatenations.
-- [ ] Classify expression contexts directly rather than relying only on broad
+- [x] Classify expression contexts directly rather than relying only on broad
   declaration owners.
-- [ ] Commit G0.
+- [x] Include G0 in the combined G0–G2 durable checkpoint.
 
 ## G1 — Real expression contexts
 
-- [ ] Support declaration and assignment values.
-- [ ] Support direct and nested function-call arguments.
-- [ ] Support return values, standalone calls, `defer`, and `go` calls.
-- [ ] Support struct/composite literal fields, map values, slice/array elements,
+- [x] Support declaration and assignment values.
+- [x] Support direct and nested function-call arguments.
+- [x] Support return values, standalone calls, `defer`, and `go` calls.
+- [x] Support struct/composite literal fields, map values, slice/array elements,
   and test-table entries.
-- [ ] Exclude import paths, struct tags, build directives, runes, and non-expression
+- [x] Exclude import paths, struct tags, build directives, runes, and non-expression
   strings structurally.
-- [ ] Support literal-only static concatenation and preserve dynamic expressions.
-- [ ] Make explicit SQL markers work on interpreted/static string expressions.
-- [ ] Commit G1.
+- [x] Support literal-only static concatenation and preserve dynamic expressions.
+- [x] Make explicit SQL markers work on interpreted/static string expressions.
+- [x] Include G1 in the combined G0–G2 durable checkpoint.
 
 ## G2 — Rewriting policy and safety
 
-- [ ] Enable interpreted strings by default.
-- [ ] Preserve one-line interpreted output when formatted SQL stays one line.
-- [ ] Convert multiline interpreted SQL to raw strings when exact and legal.
-- [ ] Fall back to deterministic interpreted escaping when SQL contains backticks,
+- [x] Enable interpreted strings by default.
+- [x] Preserve one-line interpreted output when formatted SQL stays one line.
+- [x] Convert multiline interpreted SQL to raw strings when exact and legal.
+- [x] Fall back to deterministic interpreted escaping when SQL contains backticks,
   carriage returns, or another raw-string blocker.
-- [ ] Decode replacements and verify exact runtime string value.
-- [ ] Reparse the complete Go source, run `gofmt`, and require idempotence.
-- [ ] Ensure unsupported SQL warnings do not suppress other literal replacements.
-- [ ] Commit G2.
+- [x] Decode replacements and verify exact runtime string value.
+- [x] Reparse the complete Go source, run `gofmt`, and require idempotence.
+- [x] Ensure unsupported SQL warnings do not suppress other literal replacements.
+- [x] Commit G0–G2 as one durable implementation checkpoint.
+
+G0–G2 checkpoint validation on 2026-07-30:
+
+- interpreted and raw Go strings use a checked decode/format/re-encode path;
+- inline/nested call arguments, declarations, assignments, returns, standalone,
+  defer/go calls, composite values, and literal-only concatenations are covered;
+- dynamic expressions remain unchanged and follow the default/strict unsupported policy;
+- replacement runtime values are re-decoded and compared before applying edits;
+- the complete Go file reparses, the realistic fixture remains `gofmt`-clean and
+  compiles with `go test ./...`, and formatting remains idempotent;
+- the full offline gate passed with 187 tests, Clippy warnings denied, Rustdoc,
+  formatting, and `git diff --check`.
 
 ## G3 — Real-project corpus
 

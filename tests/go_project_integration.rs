@@ -176,32 +176,39 @@ fn preserves_crlf_in_multiline_go_raw_sql_envelopes() {
 }
 
 #[test]
-fn explicit_marker_rejects_concatenated_fragments_without_project_writes() {
+fn explicit_dynamic_fragments_warn_by_default_and_fail_atomically_in_strict_mode() {
     let project = TempDir::new().expect("create temporary Go project");
-    fs::write(
-        project.path().join("valid.go"),
-        "package fixture\n\nconst query = `select id,name from public.users;`\n",
-    )
-    .expect("write valid Go source");
-    fs::write(
-        project.path().join("fragment.go"),
-        "package fixture\n\nconst columns = \"id,name\"\n\n// semblock:sql\nconst query = `SELECT ` + columns + ` FROM public.users`\n",
-    )
-    .expect("write concatenated Go source");
-    let before = collect_tree(project.path());
+    let valid = "package fixture\n\nconst query = `select id,name from public.users;`\n";
+    let formatted_valid = "package fixture\n\nconst query = `SELECT id, name FROM public.users;`\n";
+    let fragment = "package fixture\n\nconst columns = \"id,name\"\n\n// semblock:sql\nconst query = `SELECT ` + columns + ` FROM public.users`\n";
+    fs::write(project.path().join("valid.go"), valid).expect("write valid Go source");
+    fs::write(project.path().join("fragment.go"), fragment).expect("write concatenated Go source");
 
     let output = semblock(project.path(), &["fmt", "."]);
 
-    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("concatenated Go raw-string fragment"),
+        String::from_utf8_lossy(&output.stderr).contains("warning[syntax.unsupported]"),
         "{output:?}"
     );
     assert_eq!(
-        collect_tree(project.path()),
-        before,
-        "preflight failure must prevent every project write"
+        fs::read_to_string(project.path().join("valid.go")).expect("read valid Go"),
+        formatted_valid
     );
+    assert_eq!(
+        fs::read_to_string(project.path().join("fragment.go")).expect("read fragment Go"),
+        fragment
+    );
+
+    fs::write(project.path().join("valid.go"), valid).expect("restore valid Go source");
+    let before = collect_tree(project.path());
+    let strict = semblock(project.path(), &["--strict-unsupported", "fmt", "."]);
+    assert_eq!(strict.status.code(), Some(3), "{strict:?}");
+    assert!(
+        String::from_utf8_lossy(&strict.stderr).contains("error[syntax.unsupported]"),
+        "{strict:?}"
+    );
+    assert_eq!(collect_tree(project.path()), before);
 }
 
 #[test]

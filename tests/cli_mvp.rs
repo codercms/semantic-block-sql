@@ -221,7 +221,7 @@ const fragment = `WHERE deleted_at IS NULL`
 }
 
 #[test]
-fn malformed_go_sql_aborts_the_whole_file() {
+fn malformed_auto_detected_go_candidate_is_skipped_while_valid_sql_formats() {
     let project = TempDir::new().expect("temp project");
     let source = r#"package queries
 
@@ -232,12 +232,10 @@ const invalid = `select from;`
 
     let output = run(project.path(), &["fmt", "queries.go"], None);
 
-    assert_eq!(output.status.code(), Some(3), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("PostgreSQL parse failed"));
-    assert_eq!(
-        fs::read_to_string(project.path().join("queries.go")).expect("read Go"),
-        source
-    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let formatted = fs::read_to_string(project.path().join("queries.go")).expect("read Go");
+    assert!(formatted.contains("const valid = `SELECT id, title FROM public.items;`"));
+    assert!(formatted.contains("const invalid = `select from;`"));
 }
 
 #[test]
@@ -438,11 +436,14 @@ const query = "select id from public.items;"
 "#;
     write(project.path(), "interpreted.go", interpreted);
     let output = run(project.path(), &["fmt", "interpreted.go"], None);
-    assert_eq!(output.status.code(), Some(3), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("interpreted strings"));
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(
         fs::read_to_string(project.path().join("interpreted.go")).expect("read interpreted Go"),
-        interpreted
+        r#"package queries
+
+// language=SQL
+const query = "SELECT id FROM public.items;"
+"#
     );
 }
 
