@@ -338,15 +338,18 @@ fn format_regular_document_content(
         }
         output.push_str(&normalize_document_gap(&source[cursor..start], false));
         let statement = &source[start..end];
+        let routine = is_routine_statement(raw);
         match format_statement_once(statement, raw, options) {
             Ok(formatted) => {
                 output.push_str(&formatted.output);
-                diagnostics.extend(
-                    formatted
-                        .diagnostics
-                        .into_iter()
-                        .map(|diagnostic| diagnostic.shifted(start)),
-                );
+                if routine {
+                    diagnostics.extend(
+                        formatted
+                            .diagnostics
+                            .into_iter()
+                            .map(|diagnostic| diagnostic.shifted(start)),
+                    );
+                }
             }
             Err(error @ FormatDiagnostic::UnsupportedSyntax { .. }) => {
                 output.push_str(statement);
@@ -548,17 +551,20 @@ fn dollar_tag_at(source: &str, start: usize) -> Option<(&str, usize)> {
     }
 }
 
+fn is_routine_statement(raw: &pg_query::protobuf::RawStmt) -> bool {
+    use pg_query::protobuf::node::Node;
+    matches!(
+        raw.stmt.as_deref().and_then(|node| node.node.as_ref()),
+        Some(Node::DoStmt(_) | Node::CreateFunctionStmt(_))
+    )
+}
+
 fn format_statement_once(
     source: &str,
     raw: &pg_query::protobuf::RawStmt,
     options: &FormatOptions,
 ) -> Result<FormattedSql, FormatDiagnostic> {
-    use pg_query::protobuf::node::Node;
-    let routine = matches!(
-        raw.stmt.as_deref().and_then(|node| node.node.as_ref()),
-        Some(Node::DoStmt(_) | Node::CreateFunctionStmt(_))
-    );
-    if routine {
+    if is_routine_statement(raw) {
         return procedural::format_single_routine(source, options);
     }
     format_supported_statement(source, options)
