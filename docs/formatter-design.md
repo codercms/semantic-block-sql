@@ -467,6 +467,16 @@ It is never the SQL authority. Incomplete fragments such as a standalone
 
 MVP supports raw backtick literals only. Interpreted strings remain disabled.
 
+### Embedded Go indentation precedence
+
+The 2026-07-29 style-guide 1.0.1 requirement supersedes the earlier MVP
+envelope behavior: multiline SQL in Go raw strings is formatted at SQL root
+indentation, independent from the surrounding Go block. Host syntax remains
+valid and is reparsed after replacement. One-line raw strings retain their Go
+expression placement; only continuation lines created by SQL formatting are
+indented as required to remain readable Go source.
+
+
 ## Directives
 
 Planned directives:
