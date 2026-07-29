@@ -169,6 +169,30 @@ hard_line_width = 160
 Indentation is fixed at four spaces. Authored list groups, blank lines, and
 comment boundaries are mandatory formatter invariants rather than options.
 
+### Cast, array, and JSON expression punctuation
+
+Fixture-backed scalar-expression rendering now treats PostgreSQL type and array
+syntax as owned punctuation rather than generic binary-token spacing:
+
+- casts render as `value::type` or `CAST(value AS type)`;
+- unquoted type names are lowercase, including qualified custom names and
+  contextual multiword types such as `double precision`, `character varying`,
+  and `timestamp WITH time zone`;
+- quoted type-name components remain byte-identical;
+- array constructors, array type suffixes, subscripts, and slices are tight:
+  `ARRAY[1, 2]`, `text[]`, `items[1]`, and `items[1:3]`;
+- `ARRAY (SELECT ...)` remains grammar-parenthesis syntax and is not folded into
+  square-bracket ownership;
+- legacy PostgreSQL JSON operators (`->`, `->>`, `#>`, `#>>`, `#-`, `@>`, `<@`,
+  `?`, `?|`, `?&`, and `||`) render as binary operators with one surrounding
+  space while preserving JSON and path literals exactly.
+
+Simple `JSON_OBJECT(key: value)` and `JSON_ARRAY(value)` constructors retain
+existing fixture-backed support. Advanced SQL/JSON constructors and query,
+aggregate, parse, scalar, serialization, predicate, and table expression roots
+fail closed with `syntax.unsupported` until their complete grammar clauses have
+owned layouts and acceptance fixtures.
+
 ### Width semantics
 
 - Soft width permits a break; it does not force one.
