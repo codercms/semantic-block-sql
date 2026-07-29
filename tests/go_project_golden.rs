@@ -134,10 +134,7 @@ fn formats_a_realistic_go_project_against_complete_golden_files() {
     let pairs = golden_pairs(project.path());
     let actual_go = go_files(project.path());
     assert_eq!(
-        pairs
-            .iter()
-            .map(|(actual, _)| actual)
-            .collect::<Vec<_>>(),
+        pairs.iter().map(|(actual, _)| actual).collect::<Vec<_>>(),
         actual_go.iter().collect::<Vec<_>>(),
         "every Go fixture must have an adjacent .go.expected file"
     );
@@ -186,10 +183,7 @@ fn invalid_embedded_sql_aborts_every_go_file_rewrite() {
     copy_tree(&fixture("go-project-invalid"), project.path());
     assert_go_project_is_valid(project.path());
 
-    let valid_check = semblock(
-        project.path(),
-        &["check", "valid.go", "--list-different"],
-    );
+    let valid_check = semblock(project.path(), &["check", "valid.go", "--list-different"]);
     assert_eq!(valid_check.status.code(), Some(1), "{valid_check:?}");
 
     let before = snapshot(project.path());
