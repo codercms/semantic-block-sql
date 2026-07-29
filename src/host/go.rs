@@ -29,6 +29,10 @@ pub enum GoError {
     InterpretedString { line: usize },
     #[error("raw Go SQL strings are disabled by configuration")]
     RawStringsDisabled,
+    #[error(
+        "explicit SQL marker targets a concatenated Go raw-string fragment at line {line}; fragment formatting is not supported"
+    )]
+    ConcatenatedFragment { line: usize },
     #[error("embedded SQL at Go line {line}: {source}")]
     EmbeddedSql {
         line: usize,
@@ -44,6 +48,12 @@ enum GoDirective {
     FileIgnore,
     Ignore,
     Sql,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GoLiteralUsage {
+    CompleteCandidate,
+    ConcatenatedFragment,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -187,8 +197,20 @@ pub fn format_go_source(
         if !explicit && !config.auto_detect {
             continue;
         }
+        if explicit {
+            if let Some(literal) = owner.raw.iter().find(|literal| {
+                literal_usage(**literal, owner.node) == GoLiteralUsage::ConcatenatedFragment
+            }) {
+                return Err(GoError::ConcatenatedFragment {
+                    line: literal.start_position().row + 1,
+                });
+            }
+        }
 
         for literal in &owner.raw {
+            if literal_usage(*literal, owner.node) == GoLiteralUsage::ConcatenatedFragment {
+                continue;
+            }
             let content_start = literal.start_byte() + 1;
             let content_end = literal.end_byte().saturating_sub(1);
             let content = &source[content_start..content_end];
@@ -275,6 +297,19 @@ fn find_first_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> 
     let mut cursor = node.walk();
     node.children(&mut cursor)
         .find_map(|child| find_first_kind(child, kind))
+}
+
+fn literal_usage(mut literal: Node<'_>, owner: Node<'_>) -> GoLiteralUsage {
+    while let Some(parent) = literal.parent() {
+        if parent == owner {
+            break;
+        }
+        if parent.kind() == "binary_expression" {
+            return GoLiteralUsage::ConcatenatedFragment;
+        }
+        literal = parent;
+    }
+    GoLiteralUsage::CompleteCandidate
 }
 
 fn supported_owner(mut node: Node<'_>) -> Option<Node<'_>> {

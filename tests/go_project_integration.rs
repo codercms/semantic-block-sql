@@ -167,3 +167,32 @@ fn preserves_crlf_in_multiline_go_raw_sql_envelopes() {
         b"package queries\r\n\r\nfunc load() {\r\n\tconst query = `\r\nSELECT id, title FROM public.items;\r\n\t`\r\n\t_ = query\r\n}\r\n"
     );
 }
+
+#[test]
+fn explicit_marker_rejects_concatenated_fragments_without_project_writes() {
+    let project = TempDir::new().expect("create temporary Go project");
+    fs::write(
+        project.path().join("valid.go"),
+        "package fixture\n\nconst query = `select id,name from public.users;`\n",
+    )
+    .expect("write valid Go source");
+    fs::write(
+        project.path().join("fragment.go"),
+        "package fixture\n\nconst columns = \"id,name\"\n\n// semblock:sql\nconst query = `SELECT ` + columns + ` FROM public.users`\n",
+    )
+    .expect("write concatenated Go source");
+    let before = collect_tree(project.path());
+
+    let output = semblock(project.path(), &["fmt", "."]);
+
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("concatenated Go raw-string fragment"),
+        "{output:?}"
+    );
+    assert_eq!(
+        collect_tree(project.path()),
+        before,
+        "preflight failure must prevent every project write"
+    );
+}

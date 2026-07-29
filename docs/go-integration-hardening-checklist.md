@@ -1,6 +1,6 @@
 # Go integration hardening — durable checklist
 
-Status: **Batches G0-G1 complete; Batch G2 in progress**
+Status: **Batches G0-G2 complete; Batch G3 in progress**
 
 This workstream strengthens embedded-Go SQL support after PR 7. Update this
 file before every checkpoint commit. A checked item requires focused tests and
@@ -53,15 +53,15 @@ the batch self-review described in `AGENTS.md`.
 
 ## Batch G2 — Concatenated-fragment safety
 
-- [ ] Add a failing fixture for raw SQL-looking literals in Go binary string
+- [x] Add a failing fixture for raw SQL-looking literals in Go binary string
   concatenation.
-- [ ] Classify raw-literal usage structurally.
-- [ ] Skip concatenated fragments during auto-detection without suppressing
+- [x] Classify raw-literal usage structurally.
+- [x] Skip concatenated fragments during auto-detection without suppressing
   unrelated complete SQL literals in the same owner/file.
-- [ ] Define and test explicit-marker behavior for a concatenated expression.
-- [ ] Preserve project/file atomicity.
-- [ ] Run focused tests and Batch G2 self-review.
-- [ ] Commit Batch G2.
+- [x] Define and test explicit-marker behavior for a concatenated expression.
+- [x] Preserve project/file atomicity.
+- [x] Run focused tests and Batch G2 self-review.
+- [x] Commit Batch G2.
 
 ## Batch G3 — Direct return and expression-statement owners
 

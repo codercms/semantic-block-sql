@@ -18,10 +18,16 @@ const deleteExpired = `
     delete from public.orders item using staging.orders source where item.id=source.id and source.expired=true returning item.id;
 `
 
+const (
+	dynamicColumns = "id,total"
+	dynamicQuery   = `SELECT ` + dynamicColumns + ` FROM public.orders`
+	groupedQuery   = `select id,total from public.orders;`
+)
+
 const message = `choose a plan from the menu`
 const fragment = `WHERE deleted_at IS NULL`
 const interpreted = "select id,total from public.orders;"
 
 func Queries() []string {
-	return []string{recent, legacy, updateFromImport, deleteExpired, message, fragment, interpreted}
+	return []string{recent, legacy, updateFromImport, deleteExpired, dynamicQuery, groupedQuery, message, fragment, interpreted}
 }
