@@ -8,10 +8,7 @@ import (
 const FindByIDQuery = `SELECT id, name, email FROM public.users WHERE id = $1;`
 
 var ActiveUsersQuery = `
-    SELECT id, name, email
-    FROM public.users
-    WHERE deleted_at IS NULL
-    ORDER BY id;
+    SELECT id, name, email FROM public.users WHERE deleted_at IS NULL ORDER BY id;
 `
 
 type Repository struct {
@@ -25,7 +22,11 @@ func (repository Repository) FindByID(ctx context.Context, id int64) (*sql.Rows,
 	_ = auditQuery
 
 	return repository.DB.QueryContext(ctx, `
-        SELECT id, name, email FROM public.users WHERE id = $1 AND deleted_at IS NULL;
+        SELECT id, name, email
+        FROM public.users
+        WHERE
+            id = $1
+            AND deleted_at IS NULL;
     `, id)
 }
 
