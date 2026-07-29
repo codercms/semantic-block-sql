@@ -1,6 +1,7 @@
 mod diagnostics;
 mod layout_ir;
 mod ownership;
+mod procedural;
 mod semantic_block;
 mod structure;
 mod tokens;
@@ -211,6 +212,23 @@ pub enum FormatDiagnostic {
 /// Formats one or more complete PostgreSQL statements without touching files.
 pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql, FormatDiagnostic> {
     options.validate()?;
+    if procedural::is_routine(source)? {
+        let mut formatted = procedural::format_routine(source, options)?;
+        let second = procedural::format_routine(&formatted.output, options)?;
+        if second.output != formatted.output {
+            return Err(FormatDiagnostic::NotIdempotent);
+        }
+        let warnings = semantic_block::validate_hard_width(&formatted.output, options)?;
+        formatted.warnings = warnings;
+        formatted.diagnostics = diagnostics::style_diagnostics(source, &formatted.output, options)?;
+        formatted
+            .diagnostics
+            .extend(diagnostics::warning_diagnostics(
+                source,
+                &formatted.warnings,
+            ));
+        return Ok(formatted);
+    }
     let document = validation::parse_supported_postgresql(source)?;
 
     let output = match options.style {
