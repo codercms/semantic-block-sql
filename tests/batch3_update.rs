@@ -56,14 +56,33 @@ fn update_set_comments_remain_attached() {
 }
 
 #[test]
+fn update_supports_expanded_sources_and_subqueries() {
+    assert_format(
+        "UPDATE items SET title = source.title FROM ROWS FROM (jsonb_each_text(payload)) source;",
+        "UPDATE items
+SET
+    title = source.title
+FROM ROWS FROM (jsonb_each_text(payload)) source;",
+    );
+    assert_format(
+        "UPDATE items SET title = source.title FROM staging.items source TABLESAMPLE SYSTEM (10);",
+        "UPDATE items
+SET
+    title = source.title
+FROM staging.items source TABLESAMPLE SYSTEM (10);",
+    );
+    assert_format(
+        "UPDATE items SET title = (SELECT title FROM staging.items LIMIT 1);",
+        "UPDATE items SET title = (SELECT title FROM staging.items LIMIT 1);",
+    );
+}
+
+#[test]
 fn unsupported_update_variants_remain_unchanged() {
     for source in [
         "UPDATE ONLY items SET title = 'x';",
         "UPDATE items SET (title, updated_at) = ('x', NOW());",
         "UPDATE items SET payload['title'] = 'x';",
-        "UPDATE items SET title = source.title FROM ROWS FROM (jsonb_each_text(payload)) source;",
-        "UPDATE items SET title = source.title FROM staging.items source TABLESAMPLE SYSTEM (10);",
-        "UPDATE items SET title = (SELECT title FROM staging.items LIMIT 1);",
     ] {
         let result = format_sql_result(source, &FormatOptions::default());
         assert_eq!(

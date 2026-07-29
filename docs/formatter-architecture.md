@@ -474,3 +474,29 @@ The next syntax extensions are:
 3. routine and PL/pgSQL body ownership;
 4. PostgreSQL arrays, JSON expressions, and additional expression families;
 5. protected template ranges, property tests, and fuzzing.
+
+
+## Expanded statement, relation, table, and procedural capabilities
+
+The expanded coverage tranche preserves the existing one-way pipeline:
+PostgreSQL AST validation produces closed capability records, token binding owns
+source ranges, planners operate only on those records, and the writer emits the
+original token stream in order.
+
+- Common migration statements use `StatementSpec::Utility(UtilityStatementKind)`.
+  This is a closed enum, not a generic "parsed utility" escape hatch. Each
+  accepted `DropStmt`, `TruncateStmt`, grant, comment, type/domain/sequence,
+  trigger, or policy shape is validated before rendering.
+- Query capability records now carry `INTO`, row-lock, data-modifying CTE,
+  `SEARCH` / `CYCLE`, and nested-subquery facts. The binder distinguishes CTE
+  root statements from subqueries nested inside those statements.
+- Relation items own `ROWS FROM`, sampling, aliases with column/definition
+  lists, and derived `WITH` queries. Table DDL capability records own partition,
+  inheritance, typed-table, storage, access-method, tablespace, and on-commit
+  shapes.
+- `procedural.rs` remains a separate nested-language boundary. It validates the
+  `parse_plpgsql` node allowlist and uses explicit indentation frames for blocks,
+  loops, CASE branches, exception handlers, and cursor/dynamic-execution forms.
+
+No new dependency or runtime registry was introduced. Unsupported neighbors
+continue to fail before token planning and preserve complete project atomicity.

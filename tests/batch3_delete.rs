@@ -46,14 +46,33 @@ fn delete_comments_remain_attached() {
 }
 
 #[test]
+fn delete_supports_expanded_sources_and_subqueries() {
+    assert_format(
+        "DELETE FROM items USING staging.items source TABLESAMPLE SYSTEM (10) WHERE items.id = source.id;",
+        "DELETE FROM items
+USING staging.items source TABLESAMPLE SYSTEM (10)
+WHERE items.id = source.id;",
+    );
+    assert_format(
+        "DELETE FROM items USING ROWS FROM (jsonb_each_text(payload)) source;",
+        "DELETE FROM items
+USING ROWS FROM (jsonb_each_text(payload)) source;",
+    );
+    assert_format(
+        "DELETE FROM items WHERE id IN (SELECT id FROM staging.items);",
+        "DELETE FROM items WHERE id IN (SELECT id FROM staging.items);",
+    );
+    assert_format(
+        "DELETE FROM items RETURNING (SELECT 1);",
+        "DELETE FROM items RETURNING (SELECT 1);",
+    );
+}
+
+#[test]
 fn unsupported_delete_variants_remain_unchanged() {
     for source in [
         "DELETE FROM ONLY items WHERE id = 1;",
         "DELETE FROM items USING ONLY staging.items source WHERE items.id = source.id;",
-        "DELETE FROM items USING staging.items source TABLESAMPLE SYSTEM (10) WHERE items.id = source.id;",
-        "DELETE FROM items USING ROWS FROM (jsonb_each_text(payload)) source;",
-        "DELETE FROM items WHERE id IN (SELECT id FROM staging.items);",
-        "DELETE FROM items RETURNING (SELECT 1);",
     ] {
         let result = format_sql_result(source, &FormatOptions::default());
         assert_eq!(

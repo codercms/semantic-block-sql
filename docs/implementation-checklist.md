@@ -602,6 +602,40 @@ Architecture-hardening evidence:
 - The complete gate passes formatting, Clippy with warnings denied, all 98
   tests, Rustdoc, and `git diff --check` in the packaged offline environment.
 
+## Expanded PostgreSQL coverage tranche
+
+- [x] Common migration utilities: DROP, TRUNCATE, GRANT/REVOKE, COMMENT ON,
+  enum/composite types, domains, sequences, triggers, and policies.
+- [x] SELECT INTO, all row-lock strengths/options, data-modifying CTEs,
+  SEARCH/CYCLE, and reviewed DML subqueries.
+- [x] ROWS FROM, TABLESAMPLE, alias column/definition lists, and derived WITH
+  relation sources.
+- [x] Partitioned/inherited/typed CREATE TABLE forms and reviewed storage,
+  access-method, tablespace, on-commit, and partition-bound clauses.
+- [x] PL/pgSQL loops, FOREACH, procedural CASE, dynamic EXECUTE, cursor control,
+  and reviewed EXIT/CONTINUE forms.
+- [x] Realistic Go raw-string integration and whole-project atomic-failure
+  coverage.
+- [x] Golden output, PostgreSQL equivalence, idempotence, comments/protected
+  literals, diagnostics, and fail-closed neighbors for every added family.
+
+Evidence:
+
+- `tests/batch9_migrations.rs` and `tests/fixtures/batch9/` cover common migration
+  statements and adjacent unsupported shapes;
+- `tests/batch10_query_dml.rs` covers INTO, locks, CTE extensions, and subqueries;
+- `tests/batch11_relations_tables.rs` covers advanced relation sources and table
+  or partition DDL;
+- `tests/batch12_plpgsql_control.rs` and `tests/fixtures/batch12/` cover procedural
+  control flow, dynamic execution, cursors, comments, and protected strings;
+- `tests/go_project_integration.rs` compiles representative migration/query/
+  procedural raw strings with `gofmt` and offline `go test ./...`, and proves an
+  unsupported procedural node prevents every project write;
+- the durable implementation record is
+  `docs/expanded-postgresql-coverage-checklist.md`.
+- the complete offline gate passes formatting, Clippy with warnings denied, all
+  170 tests, Rustdoc, and `git diff --check`.
+
 ## Batch 7 — Performance and release polish
 
 - [ ] Establish correctness-preserving benchmarks.

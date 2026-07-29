@@ -1,6 +1,6 @@
 # Expanded PostgreSQL coverage — durable checklist
 
-Status: **Batch X4 complete; Batch X5 in progress**
+Status: **Implementation complete; publication pending**
 
 This workstream is one PR-sized batch, split into durable internal checkpoints.
 Every checked implementation item requires fixtures, parser-backed capability
@@ -84,16 +84,32 @@ batch self-review.
 
 ## Batch X5 — Integration, documentation, and full gate
 
-- [ ] Add representative successful Go raw-string migration/query/procedural
+- [x] Add representative successful Go raw-string migration/query/procedural
   fixtures and compile with `gofmt` plus offline `go test ./...`.
-- [ ] Add project-wide atomic-failure fixtures for unsupported neighboring syntax.
-- [ ] Update README, formatter design/architecture, extension guide, and main
+- [x] Add project-wide atomic-failure fixtures for unsupported neighboring syntax.
+- [x] Update README, formatter design/architecture, extension guide, and main
   implementation checklist.
-- [ ] Run `cargo fmt --all -- --check`.
-- [ ] Run `cargo clippy --locked --all-targets -- -D warnings`.
-- [ ] Run `cargo test --locked --all-targets`.
-- [ ] Run `cargo doc --locked --no-deps`.
-- [ ] Run `git diff --check`.
-- [ ] Perform final semantic, ownership, comments, diagnostics, atomicity,
+- [x] Run `cargo fmt --all -- --check`.
+- [x] Run `cargo clippy --locked --all-targets -- -D warnings`.
+- [x] Run `cargo test --locked --all-targets`.
+- [x] Run `cargo doc --locked --no-deps`.
+- [x] Run `git diff --check`.
+- [x] Perform final semantic, ownership, comments, diagnostics, atomicity,
   dependency, and dead-code review.
 - [ ] Commit final checkpoint, publish branch, and open one draft PR to `main`.
+
+
+Final validation on 2026-07-29:
+
+- Rust formatting passed.
+- Clippy passed for all targets with warnings denied.
+- All 170 Rust tests passed, including realistic Go formatting, `gofmt`, and
+  offline `go test ./...`.
+- Rust documentation built successfully.
+- `git diff --check` passed.
+- Final review found no dependency additions, permissive parser fallback,
+  document-wide statement discovery, protected-token rewriting, or partial-write
+  path. Stale negative fixtures were converted to positive equivalence tests only
+  for syntax intentionally added by this tranche; fail-closed siblings remain.
+- `JSON_TABLE` remains unsupported and retains its specific diagnostic after the
+  relation-source expansion.

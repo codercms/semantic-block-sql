@@ -1271,6 +1271,7 @@ fn validate_relation_source(
             validate_join_source(join, result, feature)?;
             Ok(RelationItemSpec::Join)
         }
+        Some(NodeEnum::JsonTable(_)) => Err("JSON_TABLE expression"),
         _ => Err(feature),
     }
 }

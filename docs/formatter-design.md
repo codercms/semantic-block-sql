@@ -687,7 +687,7 @@ configuration errors.
 
 ## Open decisions
 
-- broader Batch 3 statement layout coverage;
+- additional fixture-backed PostgreSQL families selected from real project diagnostics;
 - Windows/macOS atomic replacement verification beyond the Unix integration
   gate;
 - machine-readable diagnostic output for editor integration;
@@ -696,6 +696,28 @@ configuration errors.
   already bounded by `--jobs`).
 
 No open decision authorizes bypassing the safety invariants.
+
+## Expanded PostgreSQL capability boundary
+
+The ordinary statement validator now admits a closed set of common migration
+utilities in addition to the layout-bearing query/DML/DDL families. `DROP`,
+`TRUNCATE`, object and role `GRANT` / `REVOKE`, `COMMENT ON`, enum/composite
+`CREATE TYPE`, domains, sequences, triggers, and policies are represented by
+`UtilityStatementKind`. The validator checks the exact PostgreSQL AST shape
+before the shared token renderer may normalize casing and spacing; unknown
+object kinds or option combinations still return `syntax.unsupported`.
+
+Query ownership covers `SELECT INTO`, every row-lock strength and wait policy,
+data-modifying CTEs, `SEARCH` / `CYCLE`, and reviewed scalar/predicate subqueries
+inside UPDATE, DELETE, and MERGE expressions. Relation-source capabilities cover
+`ROWS FROM`, `TABLESAMPLE` / `REPEATABLE`, alias column or definition lists, and
+derived queries containing `WITH`. These are AST capabilities consumed by the
+existing query and relation binders, not document-wide keyword scans.
+
+`CREATE TABLE` validation now owns inheritance, typed tables, access methods,
+storage parameters, tablespaces, on-commit modes, partition keys, `PARTITION
+OF`, and range/list/hash/default partition bounds. Adjacent syntax such as
+`CREATE TABLE AS`, `LIKE`, and `XMLTABLE` remains explicitly unsupported.
 
 ## Parser-backed PL/pgSQL routine bodies
 
@@ -706,13 +728,15 @@ parser; the body is independently parsed through the pinned
 recognize a fixture-backed procedural node set.
 
 The supported subset covers declarations, nested blocks, ordinary SQL statements,
-assignments, `PERFORM`, returns, `IF`/`ELSIF`/`ELSE`, raises, diagnostics, and
-exception handlers. Embedded SQL reuses the normal formatter facade. The output
-is reparsed by both parsers and normalized expression/query trees are compared
-before the result is accepted.
+assignments, `PERFORM`, returns, `IF`/`ELSIF`/`ELSE`, raises, diagnostics,
+exception handlers, basic/WHILE/integer/query/cursor `FOR` loops, `FOREACH`,
+searched and simple procedural `CASE`, dynamic `EXECUTE`, cursor declaration and
+control, and reviewed labeled or unlabeled `EXIT` / `CONTINUE` forms. Embedded
+SQL reuses the normal formatter facade.
 
-Dollar-quote tags are preserved exactly. Body-root constructs (`DECLARE`,
-`BEGIN`, `EXCEPTION`, and `END`) remain at SQL root indentation regardless of the
-outer host language. Unsupported procedural nodes such as loops, dynamic
-`EXECUTE`, cursor control, transaction control, procedural `CASE`, and labels
-return `syntax.unsupported` with unchanged source.
+Dollar-quote tags and protected literals are preserved exactly. A frame-based
+body renderer owns indentation for nested blocks and branches. Output is reparsed
+by both PostgreSQL parsers; normalized procedural expression/query trees and
+idempotence are checked before accepting the result. Unreviewed nodes such as
+`ASSERT`, `RETURN QUERY`, and transaction control return `syntax.unsupported`
+with unchanged source.

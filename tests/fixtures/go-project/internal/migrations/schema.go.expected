@@ -1,0 +1,38 @@
+package migrations
+
+const Schema = `
+CREATE TYPE public.event_status AS ENUM ('pending', 'ready', 'failed');
+CREATE TABLE public.events (
+    id bigint,
+    status public.event_status,
+    created_at timestamptz
+)
+PARTITION BY RANGE (created_at)
+USING heap
+WITH (fillfactor = 80);
+CREATE TABLE public.events_2026 PARTITION OF public.events
+FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+GRANT SELECT, INSERT, UPDATE ON TABLE public.events TO app_user;
+`
+
+const ClaimQuery = `
+WITH claimed AS (
+    UPDATE public.events SET status = 'ready' WHERE id IN (SELECT id FROM public.events WHERE status = 'pending' FOR UPDATE SKIP LOCKED) RETURNING id, status
+)
+SELECT id, status
+FROM claimed
+ORDER BY id;
+`
+
+const Maintenance = `
+DO $maintenance$
+DECLARE
+    query_text text := 'update public.events set status=$1 where id=$2';
+    event_id bigint;
+BEGIN
+    FOR event_id IN SELECT id FROM public.events WHERE status = 'pending' LOOP
+        EXECUTE query_text USING 'ready', event_id;
+    END LOOP;
+END;
+$maintenance$;
+`
