@@ -1,6 +1,6 @@
 # PostgreSQL expression coverage — durable checklist
 
-Status: **Batch E2 complete; Batch E3 pending**
+Status: **Implementation complete; final checkpoint pending**
 
 This workstream completes the remaining Batch 3 scalar-expression tranche after
 Go host-language integration hardening. Update this file before every checkpoint
@@ -113,15 +113,27 @@ Batch E2 evidence:
 
 ## Batch E3 — Reconciliation and final gate
 
-- [ ] Mark casts, arrays, and JSON expressions complete in
+- [x] Mark casts, arrays, and JSON expressions complete in
   `docs/implementation-checklist.md`.
-- [ ] Document the expression punctuation and support boundary in formatter docs.
-- [ ] Run `cargo fmt --all -- --check`.
-- [ ] Run `cargo clippy --locked --all-targets -- -D warnings`.
-- [ ] Run `cargo test --locked --all-targets`.
-- [ ] Run `cargo doc --locked --no-deps`.
-- [ ] Run `git diff --check`.
-- [ ] Perform final semantic, architecture, idempotence, comment, diagnostics,
+- [x] Document the expression punctuation and support boundary in formatter docs.
+- [x] Run `cargo fmt --all -- --check`.
+- [x] Run `cargo clippy --locked --all-targets -- -D warnings`.
+- [x] Run `cargo test --locked --all-targets`.
+- [x] Run `cargo doc --locked --no-deps`.
+- [x] Run `git diff --check`.
+- [x] Perform final semantic, architecture, idempotence, comment, diagnostics,
   dependency, and dead-code self-review.
-- [ ] Commit the final checkpoint.
+- [x] Commit the final checkpoint.
 - [ ] Push the branch or create and verify a portable git bundle.
+
+Final validation on 2026-07-29:
+
+- Rust formatting passed.
+- Clippy passed for every target with warnings denied.
+- All 146 Rust tests passed, including the fixture-level `gofmt` and offline
+  `go test ./...` integration suite.
+- Rust documentation built successfully.
+- `git diff --check` passed.
+- Final review found no dependency changes, new statement ownership variants,
+  literal rewriting, comment relocation, broad identifier casing, or accidental
+  support for unreviewed SQL/JSON roots.
