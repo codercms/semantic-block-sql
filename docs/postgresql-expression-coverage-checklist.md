@@ -1,6 +1,6 @@
 # PostgreSQL expression coverage — durable checklist
 
-Status: **Batch E0 complete; Batch E1 pending**
+Status: **Batch E1 complete; Batch E2 pending**
 
 This workstream completes the remaining Batch 3 scalar-expression tranche after
 Go host-language integration hardening. Update this file before every checkpoint
@@ -50,18 +50,33 @@ require a new statement or clause ownership variant.
 
 ## Batch E1 — Cast and array rendering
 
-- [ ] Add the smallest failing golden fixture for square-bracket spacing.
-- [ ] Render `ARRAY[...]`, `expr[...]`, chained subscripts, and array type suffixes
+- [x] Add the smallest failing golden fixture for square-bracket spacing.
+- [x] Render `ARRAY[...]`, `expr[...]`, chained subscripts, and array type suffixes
   without a space before `[`.
-- [ ] Render slice bounds without spaces around `:` including omitted bounds.
-- [ ] Cover `::`, `CAST(...)`, type modifiers, schema-qualified types, and array
+- [x] Render slice bounds without spaces around `:` including omitted bounds.
+- [x] Cover `::`, `CAST(...)`, type modifiers, schema-qualified types, and array
   types without changing literal or identifier bytes.
-- [ ] Cover one-dimensional and multidimensional constructors, subscripts, and
+- [x] Cover one-dimensional and multidimensional constructors, subscripts, and
   slices.
-- [ ] Verify comments, authored list groups, semantic equivalence, idempotence,
+- [x] Verify comments, authored list groups, semantic equivalence, idempotence,
   clean `check`, and hard-width behavior.
-- [ ] Run focused tests and Batch E1 self-review.
-- [ ] Commit Batch E1.
+- [x] Run focused tests and Batch E1 self-review.
+- [x] Commit Batch E1.
+
+Batch E1 evidence:
+
+- `tests/fixtures/batch7/casts-arrays.*.sql` covers `::`, `CAST`, qualified
+  custom types, one- and multidimensional array types and constructors, chained
+  subscripts, every omitted-bound slice form, and DDL array suffixes.
+- `tests/batch7_expressions.rs` requires exact golden output, semantic
+  equivalence, idempotence, clean `check`, comment preservation, and bounded
+  narrow-width output.
+- Square brackets are tight punctuation. Slice colons are recognized only at the
+  active square-bracket level, so a SQL/JSON constructor colon nested inside an
+  array element keeps ordinary grammar spacing.
+- The cast-type classifier follows only an explicit `::`, a `CAST(... AS ...)`
+  marker, or a qualified-name dot chain. An implicit alias after a cast is not
+  lowercased as though it were another type component.
 
 ## Batch E2 — JSON operators and fail-closed SQL/JSON boundary
 

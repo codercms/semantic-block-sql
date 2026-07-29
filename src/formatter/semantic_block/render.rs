@@ -40,7 +40,7 @@ pub(in crate::formatter) fn render_token(
     }
     if token.kind == Token::Ident
         && !token.text.starts_with('"')
-        && previous.is_some_and(|previous| previous.kind == Token::Typecast)
+        && is_cast_type_identifier(tokens, index)
     {
         return token.text.to_lowercase();
     }
@@ -381,6 +381,85 @@ pub(in crate::formatter) fn is_type_keyword(kind: Token) -> bool {
     )
 }
 
+fn is_cast_type_identifier(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    let Some(previous) = index.checked_sub(1) else {
+        return false;
+    };
+
+    match tokens[previous].kind {
+        Token::Typecast => true,
+        Token::As => as_belongs_to_cast(tokens, previous),
+        Token::Ascii46 => previous
+            .checked_sub(1)
+            .is_some_and(|component| is_cast_type_name_component(tokens, component)),
+        _ => false,
+    }
+}
+
+fn is_cast_type_name_component(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if tokens[index].kind != Token::Ident {
+        return false;
+    }
+
+    let Some(previous) = index.checked_sub(1) else {
+        return false;
+    };
+    match tokens[previous].kind {
+        Token::Typecast => true,
+        Token::As => as_belongs_to_cast(tokens, previous),
+        Token::Ascii46 => previous
+            .checked_sub(1)
+            .is_some_and(|component| is_cast_type_name_component(tokens, component)),
+        _ => false,
+    }
+}
+
+fn as_belongs_to_cast(tokens: &[SqlToken<'_>], as_index: usize) -> bool {
+    let mut parentheses = 0usize;
+
+    for cursor in (0..as_index).rev() {
+        match tokens[cursor].kind {
+            Token::Ascii41 => parentheses += 1,
+            Token::Ascii40 if parentheses > 0 => parentheses -= 1,
+            Token::Ascii40 => {
+                return cursor
+                    .checked_sub(1)
+                    .is_some_and(|previous| tokens[previous].kind == Token::Cast);
+            }
+            Token::Ascii59 if parentheses == 0 => return false,
+            _ => {}
+        }
+    }
+
+    false
+}
+
+fn is_array_slice_colon(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if tokens
+        .get(index)
+        .is_none_or(|token| token.kind != Token::Ascii58)
+    {
+        return false;
+    }
+
+    let mut parentheses = 0usize;
+    let mut brackets = 0usize;
+    for token in tokens[..index].iter().rev() {
+        match token.kind {
+            Token::Ascii41 => parentheses += 1,
+            Token::Ascii93 => brackets += 1,
+            Token::Ascii40 if parentheses > 0 => parentheses -= 1,
+            Token::Ascii91 if brackets > 0 => brackets -= 1,
+            Token::Ascii40 => return false,
+            Token::Ascii91 => return parentheses == 0,
+            Token::Ascii59 if parentheses == 0 && brackets == 0 => return false,
+            _ => {}
+        }
+    }
+
+    false
+}
+
 fn is_insert_target_list_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
     if tokens
         .get(open)
@@ -420,12 +499,18 @@ pub(super) fn needs_space(
             | Token::Ascii59
             | Token::Ascii41
             | Token::Ascii93
+            | Token::Ascii91
             | Token::Ascii46
             | Token::Typecast
     ) || matches!(
         previous.kind,
         Token::Ascii40 | Token::Ascii91 | Token::Ascii46 | Token::Typecast
     ) {
+        return false;
+    }
+    if (current.kind == Token::Ascii58 && is_array_slice_colon(tokens, current_index))
+        || (previous.kind == Token::Ascii58 && is_array_slice_colon(tokens, previous_index))
+    {
         return false;
     }
     if current.kind == Token::Ascii40 && is_insert_target_list_open(tokens, current_index) {
