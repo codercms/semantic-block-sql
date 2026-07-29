@@ -1,6 +1,6 @@
 # Expanded PostgreSQL coverage — durable checklist
 
-Status: **Batch X0 complete; implementation pending**
+Status: **Batch X0 complete; Batch X1 in progress**
 
 This workstream is one PR-sized batch, split into durable internal checkpoints.
 Every checked implementation item requires fixtures, parser-backed capability
@@ -28,8 +28,8 @@ batch self-review.
 - [x] Read repository instructions, extension guide, architecture, and current
   formatter boundaries.
 - [x] Record the complete requested scope and checkpoint order.
-- [ ] Characterize PostgreSQL AST and scanner shapes for every requested family.
-- [ ] Commit X0 before behavior changes.
+- [x] Characterize PostgreSQL AST and scanner shapes for every requested family.
+- [x] Commit X0 before behavior changes.
 
 ## Batch X1 — Common migration SQL
 
