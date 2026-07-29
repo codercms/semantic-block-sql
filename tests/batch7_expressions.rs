@@ -66,3 +66,20 @@ FROM items;";
 
     assert_format(source, expected, &options);
 }
+
+#[test]
+fn formats_postgresql_json_operators_across_owned_statements() {
+    assert_format(
+        include_str!("fixtures/batch7/json-operators.input.sql"),
+        include_str!("fixtures/batch7/json-operators.expected.sql"),
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn preserves_simple_fixture_backed_sql_json_constructors() {
+    let source = "select json_object('a': value), json_array(value);";
+    let expected = "SELECT json_object('a' : value), json_array(value);";
+
+    assert_format(source, expected, &FormatOptions::default());
+}

@@ -1,6 +1,6 @@
 # PostgreSQL expression coverage — durable checklist
 
-Status: **Batch E1 complete; Batch E2 pending**
+Status: **Batch E2 complete; Batch E3 pending**
 
 This workstream completes the remaining Batch 3 scalar-expression tranche after
 Go host-language integration hardening. Update this file before every checkpoint
@@ -18,8 +18,10 @@ in `AGENTS.md`.
 - `ARRAY (SELECT ...)` keeps the existing grammar-parenthesis spacing; this batch
   does not change nested-query ownership.
 - JSON operators are binary operators and therefore keep one space on both sides.
-- SQL/JSON constructor/query families (`JSON_OBJECT`, `JSON_QUERY`, `JSON_TABLE`,
-  and related protobuf nodes) remain unsupported until separately fixture-backed.
+- Simple `JSON_OBJECT(key: value)` and `JSON_ARRAY(value)` forms remain supported
+  because they already have acceptance coverage. Advanced constructor options and
+  SQL/JSON query, aggregate, parse, scalar, serialization, predicate, and table
+  families remain unsupported until separately fixture-backed.
 - No new dependency is permitted for this tranche.
 
 ## AST characterization
@@ -80,17 +82,31 @@ Batch E1 evidence:
 
 ## Batch E2 — JSON operators and fail-closed SQL/JSON boundary
 
-- [ ] Add golden fixtures for `->`, `->>`, `#>`, `#>>`, `@>`, `<@`, `?`, `?|`,
+- [x] Add golden fixtures for `->`, `->>`, `#>`, `#>>`, `@>`, `<@`, `?`, `?|`,
   `?&`, `#-`, and `||` in realistic expressions.
-- [ ] Verify JSON operators use binary-operator spacing and preserve JSON/path
+- [x] Verify JSON operators use binary-operator spacing and preserve JSON/path
   literal bytes exactly.
-- [ ] Cover JSON expressions in SELECT, predicates, assignments, VALUES, and
+- [x] Cover JSON expressions in SELECT, predicates, assignments, VALUES, and
   RETURNING through existing statement ownership.
-- [ ] Explicitly reject unreviewed SQL/JSON protobuf families with
+- [x] Explicitly reject unreviewed SQL/JSON protobuf families with
   `syntax.unsupported` and unchanged source.
-- [ ] Add neighboring unsupported fixtures for SQL/JSON constructors/query forms.
-- [ ] Run focused tests and Batch E2 self-review.
-- [ ] Commit Batch E2.
+- [x] Add neighboring unsupported fixtures for SQL/JSON constructors/query forms.
+- [x] Run focused tests and Batch E2 self-review.
+- [x] Commit Batch E2.
+
+Batch E2 evidence:
+
+- `tests/fixtures/batch7/json-operators.*.sql` covers every reviewed legacy
+  PostgreSQL JSON operator in SELECT expressions, predicates, UPDATE assignments,
+  INSERT VALUES, and RETURNING expressions. Exact goldens preserve JSON and path
+  literal bytes.
+- Simple `JSON_OBJECT` and `JSON_ARRAY` constructors remain fixture-backed and
+  supported. Their advanced output/null/unique options are rejected explicitly.
+- `tests/batch7_json_boundary.rs` requires unchanged fail-safe results and
+  `syntax.unsupported` for SQL/JSON query/value/exists, serialization, scalar,
+  parse, `IS JSON`, aggregate, query-constructor, and `JSON_TABLE` roots.
+- The classifier rejects root expression families, not shared helper nodes such as
+  `JsonValueExpr`, so allowed simple constructors are not rejected indirectly.
 
 ## Batch E3 — Reconciliation and final gate
 
