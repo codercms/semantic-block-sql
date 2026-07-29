@@ -184,12 +184,24 @@ Batch 2 evidence:
 - [x] Multi-action `ALTER TABLE` with syntactic action groups.
 - [x] `CREATE VIEW` and `CREATE MATERIALIZED VIEW` bounded subsets.
 - [x] MERGE with multiple, joined, derived, and function sources.
-- [ ] PL/pgSQL blocks.
-- [ ] Dollar quoting.
+- [x] Bounded parser-backed PL/pgSQL blocks.
+- [x] Dollar-quoted PL/pgSQL bodies with exact tag preservation.
 - [x] Comments for every currently claimed Batch 3 statement family.
 - [x] Golden, parse, idempotence, and safety fixtures for every checked item.
-- [ ] Batch 3 full tests and self-review.
-- [ ] Dead-code removal, docs, checklist, and commit.
+- [x] Batch 3 full tests and self-review.
+- [x] Dead-code removal, docs, checklist, and commit.
+
+PL/pgSQL tranche evidence:
+
+- `src/formatter/procedural.rs` keeps procedural parsing separate from ordinary
+  statement ownership and uses both PostgreSQL parsers as safety gates;
+- `tests/batch8_plpgsql.rs` covers DO, function, procedure, declarations, SQL,
+  IF/ELSE, multiple exception handlers, comments, custom dollar tags,
+  idempotence, and fail-closed neighboring nodes;
+- `tests/go_project_integration.rs` proves Go-host formatting, CRLF preservation,
+  offline Go compilation, and whole-project atomicity for unsupported routines;
+- compact single-line bodies and unreviewed procedural node families remain
+  explicitly unsupported rather than partially rewritten.
 
 Expression tranche evidence:
 
@@ -607,7 +619,7 @@ Architecture-hardening evidence:
 - [ ] Document shell and CI integration.
 - [ ] Document stdin/editor integration.
 - [ ] Batch 7 full tests, benchmarks, and self-review.
-- [ ] Dead-code removal, docs, checklist, and commit.
+- [x] Dead-code removal, docs, checklist, and commit.
 
 PR #7 Git-aware CLI hardening evidence:
 

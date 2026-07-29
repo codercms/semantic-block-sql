@@ -61,3 +61,13 @@ func FindByID() string {
 func mustPrepare(query string) string {
 	return query
 }
+
+const normalizeUserTitle = `
+create or replace procedure public.normalize_user_title(user_id bigint)
+language plpgsql
+as $function$
+begin
+update public.users set title=trim(title) where id=user_id;
+end;
+$function$;
+`
