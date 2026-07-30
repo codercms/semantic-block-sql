@@ -627,7 +627,11 @@ Evidence:
   it also proves that leading statement comments remain attached while WITH
   ownership is bound from the first non-comment syntax token, and that nested
   UPDATE ownership plus predicate-subquery indentation remain canonical inside
-  a data-modifying CTE;
+  a data-modifying CTE, while short `SET` and `RETURNING` lists remain compact
+  when surrounding statement layout expands;
+- `tests/batch3_update.rs` proves long ungrouped UPDATE lists split at safe item
+  boundaries while authored `SET` and `RETURNING` groups remain intact when
+  each group fits the hard limit;
 - `tests/batch11_relations_tables.rs` covers advanced relation sources and table
   or partition DDL;
 - `tests/batch12_plpgsql_control.rs` and `tests/fixtures/batch12/` cover procedural

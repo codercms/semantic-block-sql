@@ -40,7 +40,7 @@ pub(super) fn plan_update_statements(
             update.set,
             set_end,
             update.span.base_depth,
-            true,
+            false,
             plan,
         );
 
@@ -58,7 +58,7 @@ pub(super) fn plan_update_statements(
                 returning,
                 update.span.end,
                 update.span.base_depth,
-                width_driven,
+                false,
                 plan,
             );
         }

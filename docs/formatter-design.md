@@ -437,12 +437,13 @@ predicate remains owned by the update action. SELECT-backed WITH clauses reuse
 the same `WithBlock` for SELECT, INSERT, UPDATE, DELETE, and MERGE.
 
 The UPDATE planner supports a target relation, simple named assignments,
-optional one-relation `FROM`, `WHERE`, and `RETURNING`. A short single-assignment
-statement remains compact. Once authored layout, width, `FROM`, or a complex
-predicate expands the statement, `SET` owns one assignment per line and the
-remaining clauses start at statement scope. `WITH`, `ONLY`, multi-column or
-subscripted assignment targets, multiple or joined FROM sources, and subqueries
-remain fail-safe unsupported shapes.
+optional one-relation `FROM`, `WHERE`, and `RETURNING`. Statement-level
+expansion separates UPDATE clauses, but does not force locally compact `SET` or
+`RETURNING` lists to expand. Each list uses its own authored groups, complexity,
+and width: authored groups remain stable while they fit the hard limit, and a
+list that requires expansion breaks only at safe item boundaries. `WITH`,
+`ONLY`, multi-column or subscripted assignment targets, multiple or joined FROM
+sources, and subqueries remain fail-safe unsupported shapes.
 
 The MERGE planner is a separate exhaustive statement variant because its branch
 ownership is grammar-specific. `MergeBlock` owns USING/ON, ordered WHEN

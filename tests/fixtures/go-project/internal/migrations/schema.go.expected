@@ -18,12 +18,9 @@ GRANT SELECT, INSERT, UPDATE ON TABLE public.events TO app_user;
 const ClaimQuery = `
 WITH claimed AS (
     UPDATE public.events
-    SET
-        status = 'ready'
+    SET status = 'ready'
     WHERE id IN (SELECT id FROM public.events WHERE status = 'pending' FOR UPDATE SKIP LOCKED)
-    RETURNING
-        id,
-        status
+    RETURNING id, status
 )
 SELECT id, status
 FROM claimed
