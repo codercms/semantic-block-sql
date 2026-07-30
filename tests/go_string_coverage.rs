@@ -1,4 +1,5 @@
 use semblock::config::{Config, GoMultilineStringStyle};
+use semblock::host::go::format_go_source;
 use semblock::source::{Language, format_source};
 use semblock::{FormatOptions, Severity, UnsupportedPolicy};
 
@@ -223,5 +224,49 @@ const malformed = "select from;"
             &Config::default().go,
         )
         .is_err()
+    );
+}
+
+#[test]
+fn reports_real_corpus_candidate_outcomes() {
+    let source = r#"package sample
+
+func queries(columns string) {
+    valid := "select id,name from users where active=true and id>0;"
+    malformed := "select from;"
+    unsupported := "select * from json_table(payload, '$[*]' columns (value text path '$.value')) item;"
+    dynamic := "SELECT " + columns + " FROM users"
+    message := "select a plan from the menu"
+    _, _, _, _, _ = valid, malformed, unsupported, dynamic, message
+}
+"#;
+    let formatted = format_go_source(source, &FormatOptions::default(), &Config::default().go)
+        .expect("format corpus sample");
+
+    assert!(
+        formatted.stats.discovered_expressions >= 4,
+        "{:?}",
+        formatted.stats
+    );
+    assert!(
+        formatted.stats.eligible_candidates >= 3,
+        "{:?}",
+        formatted.stats
+    );
+    assert!(
+        formatted.stats.formatted_expressions >= 1,
+        "{:?}",
+        formatted.stats
+    );
+    assert_eq!(formatted.stats.auto_parse_skips, 1, "{:?}", formatted.stats);
+    assert_eq!(
+        formatted.stats.unsupported_expressions, 1,
+        "{:?}",
+        formatted.stats
+    );
+    assert_eq!(
+        formatted.stats.dynamic_expressions, 1,
+        "{:?}",
+        formatted.stats
     );
 }

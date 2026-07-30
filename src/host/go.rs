@@ -12,11 +12,23 @@ use crate::{
     UnsupportedPolicy, format_sql,
 };
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GoFormatStats {
+    pub discovered_expressions: usize,
+    pub eligible_candidates: usize,
+    pub formatted_expressions: usize,
+    pub unchanged_sql_expressions: usize,
+    pub unsupported_expressions: usize,
+    pub auto_parse_skips: usize,
+    pub dynamic_expressions: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormattedGo {
     pub output: String,
     pub warnings: Vec<FormatWarning>,
     pub diagnostics: Vec<Diagnostic>,
+    pub stats: GoFormatStats,
 }
 
 #[derive(Debug, Error)]
@@ -168,6 +180,11 @@ pub fn format_go_source(
     let mut dynamic = Vec::new();
     let mut comments = Vec::new();
     collect_source_nodes(root, source, &mut expressions, &mut dynamic, &mut comments);
+    let mut stats = GoFormatStats {
+        discovered_expressions: expressions.len(),
+        dynamic_expressions: dynamic.len(),
+        ..GoFormatStats::default()
+    };
 
     let directives = comments
         .iter()
@@ -184,6 +201,7 @@ pub fn format_go_source(
             output: source.into(),
             warnings: Vec::new(),
             diagnostics: Vec::new(),
+            stats,
         });
     }
     if let Some(directive) = directives
@@ -257,6 +275,7 @@ pub fn format_go_source(
         }
 
         if explicit {
+            stats.unsupported_expressions += owner.dynamic_ranges.len();
             diagnostics.extend(owner.dynamic_ranges.iter().map(|range| {
                 unsupported_go_diagnostic(
                     *range,
@@ -289,10 +308,14 @@ pub fn format_go_source(
             if !explicit && !looks_like_complete_sql_prefix(&prepared.sql) {
                 continue;
             }
+            stats.eligible_candidates += 1;
 
             let formatted = match format_sql(&prepared.sql, options) {
                 Ok(formatted) => formatted,
-                Err(error) if !explicit && is_candidate_parse_failure(&error) => continue,
+                Err(error) if !explicit && is_candidate_parse_failure(&error) => {
+                    stats.auto_parse_skips += 1;
+                    continue;
+                }
                 Err(source) => {
                     return Err(GoError::EmbeddedSql {
                         line: expression.node.start_position().row + 1,
@@ -300,6 +323,13 @@ pub fn format_go_source(
                     });
                 }
             };
+            let expression_unsupported = formatted
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule_id == "syntax.unsupported");
+            if expression_unsupported {
+                stats.unsupported_expressions += 1;
+            }
             warnings.extend(formatted.warnings);
             let diagnostic_range = expression_diagnostic_range(*expression);
             diagnostics.extend(formatted.diagnostics.into_iter().map(|mut diagnostic| {
@@ -313,6 +343,7 @@ pub fn format_go_source(
                     GoStringExpressionKind::RawLiteral | GoStringExpressionKind::InterpretedLiteral
                 )
             {
+                stats.unchanged_sql_expressions += 1;
                 continue;
             }
 
@@ -327,6 +358,7 @@ pub fn format_go_source(
                     line: expression.node.start_position().row + 1,
                 });
             }
+            stats.formatted_expressions += 1;
             replacements.push(Replacement {
                 start: expression.node.start_byte(),
                 end: expression.node.end_byte(),
@@ -365,6 +397,7 @@ pub fn format_go_source(
         output,
         warnings,
         diagnostics,
+        stats,
     })
 }
 

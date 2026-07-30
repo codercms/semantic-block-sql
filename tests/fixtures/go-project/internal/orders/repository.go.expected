@@ -41,7 +41,7 @@ const (
 
 const message = `choose a plan from the menu`
 const fragment = `WHERE deleted_at IS NULL`
-const interpreted = "select id,total from public.orders;"
+const interpreted = "SELECT id, total FROM public.orders;"
 
 func Queries() []string {
 	return []string{recent, legacy, updateFromImport, deleteExpired, dynamicQuery, groupedQuery, message, fragment, interpreted}

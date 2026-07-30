@@ -119,6 +119,9 @@ fn formats_a_realistic_go_project_deterministically_and_compiles_it() {
     assert_eq!(
         normalized_lines(&check.stdout),
         [
+            "internal/audit/logger.go",
+            "internal/catalog/repository.go",
+            "internal/catalog/repository_test.go",
             "internal/migrations/schema.go",
             "internal/orders/repository.go",
             "internal/users/repository.go",

@@ -1,0 +1,55 @@
+package catalog
+
+import "context"
+
+type Queryer interface {
+	QueryContext(context.Context, string, ...any) (any, error)
+	ExecContext(context.Context, string, ...any) (any, error)
+}
+
+type Repository struct {
+	DB Queryer
+}
+
+type Queries struct {
+	FindActive string
+	Archive    string
+}
+
+func wrap(query string) string { return query }
+
+func (repository Repository) FindActive(ctx context.Context, minimumID int64) (any, error) {
+	return repository.DB.QueryContext(ctx, `SELECT id, name, metadata
+FROM public.catalog_items
+WHERE
+    active = TRUE
+    AND id >= $1
+ORDER BY id;`, minimumID)
+}
+
+func (repository Repository) Archive(ctx context.Context, id int64) (any, error) {
+	return repository.DB.ExecContext(ctx, wrap("UPDATE public.catalog_items SET archived_at = NOW() WHERE id = $1 RETURNING id;"), id)
+}
+
+func DefaultQueries() Queries {
+	return Queries{
+		FindActive: "SELECT id, name FROM public.catalog_items WHERE active = TRUE ORDER BY name;",
+		Archive:    "UPDATE public.catalog_items SET archived_at = NOW() WHERE id = $1;",
+	}
+}
+
+func StaticQuery() string {
+	return `SELECT id, name
+FROM public.catalog_items
+WHERE
+    active = TRUE
+    AND id > 0;`
+}
+
+func DynamicQuery(columns string) string {
+	return "SELECT " + columns + " FROM public.catalog_items"
+}
+
+const markerQuery = "SELECT '`' AS marker, id FROM public.catalog_items WHERE id = $1;"
+
+func MarkerQuery() string { return markerQuery }
