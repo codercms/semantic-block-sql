@@ -707,3 +707,15 @@ The post-PR-7 fixture-backed Go integration work is tracked durably in
 [`go-integration-hardening-checklist.md`](go-integration-hardening-checklist.md).
 That checklist also records the newer embedded-SQL indentation decision from
 style guide 1.0.1, which supersedes the historical MVP envelope behavior.
+
+## Go string-expression and real-corpus tranche
+
+- [x] Complete Go interpreted-string decode/encode round trip.
+- [x] Expression-aware raw/interpreted/static-concatenation extraction.
+- [x] Inline/nested calls, returns, assignments, composite values, `defer`, and `go` calls.
+- [x] Runtime-value verification, full-file reparse, `gofmt`, compilation, and idempotence.
+- [x] Expanded offline multi-package golden project.
+- [x] Pinned, licensed, opt-in external corpus manifest and JSON reporting runner.
+- [x] Normal CI remains network-independent.
+
+The earlier MVP checkbox that kept interpreted strings disabled records the historical first slice only and is superseded by this completed tranche and `docs/real-world-readiness-checklist.md`.

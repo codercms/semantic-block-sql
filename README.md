@@ -9,7 +9,7 @@ The project is currently an early, usable release. It is suitable for repository
 ## Features
 
 - `fmt`, `check`, and `diff` commands;
-- standalone `.sql` files and complete PostgreSQL statements in Go raw strings;
+- standalone `.sql` files and complete PostgreSQL statements in Go raw or interpreted string expressions;
 - recursive project discovery with `.gitignore` and nested `.semblockignore` support;
 - safe project writes: malformed input or safety failures prevent writes, while valid unsupported units are skipped by default;
 - PostgreSQL parsing through the pinned `pg_query` backend;
@@ -114,19 +114,42 @@ semblock init
 
 Directory discovery includes `.sql` and `.go` files by default. It respects `.gitignore` and nested `.semblockignore` files. An explicitly named file is processed even when an ignore rule matches it.
 
-Go support formats raw backtick literals that:
+Go support understands complete SQL values in Go string expressions, including:
 
-- belong to a `const`, `var`, regular assignment, short assignment, direct
-  `return`, or standalone expression statement;
-- begin with a supported SQL statement keyword; and
-- contain one or more complete PostgreSQL statements.
+- raw backtick and interpreted double-quoted literals;
+- package and local declarations, assignments, returns, and standalone calls;
+- direct or nested function-call arguments, including `defer` and `go` calls;
+- struct/composite fields, map values, slice/array elements, and table-driven tests;
+- compile-time concatenations made entirely from string literals.
 
-This covers common database calls such as raw SQL passed directly to
-`QueryContext` from a `return` statement or to `ExecContext` as a standalone
-call. Semblock classifies the Go syntax structurally and does not depend on a
-specific database library or function name.
+Interpreted strings are decoded according to Go lexical rules before SQL formatting.
+One-line results remain interpreted; multiline results become readable raw strings
+when lossless, otherwise semblock emits deterministic interpreted escapes. Every
+replacement is decoded again and compared with the intended formatted runtime value,
+and the complete Go file must reparse. Expressions containing identifiers, calls,
+indexing, or other runtime values remain untouched. Import paths, struct tags, build
+directives, runes, comments, and incomplete fragments are excluded structurally.
+Detection is database-library-neutral: PostgreSQL parsing, not a method-name allowlist,
+decides whether a candidate is complete SQL.
 
-Interpreted Go strings and incomplete fragments such as a standalone `WHERE` clause are skipped.
+### Real Go corpus
+
+The normal test suite is fully offline and includes a multi-package golden Go project.
+An opt-in network corpus pins permissively licensed releases of go-sqlmock, sqlx, and
+pgx, formats selected real source files, runs `gofmt`, verifies a second semblock pass
+is byte-idempotent, executes selected `go test` commands, and writes candidate/format/
+unsupported/safe-skip metrics:
+
+```bash
+./scripts/test-go-corpus.sh --keep
+```
+
+```powershell
+./scripts/test-go-corpus.ps1 --keep
+```
+
+The resolved commit SHA for every pinned release is recorded in
+`target/go-corpus-report.json`. This opt-in runner is not executed by normal CI.
 
 ## SQL coverage
 
@@ -206,7 +229,8 @@ ignore_file = ".semblockignore"
 enabled = true
 auto_detect = true
 raw_strings = true
-interpreted_strings = false
+interpreted_strings = true
+multiline_string_style = "prefer_raw"
 ```
 
 Indentation is always four spaces. Authored list groups, blank lines, and comment boundaries are mandatory and are not configurable.

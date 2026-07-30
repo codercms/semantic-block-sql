@@ -7,14 +7,15 @@ The success corpus keeps each input `.go` file beside a complete `.go.expected` 
 The corpus covers:
 
 - package-level and grouped declarations;
-- local constants, variables, assignments, and nested call arguments;
-- direct `return` and standalone expression-statement owners;
+- local constants, variables, assignments, returns, and standalone calls;
+- raw and interpreted strings in direct/nested call arguments, `defer`, and `go` calls;
+- struct/composite fields, map/slice values, and table-driven test cases;
+- literal-only static concatenations and untouched dynamic expressions;
+- lossless interpreted-to-raw conversion and escaped interpreted fallback;
 - SQL-root indentation inside multiline raw strings;
-- concatenated SQL fragments that must be skipped conservatively;
-- representative supported PostgreSQL statements, comments, quoted identifiers, and backslash-containing literals;
-- interpreted strings, explicit directives, and project ignore files that must remain unchanged;
-- CRLF preservation and deterministic `--jobs 1` versus `--jobs 4` output.
+- representative PostgreSQL migrations, queries, PL/pgSQL, comments, identifiers, and protected literals;
+- explicit directives, project ignore files, CRLF preservation, and deterministic `--jobs 1` versus `--jobs 4` output.
 
 Separate malformed-SQL, malformed-Go, and directive-error projects prove project-wide preflight: one invalid host file prevents every planned rewrite.
 
-Detection remains structural and database-library-neutral. Tree-sitter identifies an explicitly supported Go owner and PostgreSQL parsing remains the SQL authority.
+Detection remains structural and database-library-neutral. Tree-sitter identifies eligible string-expression contexts, a Go codec proves decoded runtime values, and PostgreSQL parsing remains the SQL authority. `tests/corpus/go-projects.json` and the opt-in `go_corpus` example extend this with pinned external projects without adding network access to normal CI.

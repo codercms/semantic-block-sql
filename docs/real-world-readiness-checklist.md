@@ -1,6 +1,6 @@
 # Real-world formatter readiness — durable three-PR checklist
 
-Status: **PR 1 and PR 2 complete; PR 3 in progress**
+Status: **All three implementation PRs complete**
 
 This roadmap is intentionally split into three stacked pull requests. Each PR
 must pass the complete repository quality gate and remain independently
@@ -187,7 +187,7 @@ PR 2 validation on 2026-07-30:
 
 # PR 3 — Real Go string-expression coverage
 
-Status: **G0–G2 durable checkpoint complete. G3–G4 pending.**
+Status: **Complete**
 
 ## G0 — Go string codec and expression IR
 
@@ -239,19 +239,29 @@ G0–G2 checkpoint validation on 2026-07-30:
 
 ## G3 — Real-project corpus
 
-- [ ] Expand the checked-in golden project with realistic repository, migration,
+- [x] Expand the checked-in golden project with realistic repository, migration,
   test-table, pgx/database-sql/sqlx-like, nested-call, and inline-literal patterns.
-- [ ] Add a pinned external-project corpus manifest and opt-in runner for several
+- [x] Add a pinned external-project corpus manifest and opt-in runner for several
   permissively licensed Go projects.
-- [ ] Report candidate, formatted, unsupported, false-positive, build, and test
+- [x] Report candidate, formatted, unsupported, false-positive, build, and test
   outcomes.
-- [ ] Require `gofmt`, selected `go test`, and semblock idempotence.
-- [ ] Keep the normal offline CI independent from network corpus execution.
-- [ ] Commit G3.
+- [x] Require `gofmt`, selected `go test`, and semblock idempotence.
+- [x] Keep the normal offline CI independent from network corpus execution.
+- [x] Commit G3.
 
 ## G4 — PR 3 reconciliation
 
-- [ ] Update README/config/docs and remove the interpreted-string MVP limitation.
-- [ ] Run the complete offline quality gate and architecture/dead-code review.
-- [ ] Produce a verified PR 3 git bundle and SHA-256 file.
-- [ ] Record stacked Windows apply/push/PR instructions.
+- [x] Update README/config/docs and remove the interpreted-string MVP limitation.
+- [x] Run the complete offline quality gate and architecture/dead-code review.
+- [x] Produce a verified PR 3 git bundle and SHA-256 file.
+- [x] Record stacked Windows apply/push/PR instructions.
+
+
+PR 3 final evidence on 2026-07-30:
+
+- the offline golden project covers interpreted/raw strings, nested calls, composite/test-table values, static and dynamic expressions, `defer`, `go`, migrations, and PL/pgSQL;
+- complete files match adjacent goldens, serial/parallel bytes match, `gofmt` is clean, `go test ./...` passes, and the second semblock pass is byte-idempotent;
+- `tests/corpus/go-projects.json` pins three permissively licensed external releases;
+- `examples/go_corpus.rs` resolves and reports exact commit SHAs and candidate, formatting, unsupported, potential false-positive skip, dynamic, diagnostics, gofmt, idempotence, and test outcomes;
+- external execution is explicit and networked, while normal CI only compiles the runner and validates the manifest;
+- the complete offline gate passed with 189 tests, Clippy warnings denied, Rustdoc, formatting, and `git diff --check`.

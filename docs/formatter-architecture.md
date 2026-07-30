@@ -510,3 +510,11 @@ Operational utilities remain a closed `UtilityStatementKind` capability set. Nes
 ## Procedural IR boundary
 
 The procedural formatter is split into `procedural::ir` and `procedural::layout`. The IR adapter validates parser node families, binds source spans independently from line boundaries, and cross-checks key parser-node counts against lexical nodes. The layout layer consumes only typed nodes and emits indentation frames; it does not discover syntax from source lines. Outer SQL, dollar-tag preservation, normalized parser equivalence, protected literals, and idempotence remain separate gates.
+
+## Go string-expression pipeline
+
+Go extraction operates on tree-sitter expression nodes rather than database API names or broad declaration-only ownership. Raw literals, interpreted literals, and literal-only static concatenations are decoded into a `GoStringExpression`; runtime-dependent concatenations are retained as dynamic opaque expressions. Eligible declaration, assignment, return, call-argument, `defer`, `go`, and composite-literal contexts pass through PostgreSQL formatting.
+
+Interpreted strings use a complete Go escape codec. Re-encoding prefers a raw literal for multiline SQL only when exact, otherwise deterministic interpreted escapes are used. The replacement is decoded again, compared with the expected runtime value, and accepted only when the complete Go file reparses. `GoFormatStats` exposes corpus-oriented counts without influencing formatting policy.
+
+The checked-in golden project remains offline. `examples/go_corpus.rs` consumes pinned external-project metadata only when explicitly invoked, records resolved commit SHAs, formats selected tracked Go files, requires `gofmt`, a byte-idempotent second pass, and selected project tests, and emits a JSON outcome report.

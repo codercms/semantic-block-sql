@@ -752,3 +752,11 @@ The formatter classifies every parser-proven top-level statement independently. 
 Routine bodies are no longer formatted from authored lines. `parse_plpgsql` is adapted into typed parser capability categories, while PostgreSQL scanner tokens are bound into a span-bearing `RoutineBody` IR containing declarations, control headers, statements, comments, and opaque units. A separate procedural layout pass owns indentation and blank-line policy. This enables compact and multi-statement single-line bodies without weakening the outer PostgreSQL parser boundary.
 
 `ASSERT` and `RETURN QUERY` are formatter-owned. Trustworthy opaque transaction-control spans are preserved and diagnosed per statement, so supported routine siblings still format under the default unsupported policy; strict policy restores the complete routine/document.
+
+## Go interpreted-string and corpus contract
+
+The Go host layer classifies string expressions structurally. It owns raw literals, interpreted literals, and compile-time concatenations containing only literal operands in declarations, assignments, return values, direct/nested call arguments, `defer`/`go` calls, and composite literal values. Dynamic expressions and non-expression strings remain byte-identical.
+
+Interpreted strings are decoded with the complete Go escape grammar. A multiline formatted value is emitted as a raw string only when no raw-string blocker exists; otherwise it is deterministically escaped. The emitted literal is decoded and compared with the intended runtime value before the complete Go source is reparsed. Auto-detected parse failures remain safe skips; explicit malformed SQL remains fatal.
+
+Real-project confidence has two layers: an offline, checked-in multi-package golden project compiled with `go test ./...`, and an opt-in external runner over immutable release refs. The runner reports discovered expressions, eligible candidates, formatted and unchanged SQL expressions, unsupported expressions, potential false-positive parse skips, dynamic expressions, diagnostics, `gofmt`, idempotence, and project-test results.
