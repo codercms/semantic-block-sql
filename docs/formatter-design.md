@@ -240,6 +240,12 @@ over-hard, breakable line is an error rather than silently violating the
 contract. When an indivisible string, quoted identifier, identifier, or comment
 necessarily exceeds hard width, formatting succeeds and returns
 `FormatWarning::IndivisibleTokenExceedsHardWidth { line, width }`.
+An indivisible token excuses the line only when the token cannot fit at its
+required indentation, or when an attached comment itself crosses the limit; a
+short token merely located after the limit does not make a breakable line
+unavoidable. The low-level warning retains the proposed-output line for API
+compatibility, while the shared diagnostic aligns the causing output token with
+its original token and reports the corresponding source line and byte range.
 
 `FormatOptions` exposes:
 
@@ -732,6 +738,14 @@ applies both to ordinary multi-statement documents and to recursively segmented
 `COPY ... FROM STDIN` documents, whose formatted header and protected payload
 may precede the failing statement. The ALTER relation-option fixture exposed the
 general attribution defect; line-coordinate handling is not specific to ALTER.
+
+Table and column `CHECK` constraints carry AST-validated constraint counts into
+token ownership for `CREATE TABLE` and `ALTER TABLE`. The binder proves each
+`CHECK (` wrapper inside its owning element or action, then passes only the
+inner expression to the ordinary predicate planner with the wrapper's
+additional indentation. Boolean precedence, authored parentheses, comments,
+and source token order therefore follow the same layout rules as `WHERE`
+without treating `CHECK` as a query clause or discovering it globally.
 
 ## Parser-backed PL/pgSQL routine bodies
 

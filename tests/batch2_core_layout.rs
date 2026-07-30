@@ -198,6 +198,39 @@ fn reports_indivisible_tokens_that_make_a_line_exceed_the_hard_width() {
 }
 
 #[test]
+fn indivisible_width_diagnostics_point_to_the_source_line() {
+    let literal = "'this literal is intentionally much longer than the configured hard width'";
+    let source = format!("CREATE TABLE sample (id bigint);\nSELECT {literal};");
+    let options = FormatOptions {
+        soft_line_width: 32,
+        hard_line_width: 40,
+        ..FormatOptions::default()
+    };
+
+    let formatted = format_sql(&source, &options).expect("indivisible token is allowed");
+    let diagnostic = formatted
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.rule_id == "layout.hard_line_width")
+        .expect("hard-width warning");
+
+    assert_eq!(
+        &source[diagnostic.source_range.start..diagnostic.source_range.end],
+        literal
+    );
+    assert!(
+        diagnostic.message.contains("source line 2"),
+        "{}",
+        diagnostic.message
+    );
+    assert!(
+        !diagnostic.message.contains("line 4"),
+        "{}",
+        diagnostic.message
+    );
+}
+
+#[test]
 fn four_space_indentation_is_mandatory_for_real_syntax_nesting() {
     let output = format_sql(
         "select item.id from public.items item where item.deleted_at is null and (item.title_rus is not null or item.title_orig is not null);",

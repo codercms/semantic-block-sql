@@ -233,10 +233,14 @@ Values, windows, lateral, and DDL tranche evidence:
 - `tests/batch5_values_windows.rs` and `tests/batch5_ddl.rs` require golden
   output, semantic equivalence, idempotence, clean check output, exact comment
   preservation, fail-safe neighboring variants, authored relation-option
-  groups, and hard-width option splitting;
+  groups, hard-width option splitting, and WHERE-equivalent predicate wrapping
+  for AST-counted CREATE/ALTER TABLE CHECK constraints;
 - `tests/batch5_ddl.rs` and `tests/batch14_utilities.rs` require
   document-relative fatal line diagnostics across ordinary statement
   reconstruction and recursive `COPY ... FROM STDIN` payload boundaries.
+- `tests/batch2_core_layout.rs` requires indivisible-width diagnostics to map
+  the causing output token back to its source line/range and rejects a short
+  indivisible token as an excuse for an otherwise breakable over-hard line.
 - authored blank lines between complete top-level statements are preserved.
 
 

@@ -265,7 +265,9 @@ fn format_document_once(
         })
     });
     diagnostics.extend(style_diagnostics);
-    diagnostics.extend(diagnostics::warning_diagnostics(source, &warnings));
+    diagnostics.extend(diagnostics::warning_diagnostics(
+        source, &output, &warnings, options,
+    )?);
 
     Ok(FormattedSql {
         changed: output != source,
@@ -616,7 +618,9 @@ fn format_supported_statement(
     }
     let warnings = semantic_block::validate_hard_width(&output, options)?;
     let mut result_diagnostics = diagnostics::style_diagnostics(source, &output, options)?;
-    result_diagnostics.extend(diagnostics::warning_diagnostics(source, &warnings));
+    result_diagnostics.extend(diagnostics::warning_diagnostics(
+        source, &output, &warnings, options,
+    )?);
     Ok(FormattedSql {
         changed: output != source,
         output,

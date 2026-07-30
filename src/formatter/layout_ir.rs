@@ -124,6 +124,7 @@ pub(super) enum PredicateKind {
     MergeOn,
     MergeWhen,
     IndexWhere,
+    Check,
 }
 
 /// Predicate content owned by a clause introducer.
@@ -135,6 +136,7 @@ pub(super) struct PredicateBlock {
     pub end: usize,
     pub base_depth: usize,
     pub indent: usize,
+    pub wrapper_close: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,9 +290,18 @@ pub(super) struct ValuesBlock {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CheckPredicateBlock {
+    pub introducer: usize,
+    pub open: usize,
+    pub close: usize,
+    pub indent: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CreateTableItem {
     pub range: TokenRange,
     pub kind: CreateTableElementSpec,
+    pub checks: Vec<CheckPredicateBlock>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -325,6 +336,7 @@ pub(super) struct AlterTableAction {
     pub range: TokenRange,
     pub group: AlterTableActionGroup,
     pub relation_options: Option<AlterTableOptionList>,
+    pub checks: Vec<CheckPredicateBlock>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

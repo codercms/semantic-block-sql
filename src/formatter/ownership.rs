@@ -191,8 +191,21 @@ pub(super) struct MaterializedViewSpec {
 /// enforcing the column/constraint boundary in layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CreateTableElementSpec {
-    Column,
-    Constraint,
+    Column { check_constraints: usize },
+    Constraint { is_check: bool },
+}
+
+impl CreateTableElementSpec {
+    pub fn is_column(self) -> bool {
+        matches!(self, Self::Column { .. })
+    }
+
+    pub fn check_constraints(self) -> usize {
+        match self {
+            Self::Column { check_constraints } => check_constraints,
+            Self::Constraint { is_check } => usize::from(is_check),
+        }
+    }
 }
 
 /// Exact CREATE TABLE capabilities proven by PostgreSQL AST validation.
@@ -238,6 +251,7 @@ pub(super) enum AlterTableActionGroup {
 pub(super) struct AlterTableActionSpec {
     pub group: AlterTableActionGroup,
     pub relation_options: Option<usize>,
+    pub check_constraints: usize,
 }
 
 /// Exact ALTER TABLE capabilities proven by PostgreSQL AST validation.

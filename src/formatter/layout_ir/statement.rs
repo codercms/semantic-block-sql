@@ -564,8 +564,22 @@ pub(super) fn bind_create_table(
         let items = ranges
             .into_iter()
             .zip(spec.elements.iter().copied())
-            .map(|(range, kind)| CreateTableItem { range, kind })
-            .collect();
+            .map(|(range, kind)| {
+                let checks = bind_check_predicates(
+                    tokens,
+                    structure,
+                    range,
+                    base + 1,
+                    base + 1,
+                    kind.check_constraints(),
+                )?;
+                Ok(CreateTableItem {
+                    range,
+                    kind,
+                    checks,
+                })
+            })
+            .collect::<Result<Vec<_>, FormatDiagnostic>>()?;
         (Some(open), Some(close), items)
     };
 
@@ -864,6 +878,14 @@ pub(super) fn bind_alter_table(
                 range,
                 group: action.group,
                 relation_options,
+                checks: bind_check_predicates(
+                    tokens,
+                    structure,
+                    range,
+                    base,
+                    base + 1,
+                    action.check_constraints,
+                )?,
             })
         })
         .collect::<Result<Vec<_>, FormatDiagnostic>>()?;
@@ -875,6 +897,49 @@ pub(super) fn bind_alter_table(
         },
         actions,
     })
+}
+
+fn bind_check_predicates(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    range: TokenRange,
+    depth: usize,
+    indent: usize,
+    expected: usize,
+) -> Result<Vec<CheckPredicateBlock>, FormatDiagnostic> {
+    let checks = (range.start..range.end)
+        .filter(|index| structure.depth(*index) == depth && tokens[*index].kind == Token::Check)
+        .map(|introducer| {
+            let open = (introducer + 1..range.end)
+                .find(|index| !tokens[*index].is_comment())
+                .filter(|index| {
+                    structure.depth(*index) == depth && tokens[*index].kind == Token::Ascii40
+                })
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership(
+                        "AST-validated CHECK constraint has no opening parenthesis".into(),
+                    )
+                })?;
+            let close = structure.matching_parenthesis(open).ok_or_else(|| {
+                FormatDiagnostic::Ownership(
+                    "AST-validated CHECK constraint has no closing parenthesis".into(),
+                )
+            })?;
+            if close >= range.end {
+                return Err(FormatDiagnostic::Ownership(
+                    "CHECK constraint escapes its validated owner".into(),
+                ));
+            }
+            Ok(CheckPredicateBlock {
+                introducer,
+                open,
+                close,
+                indent,
+            })
+        })
+        .collect::<Result<Vec<_>, FormatDiagnostic>>()?;
+    require_count("CHECK", "constraint count", checks.len(), expected)?;
+    Ok(checks)
 }
 
 pub(super) fn bind_with_block(

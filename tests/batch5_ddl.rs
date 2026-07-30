@@ -36,6 +36,44 @@ fn formats_create_table_columns_and_constraints() {
 }
 
 #[test]
+fn wraps_create_table_check_predicates_like_where_predicates() {
+    let source = "CREATE TABLE queue (\n    status text,\n    claim_token uuid,\n    claimed_revision bigint,\n    processing_started_at timestamptz,\n\n    CHECK ((status = 'processing' AND claim_token IS NOT NULL AND claimed_revision IS NOT NULL AND processing_started_at IS NOT NULL) OR (status != 'processing' AND claim_token IS NULL AND claimed_revision IS NULL AND processing_started_at IS NULL))\n);";
+    let expected = "CREATE TABLE queue (\n    status text,\n    claim_token uuid,\n    claimed_revision bigint,\n    processing_started_at timestamptz,\n\n    CHECK (\n        (\n            status = 'processing'\n            AND claim_token IS NOT NULL\n            AND claimed_revision IS NOT NULL\n            AND processing_started_at IS NOT NULL\n        )\n        OR (\n            status != 'processing'\n            AND claim_token IS NULL\n            AND claimed_revision IS NULL\n            AND processing_started_at IS NULL\n        )\n    )\n);";
+
+    let formatted =
+        format_sql(source, &FormatOptions::default()).expect("CHECK predicate formatting succeeds");
+    assert_eq!(formatted.output, expected);
+    assert!(
+        formatted.warnings.is_empty(),
+        "breakable CHECK predicates are not indivisible: {:?}",
+        formatted.warnings
+    );
+    assert_format(expected, expected, &FormatOptions::default());
+}
+
+#[test]
+fn wraps_alter_table_check_predicates_like_where_predicates() {
+    let source = "ALTER TABLE queue ADD CONSTRAINT queue_claim_check CHECK ((status = 'processing' AND claim_token IS NOT NULL AND claimed_revision IS NOT NULL) OR (status != 'processing' AND claim_token IS NULL AND claimed_revision IS NULL));";
+    let expected = "ALTER TABLE queue\n    ADD CONSTRAINT queue_claim_check CHECK (\n        (\n            status = 'processing'\n            AND claim_token IS NOT NULL\n            AND claimed_revision IS NOT NULL\n        )\n        OR (\n            status != 'processing'\n            AND claim_token IS NULL\n            AND claimed_revision IS NULL\n        )\n    );";
+
+    assert_format(source, expected, &FormatOptions::default());
+}
+
+#[test]
+fn wraps_column_check_predicates_in_create_and_alter_table() {
+    assert_format(
+        "CREATE TABLE metrics (score integer CHECK (score >= 0 AND score <= 100));",
+        "CREATE TABLE metrics (\n    score integer CHECK (\n        score >= 0\n        AND score <= 100\n    )\n);",
+        &FormatOptions::default(),
+    );
+    assert_format(
+        "ALTER TABLE metrics ADD COLUMN weight integer CHECK (weight >= 0 AND weight <= 100);",
+        "ALTER TABLE metrics\n    ADD COLUMN weight integer CHECK (\n        weight >= 0\n        AND weight <= 100\n    );",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
 fn keeps_simple_indexes_compact_and_expands_complex_indexes() {
     assert_format(
         "create index users_reg_date_idx on users (reg_date);",
