@@ -13,6 +13,7 @@ use semblock::discover::{DiscoverError, discover, filter_candidates};
 use semblock::git::{GitError, GitSelection, read_staged_files, select_files};
 use semblock::rewrite::{RewriteError, atomic_replace};
 use semblock::source::{Language, SourceError, format_source, infer_language};
+use semblock::{Severity, UnsupportedPolicy};
 
 use output::{
     CheckOutput, display_path, emit_check_path, emit_check_summary, emit_check_summary_refs,
@@ -52,6 +53,10 @@ pub struct Cli {
     /// Print every inspected file
     #[arg(long, global = true, conflicts_with = "quiet")]
     verbose: bool,
+
+    /// Treat unsupported PostgreSQL syntax as a fatal error
+    #[arg(long, global = true)]
+    strict_unsupported: bool,
 
     /// Suppress progress output
     #[arg(long, global = true)]
@@ -145,6 +150,10 @@ enum Mode {
     Diff,
 }
 
+fn is_fatal_diagnostic(diagnostic: &semblock::Diagnostic) -> bool {
+    diagnostic.severity == Severity::Error && !diagnostic.fix_available
+}
+
 impl Cli {
     pub fn run(self) -> Result<ExitCode, RunError> {
         if self.jobs == 0 {
@@ -170,7 +179,10 @@ impl Cli {
             Command::Diff(paths) => (Mode::Diff, paths.clone(), CheckOutput::default()),
             Command::Config(_) | Command::Init(_) => unreachable!("handled above"),
         };
-        let config = Config::load(self.config.as_deref()).map_err(RunError::config)?;
+        let mut config = Config::load(self.config.as_deref()).map_err(RunError::config)?;
+        if self.strict_unsupported {
+            config.format.unsupported_policy = UnsupportedPolicy::Error;
+        }
 
         if self.stdin {
             if !paths.paths.is_empty() || paths.git_selection().is_some() {
@@ -241,7 +253,11 @@ impl Cli {
     }
 
     fn reject_source_options(&self, command: &str) -> Result<(), RunError> {
-        if self.stdin || self.filename.is_some() || self.language != Language::Auto {
+        if self.stdin
+            || self.filename.is_some()
+            || self.language != Language::Auto
+            || self.strict_unsupported
+        {
             return Err(RunError::usage(format!(
                 "source input options cannot be combined with the {command} command"
             )));
@@ -271,6 +287,14 @@ impl Cli {
             .map_err(|error| RunError::filesystem(format!("failed to read stdin: {error}")))?;
         let formatted = format_source(&source, language, &config.format, &config.go)
             .map_err(RunError::source)?;
+        let has_errors = formatted.diagnostics.iter().any(is_fatal_diagnostic);
+        if has_errors {
+            emit_diagnostics(&filename, &formatted, self.quiet, true);
+            if mode == Mode::Fmt {
+                print!("{}", formatted.output);
+            }
+            return Ok(ExitCode::from(3));
+        }
 
         match mode {
             Mode::Fmt => {
@@ -388,6 +412,15 @@ impl Cli {
             }
         }
         let plans = build_plans(inputs, self.language, config, self.jobs)?;
+        let has_errors = plans
+            .iter()
+            .any(|plan| plan.formatted.diagnostics.iter().any(is_fatal_diagnostic));
+        if has_errors {
+            for plan in &plans {
+                emit_diagnostics(&plan.path, &plan.formatted, self.quiet, true);
+            }
+            return Ok(ExitCode::from(3));
+        }
         let changed = plans.iter().filter(|plan| plan.formatted.changed).count();
 
         match mode {

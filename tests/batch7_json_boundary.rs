@@ -1,4 +1,4 @@
-use semblock::{FormatDiagnostic, FormatOptions, Severity, format_sql, format_sql_result};
+use semblock::{FormatOptions, Severity, UnsupportedPolicy, format_sql, format_sql_result};
 
 #[test]
 fn rejects_unreviewed_sql_json_expression_families_without_rewriting() {
@@ -61,7 +61,7 @@ fn rejects_unreviewed_sql_json_expression_families_without_rewriting() {
         );
         assert_eq!(
             formatted.diagnostics[0].severity,
-            Severity::Error,
+            Severity::Warning,
             "{source}"
         );
         assert!(
@@ -69,9 +69,17 @@ fn rejects_unreviewed_sql_json_expression_families_without_rewriting() {
             "diagnostic {:?} should mention {feature:?}",
             formatted.diagnostics[0]
         );
-        assert!(matches!(
-            format_sql(source, &FormatOptions::default()),
-            Err(FormatDiagnostic::UnsupportedSyntax { .. })
-        ));
+        let direct = format_sql(source, &FormatOptions::default())
+            .expect("unsupported SQL/JSON is non-fatal by default");
+        assert_eq!(direct.output, source);
+        assert_eq!(direct.diagnostics[0].severity, Severity::Warning);
+
+        let strict = FormatOptions {
+            unsupported_policy: UnsupportedPolicy::Error,
+            ..FormatOptions::default()
+        };
+        let strict_result = format_sql(source, &strict).expect("strict policy returns diagnostics");
+        assert_eq!(strict_result.output, source);
+        assert_eq!(strict_result.diagnostics[0].severity, Severity::Error);
     }
 }

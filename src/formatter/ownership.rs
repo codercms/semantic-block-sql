@@ -256,6 +256,25 @@ pub(super) enum UtilityStatementKind {
     CreateSequence,
     CreateTrigger,
     CreatePolicy,
+    Copy,
+    Call,
+    Explain,
+    Vacuum,
+    Analyze,
+    RefreshMaterializedView,
+    Listen,
+    Notify,
+    CreateExtension,
+    AlterType,
+    AlterDomain,
+    AlterPolicy,
+    CreateRule,
+    CreateStatistics,
+    CreateCollation,
+    CreateCast,
+    CreateSchema,
+    AlterSequence,
+    RenameObject,
 }
 
 impl UtilityStatementKind {
@@ -266,12 +285,31 @@ impl UtilityStatementKind {
             Self::Grant | Self::GrantRole => Token::Grant,
             Self::Revoke | Self::RevokeRole => Token::Revoke,
             Self::Comment => Token::Comment,
+            Self::Copy => Token::Copy,
+            Self::Call => Token::Call,
+            Self::Explain => Token::Explain,
+            Self::Vacuum => Token::Vacuum,
+            Self::Analyze => Token::Analyze,
+            Self::RefreshMaterializedView => Token::Refresh,
+            Self::Listen => Token::Listen,
+            Self::Notify => Token::Notify,
+            Self::AlterType
+            | Self::AlterDomain
+            | Self::AlterPolicy
+            | Self::AlterSequence
+            | Self::RenameObject => Token::Alter,
             Self::CreateEnum
             | Self::CreateCompositeType
             | Self::CreateDomain
             | Self::CreateSequence
             | Self::CreateTrigger
-            | Self::CreatePolicy => Token::Create,
+            | Self::CreatePolicy
+            | Self::CreateExtension
+            | Self::CreateRule
+            | Self::CreateStatistics
+            | Self::CreateCollation
+            | Self::CreateCast
+            | Self::CreateSchema => Token::Create,
         }
     }
 
@@ -290,6 +328,25 @@ impl UtilityStatementKind {
             Self::CreateSequence => "CREATE SEQUENCE",
             Self::CreateTrigger => "CREATE TRIGGER",
             Self::CreatePolicy => "CREATE POLICY",
+            Self::Copy => "COPY",
+            Self::Call => "CALL",
+            Self::Explain => "EXPLAIN",
+            Self::Vacuum => "VACUUM",
+            Self::Analyze => "ANALYZE",
+            Self::RefreshMaterializedView => "REFRESH MATERIALIZED VIEW",
+            Self::Listen => "LISTEN",
+            Self::Notify => "NOTIFY",
+            Self::CreateExtension => "CREATE EXTENSION",
+            Self::AlterType => "ALTER TYPE",
+            Self::AlterDomain => "ALTER DOMAIN",
+            Self::AlterPolicy => "ALTER POLICY",
+            Self::CreateRule => "CREATE RULE",
+            Self::CreateStatistics => "CREATE STATISTICS",
+            Self::CreateCollation => "CREATE COLLATION",
+            Self::CreateCast => "CREATE CAST",
+            Self::CreateSchema => "CREATE SCHEMA",
+            Self::AlterSequence => "ALTER SEQUENCE",
+            Self::RenameObject => "ALTER ... RENAME",
         }
     }
 }

@@ -8,7 +8,7 @@ COMMENT ON TABLE public.items IS 'items';
 COMMENT ON COLUMN public.items.payload IS NULL;
 CREATE TYPE public.status AS ENUM ('new', 'active', 'done');
 CREATE TYPE public.point AS (x double precision, y double precision);
-CREATE DOMAIN public.email AS text DEFAULT '' NOT NULL CHECK (value <> '');
+CREATE DOMAIN public.email AS text DEFAULT '' NOT NULL CHECK (VALUE <> '');
 CREATE SEQUENCE IF NOT EXISTS public.item_id_seq AS bigint INCREMENT BY 2 START WITH 10 CACHE 5 CYCLE;
 CREATE TRIGGER items_audit BEFORE INSERT OR UPDATE ON public.items FOR EACH ROW EXECUTE FUNCTION public.audit_item();
 CREATE POLICY item_visibility ON public.items FOR SELECT TO app_user USING (owner_id = current_user_id());

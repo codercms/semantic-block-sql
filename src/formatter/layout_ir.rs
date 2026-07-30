@@ -3,7 +3,7 @@ use pg_query::protobuf::Token;
 use super::FormatDiagnostic;
 use super::ownership::{
     AlterTableActionGroup, CreateTableElementSpec, RelationItemSpec, StatementSpec,
-    SupportedDocument, TokenRange, bind_token_statements,
+    SupportedDocument, TokenRange, UtilityStatementKind, bind_token_statements,
 };
 use super::structure::TokenStructure;
 use super::tokens::SqlToken;
@@ -324,6 +324,12 @@ pub(super) struct AlterTableBlock {
     pub actions: Vec<AlterTableAction>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct UtilityBlock {
+    pub span: TokenSpan,
+    pub kind: UtilityStatementKind,
+}
+
 /// Exhaustive top-level layout dispatcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum StatementLayout {
@@ -338,7 +344,7 @@ pub(super) enum StatementLayout {
     CreateTable(CreateTableBlock),
     CreateIndex(CreateIndexBlock),
     AlterTable(AlterTableBlock),
-    Utility(TokenSpan),
+    Utility(UtilityBlock),
 }
 
 /// Token-bound ownership IR consumed by all layout planners.
@@ -412,10 +418,13 @@ impl LayoutDocument {
                     body_start,
                     spec,
                 )?),
-                StatementSpec::Utility(_) => StatementLayout::Utility(TokenSpan {
-                    start: statement.range.start,
-                    end: statement.range.end,
-                    base_depth: statement.base_depth,
+                StatementSpec::Utility(kind) => StatementLayout::Utility(UtilityBlock {
+                    span: TokenSpan {
+                        start: statement.range.start,
+                        end: statement.range.end,
+                        base_depth: statement.base_depth,
+                    },
+                    kind: *kind,
                 }),
             });
         }
@@ -477,8 +486,17 @@ impl LayoutDocument {
             StatementLayout::CreateTable(block) => block.span,
             StatementLayout::CreateIndex(block) => block.span,
             StatementLayout::AlterTable(block) => block.span,
-            StatementLayout::Utility(span) => *span,
+            StatementLayout::Utility(block) => block.span,
         })
+    }
+
+    pub fn utilities(&self) -> impl Iterator<Item = &UtilityBlock> {
+        self.statements
+            .iter()
+            .filter_map(|statement| match statement {
+                StatementLayout::Utility(block) => Some(block),
+                _ => None,
+            })
     }
 
     pub fn inserts(&self) -> impl Iterator<Item = &InsertBlock> {

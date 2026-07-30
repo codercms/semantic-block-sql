@@ -740,3 +740,9 @@ by both PostgreSQL parsers; normalized procedural expression/query trees and
 idempotence are checked before accepting the result. Unreviewed nodes such as
 `ASSERT`, `RETURN QUERY`, and transaction control return `syntax.unsupported`
 with unchanged source.
+
+## Statement-granular unsupported policy
+
+The formatter classifies every parser-proven top-level statement independently. A supported statement is formatted through the normal validation, ownership, equivalence, protected-token, and idempotence gates. A valid but unsupported statement is copied byte-for-byte and receives `syntax.unsupported`. The default `UnsupportedPolicy::Skip` reports that diagnostic as a warning and continues with supported siblings. `UnsupportedPolicy::Error` collects all unsupported statements, elevates them to errors, and returns the complete original document unchanged. PostgreSQL parse errors and formatter safety failures remain fatal under both policies.
+
+`COPY ... FROM STDIN` is split into an AST-validated header plus a protected payload ending at `\.`. Only the header is formatted; payload bytes are never scanned or rewritten.

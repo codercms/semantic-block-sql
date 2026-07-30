@@ -55,7 +55,7 @@ fn rejects_non_plpgsql_and_compact_bodies() {
             result
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.severity == Severity::Error)
+                .any(|diagnostic| diagnostic.severity == Severity::Warning)
         );
     }
 }

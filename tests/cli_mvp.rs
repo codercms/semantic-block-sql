@@ -583,23 +583,38 @@ fn malformed_go_and_unmatched_sql_directives_never_rewrite() {
 }
 
 #[test]
-fn unsupported_statement_prevents_every_planned_project_write() {
+fn unsupported_statements_are_skipped_by_default_and_strict_mode_is_atomic() {
     let project = TempDir::new().expect("temp project");
     let valid = "select id from public.items;\n";
+    let formatted_valid = "SELECT id FROM public.items;\n";
     let unsupported = "create table public.new_items (like public.items including all);\n";
     write(project.path(), "a-valid.sql", valid);
     write(project.path(), "z-unsupported.sql", unsupported);
 
     let output = run(project.path(), &["fmt", "."], None);
 
-    assert_eq!(output.status.code(), Some(3), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unsupported PostgreSQL syntax"));
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("warning[syntax.unsupported]"));
     assert_eq!(
         fs::read_to_string(project.path().join("a-valid.sql")).expect("read valid"),
-        valid
+        formatted_valid
     );
     assert_eq!(
         fs::read_to_string(project.path().join("z-unsupported.sql")).expect("read unsupported"),
+        unsupported
+    );
+
+    write(project.path(), "a-valid.sql", valid);
+    let strict = run(project.path(), &["--strict-unsupported", "fmt", "."], None);
+    assert_eq!(strict.status.code(), Some(3), "{strict:?}");
+    assert!(String::from_utf8_lossy(&strict.stderr).contains("error[syntax.unsupported]"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("a-valid.sql")).expect("read strict valid"),
+        valid
+    );
+    assert_eq!(
+        fs::read_to_string(project.path().join("z-unsupported.sql"))
+            .expect("read strict unsupported"),
         unsupported
     );
 }

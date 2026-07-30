@@ -1,4 +1,4 @@
-use semblock::{FormatDiagnostic, FormatOptions, Severity, format_sql, format_sql_result};
+use semblock::{FormatOptions, Severity, UnsupportedPolicy, format_sql, format_sql_result};
 
 #[test]
 fn unsupported_statement_family_returns_original_source() {
@@ -9,15 +9,22 @@ fn unsupported_statement_family_returns_original_source() {
     assert!(!formatted.changed);
     assert_eq!(formatted.diagnostics.len(), 1);
     assert_eq!(formatted.diagnostics[0].rule_id, "syntax.unsupported");
-    assert_eq!(formatted.diagnostics[0].severity, Severity::Error);
+    assert_eq!(formatted.diagnostics[0].severity, Severity::Warning);
     assert_eq!(formatted.diagnostics[0].source_range.start, 0);
     assert_eq!(formatted.diagnostics[0].source_range.end, source.len());
     assert!(!formatted.diagnostics[0].fix_available);
 
-    assert!(matches!(
-        format_sql(source, &FormatOptions::default()),
-        Err(FormatDiagnostic::UnsupportedSyntax { .. })
-    ));
+    let direct = format_sql(source, &FormatOptions::default()).expect("unsupported is non-fatal");
+    assert_eq!(direct.output, source);
+    assert_eq!(direct.diagnostics[0].severity, Severity::Warning);
+
+    let strict = FormatOptions {
+        unsupported_policy: UnsupportedPolicy::Error,
+        ..FormatOptions::default()
+    };
+    let strict_result = format_sql(source, &strict).expect("strict policy is a result policy");
+    assert_eq!(strict_result.output, source);
+    assert_eq!(strict_result.diagnostics[0].severity, Severity::Error);
 }
 
 #[test]

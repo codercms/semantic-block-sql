@@ -2,16 +2,16 @@
 
 `semblock` is a deterministic, fail-safe PostgreSQL formatter and checker implementing the **Semantic Block SQL** style.
 
-It formats supported PostgreSQL syntax structurally, preserves comments and authored logical groups, and leaves unsupported syntax byte-identical with an explicit `syntax.unsupported` diagnostic instead of guessing.
+It formats supported PostgreSQL syntax structurally, preserves comments and authored logical groups, and skips unsupported statement units byte-identically with a `syntax.unsupported` warning instead of guessing. Strict unsupported enforcement is an explicit opt-in.
 
-The project is currently an early, usable release. It is suitable for repository-wide formatting experiments and CI enforcement when unsupported statements are treated as diagnostics rather than silently rewritten.
+The project is currently an early, usable release. It is suitable for repository-wide formatting and CI: supported units continue formatting when valid unsupported syntax is present, while malformed input and safety-gate failures remain fatal.
 
 ## Features
 
 - `fmt`, `check`, and `diff` commands;
 - standalone `.sql` files and complete PostgreSQL statements in Go raw strings;
 - recursive project discovery with `.gitignore` and nested `.semblockignore` support;
-- atomic project writes: one invalid file prevents every planned rewrite;
+- safe project writes: malformed input or safety failures prevent writes, while valid unsupported units are skipped by default;
 - PostgreSQL parsing through the pinned `pg_query` backend;
 - stable rule IDs and UTF-8 byte ranges for editor and CI integrations;
 - parse-equivalence, protected-token, comment-preservation, and idempotence safety gates.
@@ -71,7 +71,7 @@ Process Go files explicitly:
 semblock fmt --language go ./internal/...
 ```
 
-`check` and `diff` exit with code `1` when formatting changes are required, making both commands suitable for CI.
+`check` and `diff` exit with code `1` when formatting changes are required, making both commands suitable for CI. Add `--strict-unsupported` when unsupported syntax must fail CI and prevent every project write.
 
 ### Project and Git workflows
 
@@ -142,11 +142,12 @@ The formatter has fixture-backed structural support for substantial PostgreSQL s
 - enum/composite types, domains, sequences, triggers, and row-security policies;
 - `CREATE TABLE` with inheritance, typed tables, access/storage/tablespace/on-commit options, partition keys, `PARTITION OF`, and range/list/hash/default partition bounds;
 - feature-rich `CREATE INDEX`, multi-action `ALTER TABLE`, `CREATE VIEW`, and `CREATE MATERIALIZED VIEW`;
+- reviewed operational and migration utilities: `COPY` (including protected `FROM STDIN` payloads), `CALL`, `EXPLAIN`, `VACUUM`, `ANALYZE`, `REFRESH MATERIALIZED VIEW`, `LISTEN`, `NOTIFY`, extension/schema/statistics/collation/cast creation, and reviewed `ALTER TYPE` / domain / policy / rename forms;
 - parser-backed PL/pgSQL declarations, SQL statements, conditionals, exception handlers, loops, `FOREACH`, procedural `CASE`, dynamic `EXECUTE`, cursor operations, and reviewed `EXIT` / `CONTINUE` forms.
 
 Important remaining areas include advanced SQL/JSON (`JSON_TABLE`, SQL-standard JSON query/value/aggregate forms), `CREATE TABLE AS` / `LIKE`, `XMLTABLE`, and unreviewed PL/pgSQL nodes such as `ASSERT`, `RETURN QUERY`, and transaction control.
 
-A PostgreSQL statement may be valid while still being unsupported by the formatter. In that case, `semblock` preserves the statement and emits `syntax.unsupported`. This is a deliberate safety boundary, not a parser error.
+A PostgreSQL statement may be valid while still being unsupported by the formatter. By default, `semblock` preserves that statement byte-for-byte, emits a `syntax.unsupported` warning, and continues formatting supported statements in the same file or project. Set `format.unsupported_policy = "error"` or pass `--strict-unsupported` to make unsupported syntax fatal and retain project-wide no-write preflight. Malformed SQL and formatter safety failures are always errors.
 
 ## Directives
 
@@ -191,6 +192,7 @@ dialect = "postgresql"
 semicolon_policy = "preserve"
 not_equal_policy = "preserve"
 syntax_diagnostics = "parser_available"
+unsupported_policy = "skip"
 
 [layout]
 soft_line_width = 120
@@ -222,7 +224,7 @@ query.sql:0-6: error[casing.keyword]: SQL keyword or grammar construct must be `
 | `0` | Success. |
 | `1` | `check` or `diff` found formatting changes. |
 | `2` | Invalid CLI arguments or configuration. |
-| `3` | SQL, directive, or Go parse/validation failure. |
+| `3` | SQL, directive, or Go parse/validation failure, or unsupported syntax under explicit strict policy. |
 | `4` | Discovery, filesystem, or atomic replacement failure. |
 
 ## Build from source
@@ -260,7 +262,7 @@ cargo doc --locked --no-deps
 git diff --check
 ```
 
-New PostgreSQL syntax is added through explicit AST capability records, owned token ranges, golden fixtures, semantic-equivalence checks, and idempotence tests. Unsupported syntax must remain fail-safe.
+New PostgreSQL syntax is added through explicit AST capability records, owned token ranges, golden fixtures, semantic-equivalence checks, and idempotence tests. Unsupported syntax must remain byte-identical and non-fatal by default; strict unsupported policy is an explicit project choice.
 
 ## Agent skill
 

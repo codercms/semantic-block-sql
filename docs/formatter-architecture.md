@@ -500,3 +500,9 @@ original token stream in order.
 
 No new dependency or runtime registry was introduced. Unsupported neighbors
 continue to fail before token planning and preserve complete project atomicity.
+
+## Statement outcome classifier
+
+Top-level document processing now produces one outcome per PostgreSQL statement: formatted, unsupported/opaque, or fatal-invalid. Unsupported is not an error path by default. Reconstruction preserves source gaps outside owned statement spans, and style diagnostics are suppressed inside opaque unsupported ranges. Strict policy is applied only after all statement outcomes have been collected, preserving complete diagnostics and project-wide no-write behavior.
+
+Operational utilities remain a closed `UtilityStatementKind` capability set. Nested-query and option-bearing utilities receive explicit layout ownership; there is no generic parser-success fallback.

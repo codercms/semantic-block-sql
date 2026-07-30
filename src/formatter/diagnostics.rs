@@ -157,6 +157,19 @@ pub(super) fn warning_diagnostics(source: &str, warnings: &[FormatWarning]) -> V
         .collect()
 }
 
+pub(super) fn unsupported_diagnostic(
+    source: &str,
+    error: &FormatDiagnostic,
+    policy: super::UnsupportedPolicy,
+) -> Diagnostic {
+    let mut diagnostic = failure_diagnostic(source, error);
+    diagnostic.severity = match policy {
+        super::UnsupportedPolicy::Skip => Severity::Warning,
+        super::UnsupportedPolicy::Error => Severity::Error,
+    };
+    diagnostic
+}
+
 pub(super) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diagnostic {
     let rule_id = match error {
         FormatDiagnostic::InvalidOptions(_) => "config.invalid",

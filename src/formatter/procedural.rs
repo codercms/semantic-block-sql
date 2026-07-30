@@ -2,67 +2,7 @@ use serde_json::Value;
 
 use super::{FormatDiagnostic, FormatOptions, FormattedSql};
 
-pub(super) fn contains_routine(source: &str) -> Result<bool, FormatDiagnostic> {
-    let parsed = pg_query::parse(source)
-        .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
-    Ok(parsed.protobuf.stmts.iter().any(|raw| {
-        matches!(
-            raw.stmt.as_deref().and_then(|node| node.node.as_ref()),
-            Some(
-                pg_query::protobuf::node::Node::DoStmt(_)
-                    | pg_query::protobuf::node::Node::CreateFunctionStmt(_)
-            )
-        )
-    }))
-}
-
-pub(super) fn format_routine_document(
-    source: &str,
-    options: &FormatOptions,
-) -> Result<FormattedSql, FormatDiagnostic> {
-    let parsed = pg_query::parse(source)
-        .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
-    let mut output = String::with_capacity(source.len());
-    let mut cursor = 0usize;
-    for raw in &parsed.protobuf.stmts {
-        let start = usize::try_from(raw.stmt_location)
-            .unwrap_or(0)
-            .min(source.len());
-        let length = usize::try_from(raw.stmt_len).unwrap_or(0);
-        let mut end = if length == 0 {
-            source.len()
-        } else {
-            start.saturating_add(length).min(source.len())
-        };
-        if source.as_bytes().get(end) == Some(&b';') {
-            end += 1;
-        }
-        output.push_str(&source[cursor..start]);
-        let statement = &source[start..end];
-        let routine = matches!(
-            raw.stmt.as_deref().and_then(|node| node.node.as_ref()),
-            Some(
-                pg_query::protobuf::node::Node::DoStmt(_)
-                    | pg_query::protobuf::node::Node::CreateFunctionStmt(_)
-            )
-        );
-        if routine {
-            output.push_str(&format_single_routine(statement, options)?.output);
-        } else {
-            output.push_str(&super::format_sql(statement, options)?.output);
-        }
-        cursor = end;
-    }
-    output.push_str(&source[cursor..]);
-    Ok(FormattedSql {
-        changed: output != source,
-        output,
-        warnings: Vec::new(),
-        diagnostics: Vec::new(),
-    })
-}
-
-fn format_single_routine(
+pub(super) fn format_single_routine(
     source: &str,
     options: &FormatOptions,
 ) -> Result<FormattedSql, FormatDiagnostic> {
