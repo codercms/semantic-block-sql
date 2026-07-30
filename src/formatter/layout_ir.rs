@@ -370,7 +370,11 @@ impl LayoutDocument {
 
         for statement in &token_statements {
             let body_start = bind_body_start(tokens, structure.depths(), statement)?;
-            let authored_with = tokens[statement.range.start].kind == Token::With;
+            let authored_with = (statement.range.start..body_start)
+                .find(|index| {
+                    structure.depth(*index) == statement.base_depth && !tokens[*index].is_comment()
+                })
+                .is_some_and(|index| tokens[index].kind == Token::With);
             if authored_with != statement.spec.has_with() {
                 return Err(FormatDiagnostic::Ownership(format!(
                     "{} WITH ownership disagrees with the validated AST shape",

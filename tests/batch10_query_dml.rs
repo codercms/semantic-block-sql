@@ -56,6 +56,15 @@ fn formats_data_modifying_ctes_and_search_cycle_clauses() {
 }
 
 #[test]
+fn preserves_leading_comment_before_update_with_clause() {
+    assert_format(
+        "-- header\nWITH source AS (\n    SELECT 1 AS id\n)\nUPDATE items\nSET value = source.id\nFROM source\nWHERE items.id = source.id;",
+        "-- header\nWITH source AS (\n    SELECT 1 AS id\n)\nUPDATE items\nSET\n    value = source.id\nFROM source\nWHERE items.id = source.id;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
 fn formats_scalar_and_predicate_subqueries_in_dml() {
     assert_format(
         "update users set active=(select count(*) > 0 from sessions where sessions.user_id=users.id) where id in (select user_id from pending);",
