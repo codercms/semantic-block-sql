@@ -1,0 +1,18 @@
+package catalog
+
+import "testing"
+
+func TestQueryCorpusCompiles(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "active", query: "SELECT id, name FROM public.catalog_items WHERE active = TRUE;"},
+		{name: "by id", query: "SELECT id, name FROM public.catalog_items WHERE id = $1;"},
+	}
+	for _, test := range tests {
+		if test.query == "" {
+			t.Fatalf("%s has no query", test.name)
+		}
+	}
+}

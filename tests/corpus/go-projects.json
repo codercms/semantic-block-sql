@@ -1,0 +1,36 @@
+[
+  {
+    "name": "go-sqlmock",
+    "repository": "https://github.com/DATA-DOG/go-sqlmock.git",
+    "revision": "v1.5.2",
+    "license": "BSD-3-Clause",
+    "license_path": "LICENSE",
+    "include_paths": [],
+    "test_command": ["go", "test", "./..."],
+    "environment": {}
+  },
+  {
+    "name": "sqlx",
+    "repository": "https://github.com/jmoiron/sqlx.git",
+    "revision": "v1.4.0",
+    "license": "MIT",
+    "license_path": "LICENSE",
+    "include_paths": ["sqlx_test.go", "named_test.go", "bind_test.go"],
+    "test_command": ["go", "test", "./..."],
+    "environment": {
+      "SQLX_POSTGRES_DSN": "skip",
+      "SQLX_MYSQL_DSN": "skip",
+      "SQLX_SQLITE_DSN": "skip"
+    }
+  },
+  {
+    "name": "pgx-sanitize",
+    "repository": "https://github.com/jackc/pgx.git",
+    "revision": "v5.7.6",
+    "license": "MIT",
+    "license_path": "LICENSE",
+    "include_paths": ["internal/sanitize/"],
+    "test_command": ["go", "test", "./internal/sanitize"],
+    "environment": {}
+  }
+]

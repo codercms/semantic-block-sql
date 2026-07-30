@@ -30,32 +30,22 @@ fn formats_parser_backed_plpgsql_and_preserves_dollar_tags() {
 }
 
 #[test]
-fn rejects_unreviewed_procedural_nodes_without_changes() {
-    let source = "DO $$\nBEGIN\n    ASSERT active, 'must be active';\nEND;\n$$;";
-    let result = format_sql_result(source, &FormatOptions::default());
-    assert_eq!(result.output, source);
-    assert!(!result.changed);
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
+fn formats_assert_and_compact_bodies() {
+    assert_fixture(
+        "DO $$ BEGIN ASSERT active, 'must be active'; PERFORM 1; END; $$;",
+        "DO $$\nBEGIN\n    ASSERT active, 'must be active';\n    PERFORM 1;\nEND;\n$$;",
     );
 }
 
 #[test]
-fn rejects_non_plpgsql_and_compact_bodies() {
-    for source in [
-        "CREATE FUNCTION f() RETURNS int LANGUAGE SQL AS $$ SELECT 1 $$;",
-        "DO $$ BEGIN PERFORM 1; END; $$;",
-    ] {
-        let result = format_sql_result(source, &FormatOptions::default());
-        assert_eq!(result.output, source);
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.severity == Severity::Warning)
-        );
-    }
+fn rejects_non_plpgsql_bodies() {
+    let source = "CREATE FUNCTION f() RETURNS int LANGUAGE SQL AS $$ SELECT 1 $$;";
+    let result = format_sql_result(source, &FormatOptions::default());
+    assert_eq!(result.output, source);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == Severity::Warning)
+    );
 }

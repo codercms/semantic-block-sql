@@ -37,12 +37,21 @@ impl Default for DiscoveryConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoMultilineStringStyle {
+    #[default]
+    PreferRaw,
+    Preserve,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoConfig {
     pub enabled: bool,
     pub auto_detect: bool,
     pub raw_strings: bool,
     pub interpreted_strings: bool,
+    pub multiline_string_style: GoMultilineStringStyle,
 }
 
 impl Default for GoConfig {
@@ -51,7 +60,8 @@ impl Default for GoConfig {
             enabled: true,
             auto_detect: true,
             raw_strings: true,
-            interpreted_strings: false,
+            interpreted_strings: true,
+            multiline_string_style: GoMultilineStringStyle::PreferRaw,
         }
     }
 }
@@ -115,6 +125,7 @@ struct FileGoConfig {
     auto_detect: Option<bool>,
     raw_strings: Option<bool>,
     interpreted_strings: Option<bool>,
+    multiline_string_style: Option<GoMultilineStringStyle>,
 }
 
 impl Config {
@@ -150,7 +161,7 @@ impl Config {
 
     pub fn to_toml(&self) -> String {
         format!(
-            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\nunsupported_policy = \"{}\"\n\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nraw_strings = {}\ninterpreted_strings = {}\n",
+            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\nunsupported_policy = \"{}\"\n\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nraw_strings = {}\ninterpreted_strings = {}\nmultiline_string_style = \"{}\"\n",
             semicolon_policy_name(self.format.semicolon_policy),
             not_equal_policy_name(self.format.not_equal_policy),
             unsupported_policy_name(self.format.unsupported_policy),
@@ -162,6 +173,7 @@ impl Config {
             self.go.auto_detect,
             self.go.raw_strings,
             self.go.interpreted_strings,
+            go_multiline_string_style_name(self.go.multiline_string_style),
         )
     }
 
@@ -222,6 +234,9 @@ impl Config {
         if let Some(value) = file.go.interpreted_strings {
             config.go.interpreted_strings = value;
         }
+        if let Some(value) = file.go.multiline_string_style {
+            config.go.multiline_string_style = value;
+        }
 
         if config.format.soft_line_width == 0 {
             return Err(ConfigError::Invalid(
@@ -231,11 +246,6 @@ impl Config {
         if config.format.hard_line_width < config.format.soft_line_width {
             return Err(ConfigError::Invalid(
                 "layout.hard_line_width must be greater than or equal to soft_line_width".into(),
-            ));
-        }
-        if config.go.interpreted_strings {
-            return Err(ConfigError::Invalid(
-                "go.interpreted_strings is not supported by the MVP".into(),
             ));
         }
         Ok(config)
@@ -267,6 +277,13 @@ fn not_equal_policy_name(policy: NotEqualPolicy) -> &'static str {
     match policy {
         NotEqualPolicy::Preserve => "preserve",
         NotEqualPolicy::PreferBang => "prefer_bang",
+    }
+}
+
+fn go_multiline_string_style_name(style: GoMultilineStringStyle) -> &'static str {
+    match style {
+        GoMultilineStringStyle::PreferRaw => "prefer_raw",
+        GoMultilineStringStyle::Preserve => "preserve",
     }
 }
 

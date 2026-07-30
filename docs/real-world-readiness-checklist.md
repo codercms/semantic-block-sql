@@ -1,6 +1,6 @@
 # Real-world formatter readiness — durable three-PR checklist
 
-Status: **PR 1 complete; PR 2 in progress**
+Status: **All three implementation PRs complete**
 
 This roadmap is intentionally split into three stacked pull requests. Each PR
 must pass the complete repository quality gate and remain independently
@@ -134,102 +134,134 @@ PR 1 validation on 2026-07-30:
 
 ## P0 — Typed parser model
 
-- [ ] Replace JSON-name allowlisting as the primary renderer model with typed
+- [x] Replace JSON-name allowlisting as the primary renderer model with typed
   deserialization/adaptation into `PlpgsqlRoutine`, declarations, blocks,
   statements, branches, expressions, SQL units, cursors, and exception handlers.
-- [ ] Preserve parser source locations and exact source spans for every owned node.
-- [ ] Represent unmapped parser nodes as `Unsupported` only when a trustworthy
+- [x] Preserve parser source locations and exact source spans for every owned node.
+- [x] Represent unmapped parser nodes as `Unsupported` only when a trustworthy
   source span exists; otherwise preserve the complete routine.
-- [ ] Keep outer SQL routine extraction and exact dollar-tag ownership separate.
-- [ ] Commit P0.
+- [x] Keep outer SQL routine extraction and exact dollar-tag ownership separate.
+- [x] Commit P0.
 
 ## P1 — Procedural token binding and layout IR
 
-- [ ] Add procedural tokenization/binding independent from original source lines.
-- [ ] Build a dedicated layout IR for sequences, declarations, branches, labels,
+- [x] Add procedural tokenization/binding independent from original source lines.
+- [x] Build a dedicated layout IR for sequences, declarations, branches, labels,
   nested blocks, embedded SQL, comments, and opaque unsupported spans.
-- [ ] Preserve comment attachment, protected literals, authored blank-line groups,
+- [x] Preserve comment attachment, protected literals, authored blank-line groups,
   custom dollar tags, and CRLF.
-- [ ] Remove the line-oriented frame renderer after parity fixtures pass.
-- [ ] Commit P1.
+- [x] Remove the line-oriented frame renderer after parity fixtures pass.
+- [x] Commit P1.
 
 ## P2 — Formatter coverage
 
-- [ ] Format compact and multi-statement single-line bodies.
-- [ ] Format multiline declarations, assignments, conditions, and dynamic execute
+- [x] Format compact and multi-statement single-line bodies.
+- [x] Format multiline declarations, assignments, conditions, and dynamic execute
   arguments structurally.
-- [ ] Support `ASSERT`.
-- [ ] Support `RETURN QUERY` and reviewed `RETURN QUERY EXECUTE` forms.
-- [ ] Preserve unsupported procedural statements while formatting safely bound
+- [x] Support `ASSERT`.
+- [x] Support `RETURN QUERY` and reviewed `RETURN QUERY EXECUTE` forms.
+- [x] Preserve unsupported procedural statements while formatting safely bound
   supported siblings under default policy.
-- [ ] Strict policy makes unsupported routine nodes fatal without writes.
-- [ ] Retain existing blocks, IF/CASE, loops, FOREACH, cursors, RAISE, diagnostics,
+- [x] Strict policy makes unsupported routine nodes fatal without writes.
+- [x] Retain existing blocks, IF/CASE, loops, FOREACH, cursors, RAISE, diagnostics,
   exceptions, EXIT/CONTINUE, and dynamic EXECUTE behavior through the new IR.
-- [ ] Add nested control-flow, comments, compact-body, equivalence, and idempotence
+- [x] Add nested control-flow, comments, compact-body, equivalence, and idempotence
   fixtures.
-- [ ] Commit P2.
+- [x] Commit P2.
 
 ## P3 — PR 2 reconciliation
 
-- [ ] Add mixed ordinary SQL/routine and mixed supported/unsupported routine tests.
-- [ ] Update documentation and remove obsolete renderer helpers.
-- [ ] Run the complete offline quality gate and self-review.
-- [ ] Produce a verified PR 2 git bundle and SHA-256 file.
-- [ ] Record stacked Windows apply/push/PR instructions.
+- [x] Add mixed ordinary SQL/routine and mixed supported/unsupported routine tests.
+- [x] Update documentation and remove obsolete renderer helpers.
+- [x] Run the complete offline quality gate and self-review.
+- [x] Produce a verified PR 2 git bundle and SHA-256 file.
+- [x] Record stacked Windows apply/push/PR instructions.
+
+
+PR 2 validation on 2026-07-30:
+
+- The line-oriented frame renderer was removed and replaced by typed parser adaptation, span-bearing procedural IR, and a separate layout pass.
+- Compact bodies, `ASSERT`, `RETURN QUERY`, and opaque transaction-control siblings are covered.
+- Existing blocks, loops, CASE, cursors, dynamic execution, comments, dollar tags, CRLF, equivalence, and idempotence remain covered.
+- The full offline gate passed with 177 tests, Clippy warnings denied, Rustdoc, formatting, and `git diff --check`.
 
 # PR 3 — Real Go string-expression coverage
 
+Status: **Complete**
+
 ## G0 — Go string codec and expression IR
 
-- [ ] Add a complete interpreted-string decoder for Go escapes.
-- [ ] Add deterministic interpreted-string encoding and round-trip tests against
+- [x] Add a complete interpreted-string decoder for Go escapes.
+- [x] Add deterministic interpreted-string encoding and round-trip tests against
   Go `strconv.Unquote` / `strconv.Quote` in the test toolchain.
-- [ ] Add `GoStringExpression` IR for raw literals, interpreted literals, and
+- [x] Add `GoStringExpression` IR for raw literals, interpreted literals, and
   static literal-only concatenations.
-- [ ] Classify expression contexts directly rather than relying only on broad
+- [x] Classify expression contexts directly rather than relying only on broad
   declaration owners.
-- [ ] Commit G0.
+- [x] Include G0 in the combined G0–G2 durable checkpoint.
 
 ## G1 — Real expression contexts
 
-- [ ] Support declaration and assignment values.
-- [ ] Support direct and nested function-call arguments.
-- [ ] Support return values, standalone calls, `defer`, and `go` calls.
-- [ ] Support struct/composite literal fields, map values, slice/array elements,
+- [x] Support declaration and assignment values.
+- [x] Support direct and nested function-call arguments.
+- [x] Support return values, standalone calls, `defer`, and `go` calls.
+- [x] Support struct/composite literal fields, map values, slice/array elements,
   and test-table entries.
-- [ ] Exclude import paths, struct tags, build directives, runes, and non-expression
+- [x] Exclude import paths, struct tags, build directives, runes, and non-expression
   strings structurally.
-- [ ] Support literal-only static concatenation and preserve dynamic expressions.
-- [ ] Make explicit SQL markers work on interpreted/static string expressions.
-- [ ] Commit G1.
+- [x] Support literal-only static concatenation and preserve dynamic expressions.
+- [x] Make explicit SQL markers work on interpreted/static string expressions.
+- [x] Include G1 in the combined G0–G2 durable checkpoint.
 
 ## G2 — Rewriting policy and safety
 
-- [ ] Enable interpreted strings by default.
-- [ ] Preserve one-line interpreted output when formatted SQL stays one line.
-- [ ] Convert multiline interpreted SQL to raw strings when exact and legal.
-- [ ] Fall back to deterministic interpreted escaping when SQL contains backticks,
+- [x] Enable interpreted strings by default.
+- [x] Preserve one-line interpreted output when formatted SQL stays one line.
+- [x] Convert multiline interpreted SQL to raw strings when exact and legal.
+- [x] Fall back to deterministic interpreted escaping when SQL contains backticks,
   carriage returns, or another raw-string blocker.
-- [ ] Decode replacements and verify exact runtime string value.
-- [ ] Reparse the complete Go source, run `gofmt`, and require idempotence.
-- [ ] Ensure unsupported SQL warnings do not suppress other literal replacements.
-- [ ] Commit G2.
+- [x] Decode replacements and verify exact runtime string value.
+- [x] Reparse the complete Go source, run `gofmt`, and require idempotence.
+- [x] Ensure unsupported SQL warnings do not suppress other literal replacements.
+- [x] Commit G0–G2 as one durable implementation checkpoint.
+
+G0–G2 checkpoint validation on 2026-07-30:
+
+- interpreted and raw Go strings use a checked decode/format/re-encode path;
+- inline/nested call arguments, declarations, assignments, returns, standalone,
+  defer/go calls, composite values, and literal-only concatenations are covered;
+- dynamic expressions remain unchanged and follow the default/strict unsupported policy;
+- replacement runtime values are re-decoded and compared before applying edits;
+- the complete Go file reparses, the realistic fixture remains `gofmt`-clean and
+  compiles with `go test ./...`, and formatting remains idempotent;
+- the full offline gate passed with 187 tests, Clippy warnings denied, Rustdoc,
+  formatting, and `git diff --check`.
 
 ## G3 — Real-project corpus
 
-- [ ] Expand the checked-in golden project with realistic repository, migration,
+- [x] Expand the checked-in golden project with realistic repository, migration,
   test-table, pgx/database-sql/sqlx-like, nested-call, and inline-literal patterns.
-- [ ] Add a pinned external-project corpus manifest and opt-in runner for several
+- [x] Add a pinned external-project corpus manifest and opt-in runner for several
   permissively licensed Go projects.
-- [ ] Report candidate, formatted, unsupported, false-positive, build, and test
+- [x] Report candidate, formatted, unsupported, false-positive, build, and test
   outcomes.
-- [ ] Require `gofmt`, selected `go test`, and semblock idempotence.
-- [ ] Keep the normal offline CI independent from network corpus execution.
-- [ ] Commit G3.
+- [x] Require `gofmt`, selected `go test`, and semblock idempotence.
+- [x] Keep the normal offline CI independent from network corpus execution.
+- [x] Commit G3.
 
 ## G4 — PR 3 reconciliation
 
-- [ ] Update README/config/docs and remove the interpreted-string MVP limitation.
-- [ ] Run the complete offline quality gate and architecture/dead-code review.
-- [ ] Produce a verified PR 3 git bundle and SHA-256 file.
-- [ ] Record stacked Windows apply/push/PR instructions.
+- [x] Update README/config/docs and remove the interpreted-string MVP limitation.
+- [x] Run the complete offline quality gate and architecture/dead-code review.
+- [x] Produce a verified PR 3 git bundle and SHA-256 file.
+- [x] Record stacked Windows apply/push/PR instructions.
+
+
+PR 3 final evidence on 2026-07-30:
+
+- the offline golden project covers interpreted/raw strings, nested calls, composite/test-table values, static and dynamic expressions, `defer`, `go`, migrations, and PL/pgSQL;
+- complete files match adjacent goldens, serial/parallel bytes match, `gofmt` is clean, `go test ./...` passes, and the second semblock pass is byte-idempotent;
+- `tests/corpus/go-projects.json` pins three permissively licensed external releases;
+- `examples/go_corpus.rs` resolves and reports exact commit SHAs and candidate, formatting, unsupported, potential false-positive skip, dynamic, diagnostics, gofmt, idempotence, and test outcomes;
+- external execution is explicit and networked, while normal CI only compiles the runner and validates the manifest;
+- the complete offline gate passed with 189 tests, Clippy warnings denied, Rustdoc, formatting, and `git diff --check`.

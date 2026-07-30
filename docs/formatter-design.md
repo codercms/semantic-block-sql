@@ -48,11 +48,12 @@ alternative-layout preservation remains to be reconciled. Explicit support
 classification now prevents unimplemented syntax from falling through to generic
 token normalization.
 
-Earlier project requests also clarified these application-level points:
+Current application-level decisions are:
 
-- Go interpreted strings are **disabled for MVP**. Raw backtick strings come
-  first; interpreted strings require a separately proven
-  decode/format/re-encode round trip.
+- Go interpreted strings are enabled after a complete decode/format/re-encode
+  round trip and runtime-value verification were implemented.
+- Multiline interpreted SQL prefers a raw literal when lossless and otherwise
+  uses deterministic interpreted escaping.
 - Default configuration is:
 
   ```toml
@@ -60,7 +61,8 @@ Earlier project requests also clarified these application-level points:
   enabled = true
   auto_detect = true
   raw_strings = true
-  interpreted_strings = false
+  interpreted_strings = true
+  multiline_string_style = "prefer_raw"
   ```
 
 - The original ZIP is retained as immutable provenance. The unpacked
@@ -501,29 +503,19 @@ preserved, and the complete rewritten Go file is reparsed. A compact one-line
 raw string may expand to multiple SQL-root lines without adding host-language
 indentation to the SQL body.
 
-### Supported Go owners and literal usage
+### Supported Go string expressions and contexts
 
-The extractor uses a closed `GoSqlOwnerKind` capability list. Complete raw SQL
-literals may be owned by:
+The extractor owns expression-level raw literals, interpreted literals, and
+literal-only static concatenations. Eligible contexts include declarations,
+assignments, returns, direct and nested call arguments, standalone calls,
+`defer`, `go`, and composite-literal values such as struct fields, map values,
+slice/array elements, and table-driven test cases.
 
-- package or local `const` declarations;
-- package or local `var` declarations;
-- short variable declarations;
-- assignment statements;
-- return statements;
-- expression statements.
-
-This includes a literal nested as a call argument, such as direct
-`return db.QueryContext(...)` and standalone `db.ExecContext(...)` calls. It
-does not depend on `database/sql` names; ownership is determined only from the
-Go syntax tree. `defer_statement` and `go_statement` remain unsupported until
-fixture-backed.
-
-A raw literal with a Go `binary_expression` between the literal and its owner is
-classified as a concatenated fragment. Auto-detection skips that literal while
-continuing to process unrelated complete literals in the same declaration or
-file. An explicit SQL marker on a concatenated fragment is an error because no
-fragment decode/format/recompose contract exists.
+Detection is independent from database package or function names. Import paths,
+struct tags, build directives, runes, comments, and incomplete fragments are
+excluded structurally. Runtime-dependent concatenations remain byte-identical;
+an explicit SQL marker reports them through the default/strict unsupported
+policy while supported sibling expressions continue formatting.
 
 ### Go project integration evidence
 
@@ -646,6 +638,7 @@ dialect = "postgresql"
 semicolon_policy = "preserve"
 not_equal_policy = "preserve"
 syntax_diagnostics = "parser_available"
+unsupported_policy = "skip"
 
 [layout]
 soft_line_width = 120
@@ -659,7 +652,8 @@ ignore_file = ".semblockignore"
 enabled = true
 auto_detect = true
 raw_strings = true
-interpreted_strings = false
+interpreted_strings = true
+multiline_string_style = "prefer_raw"
 ```
 
 Four-space indentation and authored group, blank-line, and comment-boundary
@@ -668,9 +662,8 @@ rules are rejected by strict TOML parsing.
 
 Configuration starts with built-in defaults, then applies the first
 `semblock.toml` found from the current directory upward. `--config` replaces
-that search with an explicit path. Unknown keys, invalid widths, unsupported
-dialects, path-like ignore filenames, and enabled interpreted Go strings are
-configuration errors.
+that search with an explicit path. Unknown keys, invalid widths, unsupported dialects, path-like ignore filenames,
+and invalid policy values are configuration errors.
 
 ## MVP non-goals
 
@@ -722,27 +715,30 @@ OF`, and range/list/hash/default partition bounds. Adjacent syntax such as
 ## Parser-backed PL/pgSQL routine bodies
 
 `DO` blocks and dollar-quoted PL/pgSQL function/procedure bodies use a dedicated
-nested parser boundary. The outer statement is parsed by PostgreSQL's ordinary
-parser; the body is independently parsed through the pinned
-`pg_query::parse_plpgsql` API. Formatting is admitted only when both parsers
-recognize a fixture-backed procedural node set.
-
-The supported subset covers declarations, nested blocks, ordinary SQL statements,
-assignments, `PERFORM`, returns, `IF`/`ELSIF`/`ELSE`, raises, diagnostics,
-exception handlers, basic/WHILE/integer/query/cursor `FOR` loops, `FOREACH`,
-searched and simple procedural `CASE`, dynamic `EXECUTE`, cursor declaration and
-control, and reviewed labeled or unlabeled `EXIT` / `CONTINUE` forms. Embedded
-SQL reuses the normal formatter facade.
-
-Dollar-quote tags and protected literals are preserved exactly. A frame-based
-body renderer owns indentation for nested blocks and branches. Output is reparsed
-by both PostgreSQL parsers; normalized procedural expression/query trees and
-idempotence are checked before accepting the result. Unreviewed nodes such as
-`ASSERT`, `RETURN QUERY`, and transaction control return `syntax.unsupported`
-with unchanged source.
+nested parser boundary. `parse_plpgsql` nodes are adapted into typed capability
+categories and scanner-bound source spans, then rendered through a procedural
+layout IR independent from authored line boundaries. Compact bodies, declarations,
+blocks, SQL statements, assignments, conditionals, loops, `FOREACH`, procedural
+`CASE`, dynamic execution, cursor operations, diagnostics, exceptions, `ASSERT`,
+and reviewed `RETURN QUERY` forms are covered. Transaction control remains opaque
+and follows the default/strict unsupported policy.
 
 ## Statement-granular unsupported policy
 
 The formatter classifies every parser-proven top-level statement independently. A supported statement is formatted through the normal validation, ownership, equivalence, protected-token, and idempotence gates. A valid but unsupported statement is copied byte-for-byte and receives `syntax.unsupported`. The default `UnsupportedPolicy::Skip` reports that diagnostic as a warning and continues with supported siblings. `UnsupportedPolicy::Error` collects all unsupported statements, elevates them to errors, and returns the complete original document unchanged. PostgreSQL parse errors and formatter safety failures remain fatal under both policies.
 
 `COPY ... FROM STDIN` is split into an AST-validated header plus a protected payload ending at `\.`. Only the header is formatted; payload bytes are never scanned or rewritten.
+
+## Typed PL/pgSQL semantic and layout IR
+
+Routine bodies are no longer formatted from authored lines. `parse_plpgsql` is adapted into typed parser capability categories, while PostgreSQL scanner tokens are bound into a span-bearing `RoutineBody` IR containing declarations, control headers, statements, comments, and opaque units. A separate procedural layout pass owns indentation and blank-line policy. This enables compact and multi-statement single-line bodies without weakening the outer PostgreSQL parser boundary.
+
+`ASSERT` and `RETURN QUERY` are formatter-owned. Trustworthy opaque transaction-control spans are preserved and diagnosed per statement, so supported routine siblings still format under the default unsupported policy; strict policy restores the complete routine/document.
+
+## Go interpreted-string and corpus contract
+
+The Go host layer classifies string expressions structurally. It owns raw literals, interpreted literals, and compile-time concatenations containing only literal operands in declarations, assignments, return values, direct/nested call arguments, `defer`/`go` calls, and composite literal values. Dynamic expressions and non-expression strings remain byte-identical.
+
+Interpreted strings are decoded with the complete Go escape grammar. A multiline formatted value is emitted as a raw string only when no raw-string blocker exists; otherwise it is deterministically escaped. The emitted literal is decoded and compared with the intended runtime value before the complete Go source is reparsed. Auto-detected parse failures remain safe skips; explicit malformed SQL remains fatal.
+
+Real-project confidence has two layers: an offline, checked-in multi-package golden project compiled with `go test ./...`, and an opt-in external runner over immutable release refs. The runner reports discovered expressions, eligible candidates, formatted and unchanged SQL expressions, unsupported expressions, potential false-positive parse skips, dynamic expressions, diagnostics, `gofmt`, idempotence, and project-test results.

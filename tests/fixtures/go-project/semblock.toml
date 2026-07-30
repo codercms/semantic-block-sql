@@ -8,4 +8,4 @@ hard_line_width = 160
 enabled = true
 auto_detect = true
 raw_strings = true
-interpreted_strings = false
+interpreted_strings = true
