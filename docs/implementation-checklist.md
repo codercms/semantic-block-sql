@@ -624,6 +624,8 @@ Evidence:
 - `tests/batch9_migrations.rs` and `tests/fixtures/batch9/` cover common migration
   statements and adjacent unsupported shapes;
 - `tests/batch10_query_dml.rs` covers INTO, locks, CTE extensions, and subqueries;
+  it also proves that leading statement comments remain attached while WITH
+  ownership is bound from the first non-comment syntax token;
 - `tests/batch11_relations_tables.rs` covers advanced relation sources and table
   or partition DDL;
 - `tests/batch12_plpgsql_control.rs` and `tests/fixtures/batch12/` cover procedural
