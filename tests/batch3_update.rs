@@ -32,7 +32,7 @@ fn compact_single_assignment_update_stays_inline() {
 #[test]
 fn update_from_separates_set_source_predicate_and_returning() {
     let source = "update public.items item set title=source.title, updated_at=now() from staging.items source where item.id=source.id and source.ready=true returning item.id, item.updated_at;";
-    let expected = "UPDATE public.items item\nSET\n    title = source.title,\n    updated_at = NOW()\nFROM staging.items source\nWHERE\n    item.id = source.id\n    AND source.ready = TRUE\nRETURNING\n    item.id,\n    item.updated_at;";
+    let expected = "UPDATE public.items item\nSET title = source.title, updated_at = NOW()\nFROM staging.items source\nWHERE\n    item.id = source.id\n    AND source.ready = TRUE\nRETURNING item.id, item.updated_at;";
 
     assert_format(source, expected);
 
@@ -56,19 +56,25 @@ fn update_set_comments_remain_attached() {
 }
 
 #[test]
+fn update_lists_preserve_authored_groups_within_the_hard_limit() {
+    let source = "UPDATE items\nSET\n    status='ready', claimed_revision=revision,\n    claim_token=gen_random_uuid(), updated_at=NOW()\nWHERE id=$1\nRETURNING\n    id,status,\n    claim_token;";
+    let expected = "UPDATE items\nSET\n    status = 'ready', claimed_revision = revision,\n    claim_token = gen_random_uuid(), updated_at = NOW()\nWHERE id = $1\nRETURNING\n    id, status,\n    claim_token;";
+
+    assert_format(source, expected);
+}
+
+#[test]
 fn update_supports_expanded_sources_and_subqueries() {
     assert_format(
         "UPDATE items SET title = source.title FROM ROWS FROM (jsonb_each_text(payload)) source;",
         "UPDATE items
-SET
-    title = source.title
+SET title = source.title
 FROM ROWS FROM (jsonb_each_text(payload)) source;",
     );
     assert_format(
         "UPDATE items SET title = source.title FROM staging.items source TABLESAMPLE SYSTEM (10);",
         "UPDATE items
-SET
-    title = source.title
+SET title = source.title
 FROM staging.items source TABLESAMPLE SYSTEM (10);",
     );
     assert_format(

@@ -30,7 +30,7 @@ fn assert_format(source: &str, expected: &str) {
 fn formats_multiple_update_and_delete_sources() {
     assert_format(
         "update public.items i set title=s.title,updated_at=now() from public.source_items s, public.batches b where s.item_id=i.id and b.id=s.batch_id returning i.id;",
-        "UPDATE public.items i\nSET\n    title = s.title,\n    updated_at = NOW()\nFROM\n    public.source_items s,\n    public.batches b\nWHERE\n    s.item_id = i.id\n    AND b.id = s.batch_id\nRETURNING i.id;",
+        "UPDATE public.items i\nSET title = s.title, updated_at = NOW()\nFROM\n    public.source_items s,\n    public.batches b\nWHERE\n    s.item_id = i.id\n    AND b.id = s.batch_id\nRETURNING i.id;",
     );
 
     assert_format(
@@ -43,7 +43,7 @@ fn formats_multiple_update_and_delete_sources() {
 fn formats_joined_dml_sources_and_owns_join_predicates() {
     assert_format(
         "update public.items i set title=s.title from public.source_items s join public.batches b on b.id=s.batch_id where i.id=s.item_id;",
-        "UPDATE public.items i\nSET\n    title = s.title\nFROM public.source_items s\nJOIN public.batches b ON b.id = s.batch_id\nWHERE i.id = s.item_id;",
+        "UPDATE public.items i\nSET title = s.title\nFROM public.source_items s\nJOIN public.batches b ON b.id = s.batch_id\nWHERE i.id = s.item_id;",
     );
 
     assert_format(
@@ -53,7 +53,7 @@ fn formats_joined_dml_sources_and_owns_join_predicates() {
 
     assert_format(
         "update items i set title=s.title from source_items s cross join batches b where i.id=s.item_id;",
-        "UPDATE items i\nSET\n    title = s.title\nFROM source_items s\nCROSS JOIN batches b\nWHERE i.id = s.item_id;",
+        "UPDATE items i\nSET title = s.title\nFROM source_items s\nCROSS JOIN batches b\nWHERE i.id = s.item_id;",
     );
 
     assert_format(
@@ -63,7 +63,7 @@ fn formats_joined_dml_sources_and_owns_join_predicates() {
 
     assert_format(
         "update items i set title=s.title from source_items s right join batches b using(id,batch_id) where i.id=s.item_id;",
-        "UPDATE items i\nSET\n    title = s.title\nFROM source_items s\nRIGHT JOIN batches b USING (id, batch_id)\nWHERE i.id = s.item_id;",
+        "UPDATE items i\nSET title = s.title\nFROM source_items s\nRIGHT JOIN batches b USING (id, batch_id)\nWHERE i.id = s.item_id;",
     );
 
     assert_format(
@@ -81,22 +81,22 @@ fn formats_derived_and_function_dml_sources() {
 
     assert_format(
         "update public.items i set title=f.value from lateral jsonb_each_text(i.payload) with ordinality as f where f.key='title';",
-        "UPDATE public.items i\nSET\n    title = f.value\nFROM LATERAL jsonb_each_text(i.payload) WITH ORDINALITY AS f\nWHERE f.key = 'title';",
+        "UPDATE public.items i\nSET title = f.value\nFROM LATERAL jsonb_each_text(i.payload) WITH ORDINALITY AS f\nWHERE f.key = 'title';",
     );
 
     assert_format(
         "update public.items i set title=s.title from (select id,title,batch_id from staging.items where active) s join public.batches b on b.id=s.batch_id where i.id=s.id;",
-        "UPDATE public.items i\nSET\n    title = s.title\nFROM (\n    SELECT id, title, batch_id\n    FROM staging.items\n    WHERE active\n) s\nJOIN public.batches b ON b.id = s.batch_id\nWHERE i.id = s.id;",
+        "UPDATE public.items i\nSET title = s.title\nFROM (\n    SELECT id, title, batch_id\n    FROM staging.items\n    WHERE active\n) s\nJOIN public.batches b ON b.id = s.batch_id\nWHERE i.id = s.id;",
     );
 
     assert_format(
         "update public.items i set title=s.title from (public.source_items s join public.batches b on b.id=s.batch_id) source where i.id=s.item_id;",
-        "UPDATE public.items i\nSET\n    title = s.title\nFROM (\n    public.source_items s\n    JOIN public.batches b ON b.id = s.batch_id\n) source\nWHERE i.id = s.item_id;",
+        "UPDATE public.items i\nSET title = s.title\nFROM (\n    public.source_items s\n    JOIN public.batches b ON b.id = s.batch_id\n) source\nWHERE i.id = s.item_id;",
     );
 
     assert_format(
         "update public.items i set title=s.title from (select s.id,s.title from staging.items s join public.batches b on b.id=s.batch_id where s.active) s where i.id=s.id;",
-        "UPDATE public.items i\nSET\n    title = s.title\nFROM (\n    SELECT s.id, s.title\n    FROM staging.items s\n    JOIN public.batches b ON b.id = s.batch_id\n    WHERE s.active\n) s\nWHERE i.id = s.id;",
+        "UPDATE public.items i\nSET title = s.title\nFROM (\n    SELECT s.id, s.title\n    FROM staging.items s\n    JOIN public.batches b ON b.id = s.batch_id\n    WHERE s.active\n) s\nWHERE i.id = s.id;",
     );
 }
 
@@ -147,7 +147,7 @@ fn formats_materialized_view_storage_and_population_mode() {
 #[test]
 fn comments_remain_attached_across_source_and_view_boundaries() {
     let source = "UPDATE items i\nSET title = s.title\nFROM source_items s -- source ownership\nJOIN batches b ON b.id = s.batch_id\nWHERE i.id = s.item_id;\n\nCREATE VIEW active_items AS\nSELECT id -- public identifier\nFROM items\nWHERE active\nWITH LOCAL CHECK OPTION;\n";
-    let expected = "UPDATE items i\nSET\n    title = s.title\nFROM source_items s -- source ownership\nJOIN batches b ON b.id = s.batch_id\nWHERE i.id = s.item_id;\n\nCREATE VIEW active_items\nAS\nSELECT id -- public identifier\nFROM items\nWHERE active\nWITH LOCAL CHECK OPTION;\n";
+    let expected = "UPDATE items i\nSET title = s.title\nFROM source_items s -- source ownership\nJOIN batches b ON b.id = s.batch_id\nWHERE i.id = s.item_id;\n\nCREATE VIEW active_items\nAS\nSELECT id -- public identifier\nFROM items\nWHERE active\nWITH LOCAL CHECK OPTION;\n";
     assert_format(source, expected);
 }
 

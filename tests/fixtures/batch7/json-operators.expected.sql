@@ -14,11 +14,8 @@ WHERE
     AND metadata ?& ARRAY['id', 'status'];
 
 UPDATE public.items
-SET
-    metadata = metadata || $1::jsonb
+SET metadata = metadata || $1::jsonb
 WHERE metadata ->> 'status' = $2
-RETURNING
-    id,
-    metadata #>> '{profile,name}' AS name;
+RETURNING id, metadata #>> '{profile,name}' AS name;
 
 INSERT INTO public.events (payload) VALUES ($1::jsonb #- '{temporary}') RETURNING payload ->> 'type' AS event_type;

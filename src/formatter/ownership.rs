@@ -431,7 +431,15 @@ impl StatementSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SourceStatement {
     pub spec: StatementSpec,
+    pub ctes: Vec<CteStatementSpec>,
     pub range: SourceRange,
+}
+
+/// AST-validated statement body owned by one common table expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CteStatementSpec {
+    pub spec: StatementSpec,
+    pub ctes: Vec<CteStatementSpec>,
 }
 
 /// AST-validated top-level ownership model shared by validation and layout.
@@ -476,6 +484,7 @@ impl TokenRange {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct StatementTokens {
     pub spec: StatementSpec,
+    pub ctes: Vec<CteStatementSpec>,
     pub range: TokenRange,
     pub semicolon: Option<usize>,
     pub base_depth: usize,
@@ -485,6 +494,7 @@ pub(super) fn source_statement(
     source: &str,
     raw: &RawStmt,
     spec: StatementSpec,
+    ctes: Vec<CteStatementSpec>,
 ) -> SourceStatement {
     let start = usize::try_from(raw.stmt_location)
         .unwrap_or(0)
@@ -500,6 +510,7 @@ pub(super) fn source_statement(
     }
     SourceStatement {
         spec,
+        ctes,
         range: SourceRange::new(start, end),
     }
 }
@@ -544,6 +555,7 @@ pub(super) fn bind_token_statements(
         let base_depth = depths[start];
         result.push(StatementTokens {
             spec: statement.spec.clone(),
+            ctes: statement.ctes.clone(),
             range,
             semicolon,
             base_depth,
@@ -585,6 +597,7 @@ mod tests {
                     locking_clauses: 0,
                     from: RelationListSpec::default(),
                 }),
+                ctes: Vec::new(),
                 range: SourceRange::new(0, 9),
             },
             SourceStatement {
@@ -595,6 +608,7 @@ mod tests {
                     has_where: false,
                     returning_items: 0,
                 }),
+                ctes: Vec::new(),
                 range: SourceRange::new(10, source.len()),
             },
         ]);
@@ -622,6 +636,7 @@ mod tests {
                 locking_clauses: 0,
                 from: RelationListSpec::default(),
             }),
+            ctes: Vec::new(),
             range: SourceRange::new(0, source.len()),
         }]);
         let depths = vec![0; tokens.len()];

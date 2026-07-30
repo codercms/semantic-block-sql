@@ -12,16 +12,12 @@ const legacy = `
 
 const updateFromImport = `
 UPDATE public.orders item
-SET
-    total = source.total,
-    updated_at = NOW()
+SET total = source.total, updated_at = NOW()
 FROM staging.orders source
 WHERE
     item.id = source.id
     AND source.ready = TRUE
-RETURNING
-    item.id,
-    item.updated_at;
+RETURNING item.id, item.updated_at;
 `
 
 const deleteExpired = `

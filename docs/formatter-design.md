@@ -437,12 +437,13 @@ predicate remains owned by the update action. SELECT-backed WITH clauses reuse
 the same `WithBlock` for SELECT, INSERT, UPDATE, DELETE, and MERGE.
 
 The UPDATE planner supports a target relation, simple named assignments,
-optional one-relation `FROM`, `WHERE`, and `RETURNING`. A short single-assignment
-statement remains compact. Once authored layout, width, `FROM`, or a complex
-predicate expands the statement, `SET` owns one assignment per line and the
-remaining clauses start at statement scope. `WITH`, `ONLY`, multi-column or
-subscripted assignment targets, multiple or joined FROM sources, and subqueries
-remain fail-safe unsupported shapes.
+optional one-relation `FROM`, `WHERE`, and `RETURNING`. Statement-level
+expansion separates UPDATE clauses, but does not force locally compact `SET` or
+`RETURNING` lists to expand. Each list uses its own authored groups, complexity,
+and width: authored groups remain stable while they fit the hard limit, and a
+list that requires expansion breaks only at safe item boundaries. `WITH`,
+`ONLY`, multi-column or subscripted assignment targets, multiple or joined FROM
+sources, and subqueries remain fail-safe unsupported shapes.
 
 The MERGE planner is a separate exhaustive statement variant because its branch
 ownership is grammar-specific. `MergeBlock` owns USING/ON, ordered WHEN
@@ -706,6 +707,14 @@ inside UPDATE, DELETE, and MERGE expressions. Relation-source capabilities cover
 `ROWS FROM`, `TABLESAMPLE` / `REPEATABLE`, alias column or definition lists, and
 derived queries containing `WITH`. These are AST capabilities consumed by the
 existing query and relation binders, not document-wide keyword scans.
+
+Validated CTE body statements remain part of the typed ownership tree instead
+of being discarded after the support gate. Nested INSERT, UPDATE, DELETE, and
+MERGE bodies are bound to their CTE token ranges and dispatched through the same
+statement planners as top-level DML. SELECT bodies continue through the shared
+query planner. Predicate subqueries carry a layout indent separately from their
+scanner depth so each enclosing IN, EXISTS, ANY, or ALL block remains visible
+without weakening structural token matching.
 
 `CREATE TABLE` validation now owns inheritance, typed tables, access methods,
 storage parameters, tablespaces, on-commit modes, partition keys, `PARTITION

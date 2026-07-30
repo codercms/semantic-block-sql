@@ -93,8 +93,7 @@ fn shares_with_ownership_with_update_and_delete() {
     FROM staging.items
 )
 UPDATE public.items
-SET
-    title = source.title
+SET title = source.title
 FROM source
 WHERE public.items.id = source.id
 RETURNING public.items.id;",

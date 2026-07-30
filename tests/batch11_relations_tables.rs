@@ -50,7 +50,7 @@ fn formats_derived_with_queries_and_alias_column_lists() {
     );
     assert_format(
         "update items target set title=source.title from (with recent as (select id,title from staging) select id,title from recent) as source(id,title) where target.id=source.id;",
-        "UPDATE items target\nSET\n    title = source.title\nFROM (WITH recent AS (\n        SELECT id, title\n        FROM staging\n    )\n    SELECT id, title\n    FROM recent\n) AS source (id, title)\nWHERE target.id = source.id;",
+        "UPDATE items target\nSET title = source.title\nFROM (WITH recent AS (\n        SELECT id, title\n        FROM staging\n    )\n    SELECT id, title\n    FROM recent\n) AS source (id, title)\nWHERE target.id = source.id;",
     );
 }
 

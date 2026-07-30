@@ -3,7 +3,7 @@ use pg_query::protobuf::Token;
 use super::FormatDiagnostic;
 use super::ownership::{
     AlterTableActionGroup, CreateTableElementSpec, RelationItemSpec, StatementSpec,
-    SupportedDocument, TokenRange, UtilityStatementKind, bind_token_statements,
+    StatementTokens, SupportedDocument, TokenRange, UtilityStatementKind, bind_token_statements,
 };
 use super::structure::TokenStructure;
 use super::tokens::SqlToken;
@@ -81,6 +81,7 @@ pub(super) struct QueryBlock {
     pub list_start: usize,
     pub end: usize,
     pub base_depth: usize,
+    pub indent: usize,
     pub wrapper: Option<(usize, usize)>,
     pub clauses: QueryClauses,
 }
@@ -133,6 +134,7 @@ pub(super) struct PredicateBlock {
     pub start: usize,
     pub end: usize,
     pub base_depth: usize,
+    pub indent: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -364,12 +366,16 @@ impl LayoutDocument {
         tokens: &[SqlToken<'_>],
         structure: &TokenStructure,
     ) -> Result<Self, FormatDiagnostic> {
-        let token_statements = bind_token_statements(document, tokens, structure.depths())?;
+        let top_level_statements = bind_token_statements(document, tokens, structure.depths())?;
+        let top_level_count = top_level_statements.len();
+        let mut token_statements = top_level_statements.clone();
         let mut statements = Vec::with_capacity(token_statements.len());
         let mut with_blocks = Vec::new();
 
-        for statement in &token_statements {
-            let body_start = bind_body_start(tokens, structure.depths(), statement)?;
+        let mut statement_index = 0;
+        while statement_index < token_statements.len() {
+            let statement = token_statements[statement_index].clone();
+            let body_start = bind_body_start(tokens, structure.depths(), &statement)?;
             let authored_with = (statement.range.start..body_start)
                 .find(|index| {
                     structure.depth(*index) == statement.base_depth && !tokens[*index].is_comment()
@@ -382,43 +388,67 @@ impl LayoutDocument {
                 )));
             }
             if authored_with {
-                with_blocks.push(bind_with_block(tokens, structure, statement, body_start)?);
+                let with_block = bind_with_block(tokens, structure, &statement, body_start)?;
+                if with_block.definitions.len() != statement.ctes.len() {
+                    return Err(FormatDiagnostic::Ownership(format!(
+                        "{} CTE ownership disagrees with the validated AST shape: expected {}, found {}",
+                        statement.spec.family_name(),
+                        statement.ctes.len(),
+                        with_block.definitions.len()
+                    )));
+                }
+                for (cte, &(open, close)) in statement.ctes.iter().zip(&with_block.definitions) {
+                    token_statements.push(StatementTokens {
+                        spec: cte.spec.clone(),
+                        ctes: cte.ctes.clone(),
+                        range: TokenRange::new(open + 1, close)?,
+                        semicolon: None,
+                        base_depth: structure.depth(open) + 1,
+                    });
+                }
+                with_blocks.push(with_block);
+            }
+            let nested_select = statement_index >= top_level_count
+                && matches!(&statement.spec, StatementSpec::Select(_));
+            if nested_select {
+                statement_index += 1;
+                continue;
             }
             statements.push(match &statement.spec {
                 StatementSpec::Select(spec) => StatementLayout::Select(bind_select(
-                    tokens, structure, statement, body_start, spec,
+                    tokens, structure, &statement, body_start, spec,
                 )?),
                 StatementSpec::Values(spec) => StatementLayout::Values(bind_values(
-                    tokens, structure, statement, body_start, spec,
+                    tokens, structure, &statement, body_start, spec,
                 )?),
                 StatementSpec::Insert(spec) => StatementLayout::Insert(bind_insert(
-                    tokens, structure, statement, body_start, spec,
+                    tokens, structure, &statement, body_start, spec,
                 )?),
                 StatementSpec::Update(spec) => StatementLayout::Update(bind_update(
-                    tokens, structure, statement, body_start, spec,
+                    tokens, structure, &statement, body_start, spec,
                 )?),
                 StatementSpec::Delete(spec) => StatementLayout::Delete(bind_delete(
-                    tokens, structure, statement, body_start, spec,
+                    tokens, structure, &statement, body_start, spec,
                 )?),
                 StatementSpec::Merge(spec) => StatementLayout::Merge(bind_merge(
-                    tokens, structure, statement, body_start, spec,
+                    tokens, structure, &statement, body_start, spec,
                 )?),
                 StatementSpec::View(spec) => StatementLayout::View(bind_view(
-                    tokens, structure, statement, body_start, spec,
+                    tokens, structure, &statement, body_start, spec,
                 )?),
                 StatementSpec::MaterializedView(spec) => StatementLayout::MaterializedView(
-                    bind_materialized_view(tokens, structure, statement, body_start, spec)?,
+                    bind_materialized_view(tokens, structure, &statement, body_start, spec)?,
                 ),
                 StatementSpec::CreateTable(spec) => StatementLayout::CreateTable(
-                    bind_create_table(tokens, structure, statement, body_start, spec)?,
+                    bind_create_table(tokens, structure, &statement, body_start, spec)?,
                 ),
                 StatementSpec::CreateIndex(spec) => StatementLayout::CreateIndex(
-                    bind_create_index(tokens, structure, statement, body_start, spec)?,
+                    bind_create_index(tokens, structure, &statement, body_start, spec)?,
                 ),
                 StatementSpec::AlterTable(spec) => StatementLayout::AlterTable(bind_alter_table(
                     tokens,
                     structure.depths(),
-                    statement,
+                    &statement,
                     body_start,
                     spec,
                 )?),
@@ -431,11 +461,12 @@ impl LayoutDocument {
                     kind: *kind,
                 }),
             });
+            statement_index += 1;
         }
 
-        let queries = bind_queries(tokens, structure, &token_statements);
+        let queries = bind_queries(tokens, structure, &top_level_statements);
         let predicates = bind_predicates(tokens, structure.depths(), &queries, &statements);
-        let set_operations = bind_set_operations(tokens, structure.depths(), &token_statements);
+        let set_operations = bind_set_operations(tokens, structure.depths(), &top_level_statements);
         let window_blocks = bind_window_blocks(tokens, structure, &queries);
 
         Ok(Self {
@@ -620,6 +651,7 @@ mod tests {
                 // Deliberately contradict the source tokens.
                 returning_items: 0,
             }),
+            ctes: Vec::new(),
             range: SourceRange::new(0, source.len()),
         }]);
 
