@@ -625,7 +625,9 @@ Evidence:
   statements and adjacent unsupported shapes;
 - `tests/batch10_query_dml.rs` covers INTO, locks, CTE extensions, and subqueries;
   it also proves that leading statement comments remain attached while WITH
-  ownership is bound from the first non-comment syntax token;
+  ownership is bound from the first non-comment syntax token, and that nested
+  UPDATE ownership plus predicate-subquery indentation remain canonical inside
+  a data-modifying CTE;
 - `tests/batch11_relations_tables.rs` covers advanced relation sources and table
   or partition DDL;
 - `tests/batch12_plpgsql_control.rs` and `tests/fixtures/batch12/` cover procedural

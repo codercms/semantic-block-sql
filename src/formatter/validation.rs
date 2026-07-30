@@ -15,8 +15,8 @@ pub use equivalence::validate_equivalent;
 
 use super::ownership::{
     AlterTableActionGroup, AlterTableSpec, ConflictActionSpec, ConflictSpec, CreateIndexSpec,
-    CreateTableElementSpec, CreateTableSpec, DeleteSpec, InsertSourceSpec, InsertSpec,
-    MaterializedViewSpec, MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec,
+    CreateTableElementSpec, CreateTableSpec, CteStatementSpec, DeleteSpec, InsertSourceSpec,
+    InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec,
     RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
     RelationListSpec, SelectSpec, StatementSpec, SupportedDocument, UpdateSpec,
     UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
@@ -46,7 +46,8 @@ pub(super) fn parse_supported_postgresql(
     let mut statements = Vec::with_capacity(parsed.protobuf.stmts.len());
     for raw in &parsed.protobuf.stmts {
         let spec = validate_statement(raw).map_err(|feature| unsupported(source, raw, feature))?;
-        statements.push(source_statement(source, raw, spec));
+        let ctes = validated_cte_specs(raw).map_err(|feature| unsupported(source, raw, feature))?;
+        statements.push(source_statement(source, raw, spec, ctes));
     }
 
     for (node, _, context, _) in parsed.protobuf.nodes() {
@@ -60,6 +61,57 @@ pub(super) fn parse_supported_postgresql(
     }
 
     Ok(SupportedDocument::new(statements))
+}
+
+fn validated_cte_specs(raw: &RawStmt) -> Result<Vec<CteStatementSpec>, &'static str> {
+    let node = raw
+        .stmt
+        .as_deref()
+        .and_then(|statement| statement.node.as_ref())
+        .ok_or("empty PostgreSQL statement")?;
+    validated_nested_cte_specs(node)
+}
+
+fn validated_nested_cte_specs(node: &NodeEnum) -> Result<Vec<CteStatementSpec>, &'static str> {
+    let with_clause = match node {
+        NodeEnum::SelectStmt(statement) => statement.with_clause.as_ref(),
+        NodeEnum::InsertStmt(statement) => statement.with_clause.as_ref(),
+        NodeEnum::UpdateStmt(statement) => statement.with_clause.as_ref(),
+        NodeEnum::DeleteStmt(statement) => statement.with_clause.as_ref(),
+        NodeEnum::MergeStmt(statement) => statement.with_clause.as_ref(),
+        _ => None,
+    };
+    let Some(with_clause) = with_clause else {
+        return Ok(Vec::new());
+    };
+
+    let mut result = Vec::with_capacity(with_clause.ctes.len());
+    for cte_node in &with_clause.ctes {
+        let cte = match cte_node.node.as_ref() {
+            Some(NodeEnum::CommonTableExpr(cte)) => cte,
+            _ => return Err("unrecognized common table expression"),
+        };
+        let query = cte
+            .ctequery
+            .as_deref()
+            .and_then(|query| query.node.as_ref())
+            .ok_or("empty common table expression")?;
+        let spec = match query {
+            NodeEnum::SelectStmt(select) => {
+                StatementSpec::Select(validate_select(select, with_clause.recursive)?)
+            }
+            NodeEnum::InsertStmt(insert) => StatementSpec::Insert(validate_insert(insert)?),
+            NodeEnum::UpdateStmt(update) => StatementSpec::Update(validate_update(update)?),
+            NodeEnum::DeleteStmt(delete) => StatementSpec::Delete(validate_delete(delete)?),
+            NodeEnum::MergeStmt(merge) => StatementSpec::Merge(validate_merge(merge)?),
+            _ => return Err("unreviewed common table expression body"),
+        };
+        result.push(CteStatementSpec {
+            spec,
+            ctes: validated_nested_cte_specs(query)?,
+        });
+    }
+    Ok(result)
 }
 
 fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {

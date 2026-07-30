@@ -186,6 +186,7 @@ pub(super) fn plan_select_lists(
     for query in queries {
         let select = query.select;
         let base_depth = query.base_depth;
+        let base_indent = query.indent;
         let end = query
             .clauses
             .ordered_boundaries(query.end)
@@ -208,7 +209,7 @@ pub(super) fn plan_select_lists(
         if items.is_empty() {
             continue;
         }
-        let indent = base_depth + 1;
+        let indent = base_indent + 1;
         for item in &items {
             plan.set_indent(item.start..item.end, indent);
             if let Some(comma) = item.comma {
@@ -223,7 +224,7 @@ pub(super) fn plan_select_lists(
                 .any(|item| tokens[item.start].line_breaks_before > 0);
         let has_complex = items.iter().any(|item| item.complex);
         let compact_line_width =
-            base_depth * INDENT_WIDTH + compact_width(tokens, select, end, options);
+            base_indent * INDENT_WIDTH + compact_width(tokens, select, end, options);
         let unavoidable_single_item = items.len() == 1
             && range_is_unavoidably_over_hard(
                 tokens,

@@ -707,6 +707,14 @@ inside UPDATE, DELETE, and MERGE expressions. Relation-source capabilities cover
 derived queries containing `WITH`. These are AST capabilities consumed by the
 existing query and relation binders, not document-wide keyword scans.
 
+Validated CTE body statements remain part of the typed ownership tree instead
+of being discarded after the support gate. Nested INSERT, UPDATE, DELETE, and
+MERGE bodies are bound to their CTE token ranges and dispatched through the same
+statement planners as top-level DML. SELECT bodies continue through the shared
+query planner. Predicate subqueries carry a layout indent separately from their
+scanner depth so each enclosing IN, EXISTS, ANY, or ALL block remains visible
+without weakening structural token matching.
+
 `CREATE TABLE` validation now owns inheritance, typed tables, access methods,
 storage parameters, tablespaces, on-commit modes, partition keys, `PARTITION
 OF`, and range/list/hash/default partition bounds. Adjacent syntax such as

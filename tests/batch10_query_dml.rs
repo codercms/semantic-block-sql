@@ -65,6 +65,15 @@ fn preserves_leading_comment_before_update_with_clause() {
 }
 
 #[test]
+fn formats_nested_update_and_predicates_inside_cte() {
+    assert_format(
+        "WITH claimed AS (UPDATE queue q SET status='processing', claimed_revision=q.revision, claim_token=gen_random_uuid(), processing_started_at=NOW(), available_at=NOW()+make_interval(secs=>$2::int), attempts=q.attempts+1, updated_at=NOW() WHERE q.id IN (SELECT c.id FROM queue c WHERE c.status='pending' AND c.available_at<=NOW() AND EXISTS (SELECT 1 FROM cards k WHERE k.id=c.id AND k.source_present) ORDER BY c.id LIMIT $1 FOR UPDATE SKIP LOCKED) RETURNING q.id, q.claimed_revision, q.claim_token, gen_random_uuid() AS request_id) SELECT * FROM claimed;",
+        "WITH claimed AS (\n    UPDATE queue q\n    SET\n        status = 'processing',\n        claimed_revision = q.revision,\n        claim_token = gen_random_uuid(),\n        processing_started_at = NOW(),\n        available_at = NOW() + make_interval(secs => $2::int),\n        attempts = q.attempts + 1,\n        updated_at = NOW()\n    WHERE\n        q.id IN (\n            SELECT c.id\n            FROM queue c\n            WHERE\n                c.status = 'pending'\n                AND c.available_at <= NOW()\n                AND EXISTS (\n                    SELECT 1\n                    FROM cards k\n                    WHERE\n                        k.id = c.id\n                        AND k.source_present\n                )\n            ORDER BY c.id\n            LIMIT $1\n            FOR UPDATE SKIP LOCKED\n        )\n    RETURNING\n        q.id,\n        q.claimed_revision,\n        q.claim_token,\n        gen_random_uuid() AS request_id\n)\nSELECT *\nFROM claimed;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
 fn formats_scalar_and_predicate_subqueries_in_dml() {
     assert_format(
         "update users set active=(select count(*) > 0 from sessions where sessions.user_id=users.id) where id in (select user_id from pending);",

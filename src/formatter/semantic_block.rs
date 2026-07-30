@@ -87,6 +87,7 @@ struct BooleanRange {
     start: usize,
     end: usize,
     base_depth: usize,
+    indent: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -492,13 +493,14 @@ fn plan_query_clauses(
     for query in queries {
         let select = query.select;
         let base_depth = query.base_depth;
+        let indent = query.indent;
         let end = query.end;
         let has_join = (select + 1..end)
             .any(|index| depths[index] == base_depth && is_join_start(tokens, index));
         let has_expanded_boolean = boolean_ranges
             .iter()
             .any(|range| range.start > select && range.start < end);
-        let width_driven = base_depth * INDENT_WIDTH + compact_width(tokens, select, end, options)
+        let width_driven = indent * INDENT_WIDTH + compact_width(tokens, select, end, options)
             > options.soft_line_width;
         let expanded = expanded_selects.contains(&select)
             || has_join
@@ -511,26 +513,26 @@ fn plan_query_clauses(
         }
 
         if let Some((_open, close)) = query.wrapper {
-            plan.break_before(select, 1, base_depth);
-            plan.set_indent(select..close, base_depth);
-            plan.break_before(close, 1, base_depth.saturating_sub(1));
+            plan.break_before(select, 1, indent);
+            plan.set_indent(select..close, indent);
+            plan.break_before(close, 1, indent.saturating_sub(1));
         }
 
         for boundary in query.clauses.ordered_boundaries(end) {
             if boundary < end {
-                plan.break_before(boundary, 1, base_depth);
+                plan.break_before(boundary, 1, indent);
             }
         }
         if query.clauses.locking.is_some() {
             for index in select + 1..end {
                 if depths[index] == base_depth && tokens[index].kind == Token::For {
-                    plan.break_before(index, 1, base_depth);
+                    plan.break_before(index, 1, indent);
                 }
             }
         }
         for (index, depth) in depths.iter().enumerate().take(end).skip(select + 1) {
             if *depth == base_depth && is_join_start(tokens, index) {
-                plan.break_before(index, 1, base_depth);
+                plan.break_before(index, 1, indent);
             }
         }
         for clause in [query.clauses.group_by, query.clauses.order_by]
@@ -568,7 +570,7 @@ fn boolean_ranges(
             depths[candidate] >= predicate.base_depth
                 && matches!(tokens[candidate].kind, Token::And | Token::Or)
         });
-        let hides_structure = predicate.base_depth * INDENT_WIDTH
+        let hides_structure = predicate.indent * INDENT_WIDTH
             + compact_width(tokens, predicate.introducer, predicate.end, options)
             > options.soft_line_width;
 
@@ -577,6 +579,7 @@ fn boolean_ranges(
                 start: predicate.start,
                 end: predicate.end,
                 base_depth: predicate.base_depth,
+                indent: predicate.indent,
             });
         }
     }
@@ -592,10 +595,14 @@ fn plan_booleans(
     plan: &mut LayoutPlan,
 ) {
     for range in ranges {
-        plan.break_before(range.start, 1, range.base_depth + 1);
+        plan.break_before(range.start, 1, range.indent + 1);
         for index in range.start..range.end {
             if matches!(tokens[index].kind, Token::And | Token::Or) {
-                plan.break_before(index, 1, 1 + depths[index].saturating_sub(range.base_depth));
+                plan.break_before(
+                    index,
+                    1,
+                    range.indent + 1 + depths[index].saturating_sub(range.base_depth),
+                );
             }
             if tokens[index].kind == Token::Ascii40 {
                 let Some(&close) = parens.get(&index) else {
@@ -605,6 +612,21 @@ fn plan_booleans(
                     continue;
                 }
                 let inner_depth = depths[index] + 1;
+                let query_wrapper = (index + 1..close)
+                    .find(|candidate| !tokens[*candidate].is_comment())
+                    .filter(|candidate| {
+                        matches!(tokens[*candidate].kind, Token::Select | Token::With)
+                    });
+                if let Some(query_start) = query_wrapper {
+                    if plan.before.contains_key(&query_start) {
+                        plan.break_before(
+                            close,
+                            1,
+                            range.indent + depths[close].saturating_sub(range.base_depth).max(1),
+                        );
+                    }
+                    continue;
+                }
                 let contains_boolean = (index + 1..close).any(|candidate| {
                     depths[candidate] == inner_depth
                         && matches!(tokens[candidate].kind, Token::And | Token::Or)
@@ -614,13 +636,13 @@ fn plan_booleans(
                         plan.break_before(
                             index + 1,
                             1,
-                            1 + inner_depth.saturating_sub(range.base_depth),
+                            range.indent + 1 + inner_depth.saturating_sub(range.base_depth),
                         );
                     }
                     plan.break_before(
                         close,
                         1,
-                        depths[close].saturating_sub(range.base_depth).max(1),
+                        range.indent + depths[close].saturating_sub(range.base_depth).max(1),
                     );
                 }
             }

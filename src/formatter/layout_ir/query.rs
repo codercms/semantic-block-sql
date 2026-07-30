@@ -56,6 +56,7 @@ pub(super) fn bind_queries(
                 list_start,
                 end,
                 base_depth,
+                indent: base_depth + predicate_subquery_nesting(tokens, structure, select),
                 wrapper,
                 clauses: bind_query_clauses(tokens, depths, select, end, base_depth),
             });
@@ -64,6 +65,30 @@ pub(super) fn bind_queries(
     queries.sort_by_key(|query| query.select);
     queries.dedup_by_key(|query| query.select);
     queries
+}
+
+fn predicate_subquery_nesting(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    select: usize,
+) -> usize {
+    (0..select)
+        .filter(|open| {
+            tokens[*open].kind == Token::Ascii40
+                && structure
+                    .matching_parenthesis(*open)
+                    .is_some_and(|close| close > select)
+                && (0..*open)
+                    .rev()
+                    .find(|previous| !tokens[*previous].is_comment())
+                    .is_some_and(|previous| {
+                        matches!(
+                            tokens[previous].kind,
+                            Token::InP | Token::Exists | Token::Any | Token::All
+                        )
+                    })
+        })
+        .count()
 }
 
 fn statement_query_suffix(
@@ -321,6 +346,7 @@ pub(super) fn bind_predicates(
                 index,
                 query.clauses.next_after(index, query.end),
                 query.base_depth,
+                query.indent,
             );
         }
         if let Some(index) = query.clauses.having {
@@ -331,6 +357,7 @@ pub(super) fn bind_predicates(
                 index,
                 query.clauses.next_after(index, query.end),
                 query.base_depth,
+                query.indent,
             );
         }
         for index in query.select + 1..query.end {
@@ -357,6 +384,7 @@ pub(super) fn bind_predicates(
                 index,
                 end,
                 query.base_depth,
+                query.indent,
             );
         }
     }
@@ -373,6 +401,7 @@ pub(super) fn bind_predicates(
                             index,
                             conflict.action,
                             insert.span.base_depth,
+                            insert.span.base_depth,
                         );
                     }
                     if let Some(index) = conflict.action_where {
@@ -382,6 +411,7 @@ pub(super) fn bind_predicates(
                             PredicateKind::ConflictAction,
                             index,
                             insert.returning.unwrap_or(insert.span.end),
+                            insert.span.base_depth,
                             insert.span.base_depth,
                         );
                     }
@@ -399,6 +429,7 @@ pub(super) fn bind_predicates(
                         index,
                         update.returning.unwrap_or(update.span.end),
                         update.span.base_depth,
+                        update.span.base_depth,
                     );
                 }
             }
@@ -414,6 +445,7 @@ pub(super) fn bind_predicates(
                         index,
                         delete.returning.unwrap_or(delete.span.end),
                         delete.span.base_depth,
+                        delete.span.base_depth,
                     );
                 }
             }
@@ -426,6 +458,7 @@ pub(super) fn bind_predicates(
                     merge.on,
                     merge.branches[0].start,
                     merge.span.base_depth,
+                    merge.span.base_depth,
                 );
                 for branch in &merge.branches {
                     if let Some(condition) = branch.condition {
@@ -435,6 +468,7 @@ pub(super) fn bind_predicates(
                             PredicateKind::MergeWhen,
                             condition,
                             branch.then,
+                            merge.span.base_depth,
                             merge.span.base_depth,
                         );
                     }
@@ -448,6 +482,7 @@ pub(super) fn bind_predicates(
                         PredicateKind::IndexWhere,
                         where_clause,
                         index.span.end,
+                        index.span.base_depth,
                         index.span.base_depth,
                     );
                 }
@@ -480,6 +515,7 @@ fn push_relation_join_predicates(
                 introducer,
                 end,
                 source.base_depth,
+                source.base_depth,
             );
         }
     }
@@ -492,6 +528,7 @@ fn push_predicate(
     introducer: usize,
     end: usize,
     base_depth: usize,
+    indent: usize,
 ) {
     if introducer + 1 >= end || !seen.insert(introducer) {
         return;
@@ -502,6 +539,7 @@ fn push_predicate(
         start: introducer + 1,
         end,
         base_depth,
+        indent,
     });
 }
 
