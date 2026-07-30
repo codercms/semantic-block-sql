@@ -785,11 +785,12 @@ pub(super) fn bind_create_index(
 
 pub(super) fn bind_alter_table(
     tokens: &[SqlToken<'_>],
-    depths: &[usize],
+    structure: &TokenStructure,
     statement: &StatementTokens,
     body_start: usize,
     spec: &AlterTableSpec,
 ) -> Result<AlterTableBlock, FormatDiagnostic> {
+    let depths = structure.depths();
     let base = statement.base_depth;
     let table = find_kind(
         tokens,
@@ -821,13 +822,51 @@ pub(super) fn bind_alter_table(
         "ALTER TABLE",
         "action count",
         ranges.len(),
-        spec.action_groups.len(),
+        spec.actions.len(),
     )?;
     let actions = ranges
         .into_iter()
-        .zip(spec.action_groups.iter().copied())
-        .map(|(range, group)| AlterTableAction { range, group })
-        .collect();
+        .zip(spec.actions.iter().copied())
+        .map(|(range, action)| {
+            let relation_options = action
+                .relation_options
+                .map(|expected_items| {
+                    let open = (range.start..range.end)
+                        .find(|index| {
+                            depths[*index] == base && tokens[*index].kind == Token::Ascii40
+                        })
+                        .ok_or_else(|| {
+                            FormatDiagnostic::Ownership(
+                                "ALTER TABLE relation options have no opening parenthesis".into(),
+                            )
+                        })?;
+                    let close = structure.matching_parenthesis(open).ok_or_else(|| {
+                        FormatDiagnostic::Ownership(
+                            "ALTER TABLE relation options are unclosed".into(),
+                        )
+                    })?;
+                    if close >= range.end {
+                        return Err(FormatDiagnostic::Ownership(
+                            "ALTER TABLE relation options escape their action range".into(),
+                        ));
+                    }
+                    let items = split_item_ranges(tokens, depths, open + 1, close, base + 1)?;
+                    require_count(
+                        "ALTER TABLE",
+                        "relation option count",
+                        items.len(),
+                        expected_items,
+                    )?;
+                    Ok(AlterTableOptionList { close, items })
+                })
+                .transpose()?;
+            Ok(AlterTableAction {
+                range,
+                group: action.group,
+                relation_options,
+            })
+        })
+        .collect::<Result<Vec<_>, FormatDiagnostic>>()?;
     Ok(AlterTableBlock {
         span: TokenSpan {
             start: statement.range.start,

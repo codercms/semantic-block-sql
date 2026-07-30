@@ -314,10 +314,17 @@ pub(super) struct CreateIndexBlock {
     pub where_clause: Option<usize>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AlterTableOptionList {
+    pub close: usize,
+    pub items: Vec<TokenRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct AlterTableAction {
     pub range: TokenRange,
     pub group: AlterTableActionGroup,
+    pub relation_options: Option<AlterTableOptionList>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -446,11 +453,7 @@ impl LayoutDocument {
                     bind_create_index(tokens, structure, &statement, body_start, spec)?,
                 ),
                 StatementSpec::AlterTable(spec) => StatementLayout::AlterTable(bind_alter_table(
-                    tokens,
-                    structure.depths(),
-                    &statement,
-                    body_start,
-                    spec,
+                    tokens, structure, &statement, body_start, spec,
                 )?),
                 StatementSpec::Utility(kind) => StatementLayout::Utility(UtilityBlock {
                     span: TokenSpan {

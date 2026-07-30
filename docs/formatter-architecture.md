@@ -199,7 +199,8 @@ Examples of verified properties include:
 - top-level VALUES row count;
 - CREATE TABLE element kind and count;
 - CREATE INDEX modifiers, key/include/option counts, and secondary clauses;
-- ALTER TABLE action count and syntactic action groups;
+- ALTER TABLE action count, syntactic action groups, and relation-option
+  cardinalities;
 - CREATE VIEW aliases, options, query shape, and check mode;
 - CREATE MATERIALIZED VIEW aliases, storage clauses, query shape, and population mode.
 

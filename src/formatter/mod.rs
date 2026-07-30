@@ -285,15 +285,21 @@ fn format_document_content(
 
     let (prefix, mut diagnostics) =
         format_document_content(&source[..region.header_start], options)?;
+    let header_line_offset = completed_line_count(&prefix);
     let (header, header_diagnostics) =
-        format_regular_document_content(&source[region.header_start..region.header_end], options)?;
+        format_regular_document_content(&source[region.header_start..region.header_end], options)
+            .map_err(|error| shift_statement_error_lines(error, header_line_offset))?;
     diagnostics.extend(
         header_diagnostics
             .into_iter()
             .map(|diagnostic| diagnostic.shifted(region.header_start)),
     );
+    let payload = &source[region.header_end..region.payload_end];
+    let suffix_line_offset =
+        header_line_offset + completed_line_count(&header) + completed_line_count(payload);
     let (suffix, suffix_diagnostics) =
-        format_document_content(&source[region.payload_end..], options)?;
+        format_document_content(&source[region.payload_end..], options)
+            .map_err(|error| shift_statement_error_lines(error, suffix_line_offset))?;
     diagnostics.extend(
         suffix_diagnostics
             .into_iter()
@@ -303,7 +309,7 @@ fn format_document_content(
     let mut output = String::with_capacity(source.len() + header.len());
     output.push_str(&prefix);
     output.push_str(&header);
-    output.push_str(&source[region.header_end..region.payload_end]);
+    output.push_str(payload);
     output.push_str(&suffix);
     Ok((output, diagnostics))
 }
@@ -362,12 +368,34 @@ fn format_regular_document_content(
                     .shifted(start),
                 );
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                let line_offset = completed_line_count(&output);
+                return Err(shift_statement_error_lines(error, line_offset));
+            }
         }
         cursor = end;
     }
     output.push_str(&normalize_document_gap(&source[cursor..], true));
     Ok((output, diagnostics))
+}
+
+fn completed_line_count(source: &str) -> usize {
+    source.bytes().filter(|byte| *byte == b'\n').count()
+}
+
+fn shift_statement_error_lines(error: FormatDiagnostic, line_offset: usize) -> FormatDiagnostic {
+    match error {
+        FormatDiagnostic::HardLineExceeded {
+            line,
+            width,
+            hard_limit,
+        } => FormatDiagnostic::HardLineExceeded {
+            line: line + line_offset,
+            width,
+            hard_limit,
+        },
+        other => other,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

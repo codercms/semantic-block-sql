@@ -14,12 +14,12 @@ mod equivalence;
 pub use equivalence::validate_equivalent;
 
 use super::ownership::{
-    AlterTableActionGroup, AlterTableSpec, ConflictActionSpec, ConflictSpec, CreateIndexSpec,
-    CreateTableElementSpec, CreateTableSpec, CteStatementSpec, DeleteSpec, InsertSourceSpec,
-    InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec,
-    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
-    RelationListSpec, SelectSpec, StatementSpec, SupportedDocument, UpdateSpec,
-    UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
+    AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec, ConflictActionSpec, ConflictSpec,
+    CreateIndexSpec, CreateTableElementSpec, CreateTableSpec, CteStatementSpec, DeleteSpec,
+    InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeBranchSpec,
+    MergeSpec, OverrideSpec, RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec,
+    RelationJoinTypeSpec, RelationListSpec, SelectSpec, StatementSpec, SupportedDocument,
+    UpdateSpec, UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -1040,7 +1040,7 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
         return Err("ALTER TABLE without actions");
     }
 
-    let mut action_groups = Vec::with_capacity(alter.cmds.len());
+    let mut actions = Vec::with_capacity(alter.cmds.len());
     for command in &alter.cmds {
         let command = match command.node.as_ref() {
             Some(NodeEnum::AlterTableCmd(command)) => command,
@@ -1049,20 +1049,45 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
         let subtype =
             AlterTableType::try_from(command.subtype).unwrap_or(AlterTableType::Undefined);
         let group = alter_action_group(subtype)?;
-        if let Some(definition) = command.def.as_deref() {
+        let relation_options = if matches!(
+            subtype,
+            AlterTableType::AtSetRelOptions
+                | AlterTableType::AtResetRelOptions
+                | AlterTableType::AtReplaceRelOptions
+        ) {
+            let definitions = match command
+                .def
+                .as_deref()
+                .and_then(|definition| definition.node.as_ref())
+            {
+                Some(NodeEnum::List(definitions)) if !definitions.items.is_empty() => definitions,
+                _ => return Err("ALTER TABLE relation options without an option list"),
+            };
+            validate_def_elements(
+                &definitions.items,
+                "unrecognized ALTER TABLE relation option",
+            )?;
+            Some(definitions.items.len())
+        } else if let Some(definition) = command.def.as_deref() {
             match definition.node.as_ref() {
                 Some(NodeEnum::ColumnDef(column)) => validate_column_def(column)?,
                 Some(NodeEnum::Constraint(constraint)) => validate_constraint(constraint)?,
                 Some(_) => validate_ddl_expression(definition)?,
                 None => return Err("empty ALTER TABLE action definition"),
             }
-        }
-        action_groups.push(group);
+            None
+        } else {
+            None
+        };
+        actions.push(AlterTableActionSpec {
+            group,
+            relation_options,
+        });
     }
 
     Ok(AlterTableSpec {
         if_exists: alter.missing_ok,
-        action_groups,
+        actions,
     })
 }
 

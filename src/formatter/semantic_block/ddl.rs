@@ -4,6 +4,7 @@ use crate::formatter::layout_ir::{
 };
 use crate::formatter::ownership::TokenRange;
 
+use super::lists::plan_owned_delimited_list;
 use super::*;
 
 pub(super) fn plan_values_statements(
@@ -196,6 +197,16 @@ pub(super) fn plan_alter_tables(
                 if group_changed { 2 } else { 1 },
                 indent,
             );
+            if let Some(options) = &action.relation_options {
+                plan_owned_delimited_list(
+                    context,
+                    action.range,
+                    options.close,
+                    &options.items,
+                    indent,
+                    plan,
+                );
+            }
         }
     }
 }

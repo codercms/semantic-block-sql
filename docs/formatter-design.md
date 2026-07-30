@@ -721,6 +721,18 @@ storage parameters, tablespaces, on-commit modes, partition keys, `PARTITION
 OF`, and range/list/hash/default partition bounds. Adjacent syntax such as
 `CREATE TABLE AS`, `LIKE`, and `XMLTABLE` remains explicitly unsupported.
 
+`ALTER TABLE ... SET (...)` and `RESET (...)` relation options are AST-counted,
+bound as inner comma-delimited action lists, and planned independently from the
+outer ALTER action. Authored option groups remain intact through the hard limit;
+an ungrouped list that requires expansion uses one option per line.
+
+Fatal hard-width errors are produced by statement-local validation, then shifted
+into formatted-document line coordinates at every composition boundary. This
+applies both to ordinary multi-statement documents and to recursively segmented
+`COPY ... FROM STDIN` documents, whose formatted header and protected payload
+may precede the failing statement. The ALTER relation-option fixture exposed the
+general attribution defect; line-coordinate handling is not specific to ALTER.
+
 ## Parser-backed PL/pgSQL routine bodies
 
 `DO` blocks and dollar-quoted PL/pgSQL function/procedure bodies use a dedicated
