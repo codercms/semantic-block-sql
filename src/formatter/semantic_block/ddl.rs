@@ -80,9 +80,8 @@ pub(super) fn plan_create_tables(
         for (position, item) in table.items.iter().enumerate() {
             plan_item_indent(item, indent, plan);
             let blank_line = position > 0
-                && table.items[position - 1].kind
-                    == crate::formatter::ownership::CreateTableElementSpec::Column
-                && item.kind == crate::formatter::ownership::CreateTableElementSpec::Constraint;
+                && table.items[position - 1].kind.is_column()
+                && !item.kind.is_column();
             plan.break_before(item.range.start, if blank_line { 2 } else { 1 }, indent);
         }
         if let Some(close) = table.close {
@@ -185,7 +184,28 @@ pub(super) fn plan_alter_tables(
                 table.span.end,
                 context.options,
             );
-        if table.actions.len() == 1 && !authored && width <= context.options.soft_line_width {
+        let expands_check = table
+            .actions
+            .iter()
+            .flat_map(|action| &action.checks)
+            .any(|check| {
+                (check.open + 1..check.close).any(|index| {
+                    context.depths[index] > context.depths[check.open]
+                        && matches!(context.tokens[index].kind, Token::And | Token::Or)
+                }) || check.indent * INDENT_WIDTH
+                    + compact_width(
+                        context.tokens,
+                        check.introducer,
+                        check.close + 1,
+                        context.options,
+                    )
+                    > context.options.soft_line_width
+            });
+        if table.actions.len() == 1
+            && !authored
+            && !expands_check
+            && width <= context.options.soft_line_width
+        {
             continue;
         }
         let indent = table.span.base_depth + 1;

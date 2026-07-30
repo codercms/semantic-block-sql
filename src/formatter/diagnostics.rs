@@ -140,21 +140,83 @@ pub(super) fn style_diagnostics(
     Ok(diagnostics)
 }
 
-pub(super) fn warning_diagnostics(source: &str, warnings: &[FormatWarning]) -> Vec<Diagnostic> {
+pub(super) fn warning_diagnostics(
+    source: &str,
+    output: &str,
+    warnings: &[FormatWarning],
+    options: &FormatOptions,
+) -> Result<Vec<Diagnostic>, FormatDiagnostic> {
+    let source_tokens = tokenize(source)?;
+    let output_tokens = tokenize(output)?;
+    let source_terminal = terminal_semicolon(&source_tokens);
+    let output_terminal = terminal_semicolon(&output_tokens);
+    let pairs = align_tokens(
+        &source_tokens,
+        &output_tokens,
+        source_terminal.filter(|_| output_terminal.is_none()),
+        output_terminal.filter(|_| source_terminal.is_none()),
+    )?;
+
     warnings
         .iter()
         .map(|warning| match warning {
-            FormatWarning::IndivisibleTokenExceedsHardWidth { line, width } => Diagnostic {
-                rule_id: "layout.hard_line_width".into(),
-                severity: Severity::Warning,
-                message: format!(
-                    "line {line} has width {width} because an indivisible token cannot be split"
-                ),
-                source_range: SourceRange::new(0, source.len()),
-                fix_available: false,
-            },
+            FormatWarning::IndivisibleTokenExceedsHardWidth { line, width } => {
+                let output_range = output_line_range(output, *line);
+                let output_index = output_range.and_then(|range| {
+                    let indent = output[range.start..range.end]
+                        .chars()
+                        .take_while(|character| *character == ' ')
+                        .count();
+                    output_tokens
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, token)| token.start >= range.start && token.end <= range.end)
+                        .filter(|(_, token)| {
+                            indent + token.text.chars().count() > options.hard_line_width
+                                || (token.is_comment()
+                                    && output[range.start..token.end].chars().count()
+                                        > options.hard_line_width)
+                        })
+                        .max_by_key(|(_, token)| token.text.chars().count())
+                        .map(|(index, _)| index)
+                });
+                let source_range = output_index
+                    .and_then(|output_index| {
+                        pairs
+                            .iter()
+                            .find(|(_, candidate)| *candidate == output_index)
+                            .map(|(source_index, _)| {
+                                let token = &source_tokens[*source_index];
+                                SourceRange::new(token.start, token.end)
+                            })
+                    })
+                    .unwrap_or_else(|| SourceRange::new(0, source.len()));
+                let source_line =
+                    source[..source_range.start].bytes().filter(|byte| *byte == b'\n').count() + 1;
+                Ok(Diagnostic {
+                    rule_id: "layout.hard_line_width".into(),
+                    severity: Severity::Warning,
+                    message: format!(
+                        "formatting source line {source_line} produces a line of width {width} because an indivisible token cannot be split"
+                    ),
+                    source_range,
+                    fix_available: false,
+                })
+            }
         })
         .collect()
+}
+
+fn output_line_range(output: &str, line: usize) -> Option<SourceRange> {
+    let mut start = 0usize;
+    for (index, segment) in output.split_inclusive('\n').enumerate() {
+        let end = start + segment.strip_suffix('\n').unwrap_or(segment).len();
+        if index + 1 == line {
+            return Some(SourceRange::new(start, end));
+        }
+        start += segment.len();
+    }
+    None
 }
 
 pub(super) fn unsupported_diagnostic(

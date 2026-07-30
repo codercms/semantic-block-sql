@@ -833,11 +833,15 @@ fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'stati
                 } else {
                     validate_column_def(column)?;
                 }
-                elements.push(CreateTableElementSpec::Column);
+                elements.push(CreateTableElementSpec::Column {
+                    check_constraints: column_check_constraint_count(column),
+                });
             }
             Some(NodeEnum::Constraint(constraint)) if !typed_table => {
                 validate_constraint(constraint)?;
-                elements.push(CreateTableElementSpec::Constraint);
+                elements.push(CreateTableElementSpec::Constraint {
+                    is_check: constraint_is_check(constraint),
+                });
             }
             Some(NodeEnum::TableLikeClause(_)) => return Err("CREATE TABLE LIKE clause"),
             Some(NodeEnum::Constraint(_)) => return Err("typed table-level constraint"),
@@ -1049,7 +1053,7 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
         let subtype =
             AlterTableType::try_from(command.subtype).unwrap_or(AlterTableType::Undefined);
         let group = alter_action_group(subtype)?;
-        let relation_options = if matches!(
+        let (relation_options, check_constraints) = if matches!(
             subtype,
             AlterTableType::AtSetRelOptions
                 | AlterTableType::AtResetRelOptions
@@ -1067,21 +1071,31 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
                 &definitions.items,
                 "unrecognized ALTER TABLE relation option",
             )?;
-            Some(definitions.items.len())
+            (Some(definitions.items.len()), 0)
         } else if let Some(definition) = command.def.as_deref() {
-            match definition.node.as_ref() {
-                Some(NodeEnum::ColumnDef(column)) => validate_column_def(column)?,
-                Some(NodeEnum::Constraint(constraint)) => validate_constraint(constraint)?,
-                Some(_) => validate_ddl_expression(definition)?,
+            let check_constraints = match definition.node.as_ref() {
+                Some(NodeEnum::ColumnDef(column)) => {
+                    validate_column_def(column)?;
+                    column_check_constraint_count(column)
+                }
+                Some(NodeEnum::Constraint(constraint)) => {
+                    validate_constraint(constraint)?;
+                    usize::from(constraint_is_check(constraint))
+                }
+                Some(_) => {
+                    validate_ddl_expression(definition)?;
+                    0
+                }
                 None => return Err("empty ALTER TABLE action definition"),
-            }
-            None
+            };
+            (None, check_constraints)
         } else {
-            None
+            (None, 0)
         };
         actions.push(AlterTableActionSpec {
             group,
             relation_options,
+            check_constraints,
         });
     }
 
@@ -1178,6 +1192,22 @@ fn validate_constraint(constraint: &Constraint) -> Result<(), &'static str> {
         validate_ddl_expression(exclusion)?;
     }
     Ok(())
+}
+
+fn constraint_is_check(constraint: &Constraint) -> bool {
+    ConstrType::try_from(constraint.contype).is_ok_and(|kind| kind == ConstrType::ConstrCheck)
+}
+
+fn column_check_constraint_count(column: &ColumnDef) -> usize {
+    column
+        .constraints
+        .iter()
+        .filter_map(|constraint| match constraint.node.as_ref() {
+            Some(NodeEnum::Constraint(constraint)) => Some(constraint),
+            _ => None,
+        })
+        .filter(|constraint| constraint_is_check(constraint))
+        .count()
 }
 
 fn validate_ddl_expression(expression: &Node) -> Result<(), &'static str> {

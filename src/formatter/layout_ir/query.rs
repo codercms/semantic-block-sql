@@ -487,18 +487,48 @@ pub(super) fn bind_predicates(
                     );
                 }
             }
+            StatementLayout::CreateTable(table) => {
+                for item in &table.items {
+                    push_check_predicates(&mut result, &mut seen, depths, &item.checks);
+                }
+            }
+            StatementLayout::AlterTable(table) => {
+                for action in &table.actions {
+                    push_check_predicates(&mut result, &mut seen, depths, &action.checks);
+                }
+            }
             StatementLayout::Select(_)
             | StatementLayout::Values(_)
             | StatementLayout::View(_)
             | StatementLayout::MaterializedView(_)
-            | StatementLayout::CreateTable(_)
-            | StatementLayout::AlterTable(_)
             | StatementLayout::Utility(_) => {}
         }
     }
 
     result.sort_by_key(|predicate| predicate.introducer);
     result
+}
+
+fn push_check_predicates(
+    result: &mut Vec<PredicateBlock>,
+    seen: &mut HashSet<usize>,
+    depths: &[usize],
+    checks: &[super::CheckPredicateBlock],
+) {
+    for check in checks {
+        if check.open + 1 >= check.close || !seen.insert(check.introducer) {
+            continue;
+        }
+        result.push(PredicateBlock {
+            kind: PredicateKind::Check,
+            introducer: check.introducer,
+            start: check.open + 1,
+            end: check.close,
+            base_depth: depths[check.open] + 1,
+            indent: check.indent,
+            wrapper_close: Some(check.close),
+        });
+    }
 }
 
 fn push_relation_join_predicates(
@@ -540,6 +570,7 @@ fn push_predicate(
         end,
         base_depth,
         indent,
+        wrapper_close: None,
     });
 }
 

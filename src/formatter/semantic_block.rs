@@ -88,6 +88,7 @@ struct BooleanRange {
     end: usize,
     base_depth: usize,
     indent: usize,
+    wrapper_close: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -383,12 +384,17 @@ pub(super) fn validate_hard_width(
         let width = line.chars().count();
         let line_end = line_start + line.len();
         if width > options.hard_line_width {
+            let indent = line
+                .chars()
+                .take_while(|character| *character == ' ')
+                .count();
             let indivisible = tokens.iter().any(|token| {
                 token.start >= line_start
                     && token.end <= line_end
-                    && is_indivisible(token)
-                    && output[line_start..token.start].chars().count() + token.text.chars().count()
-                        > options.hard_line_width
+                    && (indent + token.text.chars().count() > options.hard_line_width
+                        || (token.is_comment()
+                            && output[line_start..token.end].chars().count()
+                                > options.hard_line_width))
             });
             if indivisible {
                 warnings.push(FormatWarning::IndivisibleTokenExceedsHardWidth {
@@ -407,20 +413,6 @@ pub(super) fn validate_hard_width(
     }
 
     Ok(warnings)
-}
-
-fn is_indivisible(token: &SqlToken<'_>) -> bool {
-    matches!(
-        token.kind,
-        Token::Ident
-            | Token::Uident
-            | Token::Sconst
-            | Token::Usconst
-            | Token::Bconst
-            | Token::Xconst
-            | Token::SqlComment
-            | Token::CComment
-    ) || token.text.starts_with('"')
 }
 
 fn case_ranges(tokens: &[SqlToken<'_>], options: &FormatOptions) -> Vec<CaseRange> {
@@ -580,6 +572,7 @@ fn boolean_ranges(
                 end: predicate.end,
                 base_depth: predicate.base_depth,
                 indent: predicate.indent,
+                wrapper_close: predicate.wrapper_close,
             });
         }
     }
@@ -646,6 +639,9 @@ fn plan_booleans(
                     );
                 }
             }
+        }
+        if let Some(close) = range.wrapper_close {
+            plan.break_before(close, 1, range.indent);
         }
     }
 }
@@ -747,8 +743,11 @@ fn range_is_unavoidably_over_hard(
         if needs_space(tokens, previous, index) {
             width += 1;
         }
-        width += render_token(tokens, index, options).chars().count();
-        if width > options.hard_line_width && is_indivisible(&tokens[index]) {
+        let token_width = render_token(tokens, index, options).chars().count();
+        width += token_width;
+        if indent * INDENT_WIDTH + token_width > options.hard_line_width
+            || (tokens[index].is_comment() && width > options.hard_line_width)
+        {
             return true;
         }
         previous = Some(index);
@@ -852,5 +851,25 @@ impl Writer {
             self.output.push('\n');
         }
         self.output
+    }
+}
+
+#[cfg(test)]
+mod hard_width_tests {
+    use super::*;
+
+    #[test]
+    fn short_indivisible_token_past_the_limit_does_not_excuse_a_breakable_line() {
+        let output = "CHECK ((status = 'processing' AND claim_token IS NOT NULL AND claimed_revision IS NOT NULL AND processing_started_at IS NOT NULL) OR (status != 'processing' AND claim_token IS NULL));";
+        let options = FormatOptions {
+            soft_line_width: 32,
+            hard_line_width: 40,
+            ..FormatOptions::default()
+        };
+
+        assert!(matches!(
+            validate_hard_width(output, &options),
+            Err(FormatDiagnostic::HardLineExceeded { line: 1, .. })
+        ));
     }
 }
