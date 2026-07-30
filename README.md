@@ -145,7 +145,7 @@ unsupported/safe-skip metrics:
 ```
 
 ```powershell
-./scripts/test-go-corpus.ps1 --keep
+.\scripts\test-go-corpus.ps1 --keep
 ```
 
 The resolved commit SHA for every pinned release is recorded in

@@ -331,7 +331,7 @@ Batch 4 evidence:
 - [x] Accept explicit SQL markers before prefix classification.
 - [x] Validate complete SQL through the PostgreSQL parser.
 - [x] Reject incomplete fragments.
-- [x] Keep interpreted strings disabled.
+- [x] Keep interpreted strings disabled in the historical raw-string MVP; superseded by the completed Go string-expression tranche below.
 
 ### Directives
 

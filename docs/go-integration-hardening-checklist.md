@@ -70,8 +70,9 @@ the batch self-review described in `AGENTS.md`.
 - [x] Support complete raw SQL literals nested in `expression_statement`.
 - [x] Cover direct `return db.QueryContext(...)` and standalone
   `db.ExecContext(...)` in the golden project.
-- [x] Keep `defer_statement` and `go_statement` unsupported unless separately
-  fixture-backed.
+- [x] Keep `defer_statement` and `go_statement` unsupported in this historical
+  hardening batch; both were later separately fixture-backed by the Go
+  string-expression PR tracked in `real-world-readiness-checklist.md`.
 - [x] Keep directive attachment deterministic and reject misplaced markers.
 - [x] Run focused tests and Batch G3 self-review.
 - [x] Commit Batch G3.
