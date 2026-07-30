@@ -228,10 +228,15 @@ Values, windows, lateral, and DDL tranche evidence:
 - WindowBlock owns OVER, WITHIN GROUP, and named WINDOW bodies;
 - CREATE TABLE validates and binds columns versus table constraints;
 - CREATE INDEX owns keys, INCLUDE, storage parameters, TABLESPACE, and WHERE;
-- ALTER TABLE owns action ranges and AST-derived syntactic action groups;
+- ALTER TABLE owns action ranges, AST-derived syntactic action groups, and
+  relation-level `SET (...)` / `RESET (...)` option lists;
 - `tests/batch5_values_windows.rs` and `tests/batch5_ddl.rs` require golden
   output, semantic equivalence, idempotence, clean check output, exact comment
-  preservation, and fail-safe neighboring variants.
+  preservation, fail-safe neighboring variants, authored relation-option
+  groups, and hard-width option splitting;
+- `tests/batch5_ddl.rs` and `tests/batch14_utilities.rs` require
+  document-relative fatal line diagnostics across ordinary statement
+  reconstruction and recursive `COPY ... FROM STDIN` payload boundaries.
 - authored blank lines between complete top-level statements are preserved.
 
 

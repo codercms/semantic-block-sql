@@ -234,10 +234,17 @@ pub(super) enum AlterTableActionGroup {
 }
 
 /// Exact ALTER TABLE capabilities proven by PostgreSQL AST validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct AlterTableActionSpec {
+    pub group: AlterTableActionGroup,
+    pub relation_options: Option<usize>,
+}
+
+/// Exact ALTER TABLE capabilities proven by PostgreSQL AST validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct AlterTableSpec {
     pub if_exists: bool,
-    pub action_groups: Vec<AlterTableActionGroup>,
+    pub actions: Vec<AlterTableActionSpec>,
 }
 
 /// Reviewed top-level migration/utility statement family.

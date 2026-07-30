@@ -1,5 +1,6 @@
 use super::statements::{is_insert_list_open, is_merge_list_open};
 use super::*;
+use crate::formatter::ownership::TokenRange;
 
 pub(super) fn parenthesized_lists(
     tokens: &[SqlToken<'_>],
@@ -170,6 +171,88 @@ pub(super) fn plan_keyword_list(
             plan.set_indent(item.start..item.end, indent);
         }
     }
+}
+
+pub(super) fn plan_owned_delimited_list(
+    context: &PlanningContext<'_, '_>,
+    owner: TokenRange,
+    close: usize,
+    ranges: &[TokenRange],
+    owner_indent: usize,
+    plan: &mut LayoutPlan,
+) {
+    let tokens = context.tokens;
+    let mut items = ranges
+        .iter()
+        .map(|range| {
+            let comma = (range.start..(range.end + 1).min(close)).find(|index| {
+                context.depths[*index] == context.depths[range.start]
+                    && tokens[*index].kind == Token::Ascii44
+            });
+            ListItem {
+                start: range.start,
+                end: range.end,
+                comma,
+                complex: item_is_complex(
+                    tokens,
+                    context.cases,
+                    context.lists,
+                    range.start,
+                    range.end,
+                    context.depths[range.start],
+                    context.depths,
+                ),
+            }
+        })
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        return;
+    }
+
+    let item_indent = owner_indent + 1;
+    let authored = tokens[items[0].start].line_breaks_before > 0
+        || items
+            .iter()
+            .skip(1)
+            .any(|item| tokens[item.start].line_breaks_before > 0);
+    let has_complex = items.iter().any(|item| item.complex);
+    let compact_line_width = owner_indent * INDENT_WIDTH
+        + compact_width(tokens, owner.start, owner.end, context.options);
+    if !authored && !has_complex && compact_line_width <= context.options.soft_line_width {
+        return;
+    }
+
+    for item in &items {
+        plan.set_indent(item.start..item.end, item_indent);
+        if let Some(comma) = item.comma {
+            plan.token_indents[comma] = Some(item_indent);
+        }
+    }
+    plan.break_before(items[0].start, 1, item_indent);
+    let lines = if authored {
+        authored_list_lines(tokens, &items, item_indent, context.options)
+    } else {
+        expanded_one_line_items(&items)
+    };
+    for (line_number, (item_index, blank_before)) in lines.into_iter().enumerate() {
+        if line_number == 0 {
+            continue;
+        }
+        plan.break_before(
+            items[item_index].start,
+            if blank_before { 2 } else { 1 },
+            item_indent,
+        );
+    }
+    for item in &mut items {
+        if tokens[item.start..item.end]
+            .iter()
+            .any(|token| token.kind == Token::SqlComment)
+        {
+            plan.set_indent(item.start..item.end, item_indent);
+        }
+    }
+    plan.break_before(close, 1, owner_indent);
 }
 
 pub(super) fn plan_select_lists(

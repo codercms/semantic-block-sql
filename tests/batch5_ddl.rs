@@ -1,5 +1,7 @@
 use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, check_sql, format_sql, format_sql_result, validate_equivalent};
+use semblock::{
+    FormatDiagnostic, FormatOptions, check_sql, format_sql, format_sql_result, validate_equivalent,
+};
 
 fn assert_format(source: &str, expected: &str, options: &FormatOptions) {
     let formatted = format_sql(source, options).expect("format succeeds");
@@ -52,6 +54,39 @@ fn formats_alter_table_actions_and_syntactic_groups() {
     let expected = "ALTER TABLE IF EXISTS public.users\n    ADD COLUMN name text,\n\n    ALTER COLUMN email SET NOT NULL,\n\n    ADD CONSTRAINT users_name_key UNIQUE (name),\n\n    DROP COLUMN old_name;";
 
     assert_format(source, expected, &FormatOptions::default());
+}
+
+#[test]
+fn formats_alter_table_relation_options_as_an_owned_list() {
+    let source = "ALTER TABLE i1688.offer_fetch_queue SET (\n    autovacuum_vacuum_scale_factor = 0.01, autovacuum_vacuum_threshold = 1000,\n    autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 1000\n);";
+    let expected = "ALTER TABLE i1688.offer_fetch_queue\n    SET (\n        autovacuum_vacuum_scale_factor = 0.01, autovacuum_vacuum_threshold = 1000,\n        autovacuum_analyze_scale_factor = 0.02, autovacuum_analyze_threshold = 1000\n    );";
+    assert_format(source, expected, &FormatOptions::default());
+
+    let ungrouped = "ALTER TABLE i1688.offer_fetch_queue SET (autovacuum_vacuum_scale_factor=0.01,autovacuum_vacuum_threshold=1000,autovacuum_analyze_scale_factor=0.02,autovacuum_analyze_threshold=1000);";
+    let expanded = "ALTER TABLE i1688.offer_fetch_queue\n    SET (\n        autovacuum_vacuum_scale_factor = 0.01,\n        autovacuum_vacuum_threshold = 1000,\n        autovacuum_analyze_scale_factor = 0.02,\n        autovacuum_analyze_threshold = 1000\n    );";
+    assert_format(ungrouped, expanded, &FormatOptions::default());
+
+    assert_format(
+        "ALTER TABLE public.items RESET (\n    fillfactor, autovacuum_vacuum_threshold\n);",
+        "ALTER TABLE public.items\n    RESET (\n        fillfactor, autovacuum_vacuum_threshold\n    );",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn hard_width_errors_use_document_line_numbers() {
+    let source = "CREATE SCHEMA test;\n\nALTER TABLE public.long_table_name ALTER COLUMN long_column_name SET DEFAULT 123;";
+    let options = FormatOptions {
+        soft_line_width: 32,
+        hard_line_width: 40,
+        ..FormatOptions::default()
+    };
+
+    let error = format_sql(source, &options).expect_err("the action remains breakable over hard");
+    match error {
+        FormatDiagnostic::HardLineExceeded { line, .. } => assert_eq!(line, 4),
+        other => panic!("unexpected formatter error: {other:?}"),
+    }
 }
 
 #[test]

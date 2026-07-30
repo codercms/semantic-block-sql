@@ -1,5 +1,7 @@
 use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, Severity, check_sql, format_sql, format_sql_result};
+use semblock::{
+    FormatDiagnostic, FormatOptions, Severity, check_sql, format_sql, format_sql_result,
+};
 
 fn assert_fixture(source: &str, expected: &str) {
     let options = FormatOptions::default();
@@ -35,6 +37,22 @@ fn formats_copy_stdin_header_and_preserves_payload_byte_for_byte() {
             .output
             .contains(payload)
     );
+}
+
+#[test]
+fn hard_width_errors_after_copy_payload_use_document_line_numbers() {
+    let source = "COPY public.items(id) FROM STDIN;\n1\n\\.\nALTER TABLE public.long_table_name ALTER COLUMN long_column_name SET DEFAULT 123;";
+    let options = FormatOptions {
+        soft_line_width: 32,
+        hard_line_width: 40,
+        ..FormatOptions::default()
+    };
+
+    let error = format_sql(source, &options).expect_err("the action remains breakable over hard");
+    match error {
+        FormatDiagnostic::HardLineExceeded { line, .. } => assert_eq!(line, 5),
+        other => panic!("unexpected formatter error: {other:?}"),
+    }
 }
 
 #[test]
