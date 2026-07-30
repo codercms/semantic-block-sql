@@ -1,2 +1,11 @@
 # The supplied Russian wiki uses Markdown's two-space hard line break.
 docs/semantic-block-sql-style-guide-ru.md whitespace=-blank-at-eol
+
+# Formatter fixtures are byte-sensitive and must be identical on every platform.
+tests/fixtures/**/*.sql text eol=lf
+tests/fixtures/**/*.go text eol=lf
+tests/fixtures/**/*.expected text eol=lf
+tests/fixtures/**/go.mod text eol=lf
+tests/fixtures/**/*.md text eol=lf
+tests/fixtures/**/*.toml text eol=lf
+tests/fixtures/**/.semblockignore text eol=lf
