@@ -264,6 +264,8 @@ pub(super) struct AlterTableSpec {
 /// Reviewed top-level migration/utility statement family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UtilityStatementKind {
+    Begin,
+    Commit,
     Drop,
     Truncate,
     Grant,
@@ -301,6 +303,8 @@ pub(super) enum UtilityStatementKind {
 impl UtilityStatementKind {
     pub fn expected_token(self) -> Token {
         match self {
+            Self::Begin => Token::BeginP,
+            Self::Commit => Token::Commit,
             Self::Drop => Token::Drop,
             Self::Truncate => Token::Truncate,
             Self::Grant | Self::GrantRole => Token::Grant,
@@ -336,6 +340,8 @@ impl UtilityStatementKind {
 
     pub fn family_name(self) -> &'static str {
         match self {
+            Self::Begin => "BEGIN",
+            Self::Commit => "COMMIT",
             Self::Drop => "DROP",
             Self::Truncate => "TRUNCATE",
             Self::Grant => "GRANT",

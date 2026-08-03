@@ -24,6 +24,7 @@ pub(in crate::formatter) fn render_token(
         || is_merge_match_side_keyword(tokens, index)
         || is_with_ordinality_keyword(tokens, index)
         || is_partition_strategy_keyword(tokens, index)
+        || is_transaction_control_keyword(tokens, index)
     {
         return token.text.to_uppercase();
     }
@@ -268,6 +269,44 @@ fn is_partition_strategy_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool 
         && index >= 2
         && tokens[index - 1].kind == Token::By
         && tokens[index - 2].kind == Token::Partition
+}
+
+fn is_transaction_control_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    let statement_start = tokens[..index]
+        .iter()
+        .rposition(|token| token.kind == Token::Ascii59)
+        .map_or(0, |semicolon| semicolon + 1);
+    let Some(first) = tokens[statement_start..]
+        .iter()
+        .find(|token| !token.is_comment())
+    else {
+        return false;
+    };
+
+    match first.kind {
+        Token::BeginP => matches!(
+            tokens[index].kind,
+            Token::BeginP
+                | Token::Transaction
+                | Token::Work
+                | Token::Isolation
+                | Token::Level
+                | Token::Serializable
+                | Token::Repeatable
+                | Token::Read
+                | Token::Committed
+                | Token::Uncommitted
+                | Token::Write
+                | Token::Only
+                | Token::Not
+                | Token::Deferrable
+        ),
+        Token::Commit => matches!(
+            tokens[index].kind,
+            Token::Commit | Token::Transaction | Token::Work | Token::Chain
+        ),
+        _ => false,
+    }
 }
 
 fn is_string_literal(kind: Token) -> bool {

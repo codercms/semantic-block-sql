@@ -162,6 +162,8 @@ The formatter has fixture-backed structural support for substantial PostgreSQL s
 - `UPDATE ... FROM`, `DELETE ... USING`, and PostgreSQL 17 `MERGE` with matched and not-matched actions;
 - multiple, joined, derived, function, lateral, parenthesized, `ROWS FROM`, and `TABLESAMPLE` relation sources, including alias column/definition lists and derived queries containing `WITH`;
 - `DROP`, `TRUNCATE`, object and role `GRANT` / `REVOKE`, and `COMMENT ON`;
+- top-level `BEGIN` with reviewed transaction modes and unchained `COMMIT`,
+  including `WORK` / `TRANSACTION` spellings;
 - enum/composite types, domains, sequences, triggers, and row-security policies;
 - `CREATE TABLE` with inheritance, typed tables, access/storage/tablespace/on-commit options, partition keys, `PARTITION OF`, and range/list/hash/default partition bounds;
 - feature-rich `CREATE INDEX`, multi-action `ALTER TABLE`, `CREATE VIEW`, and `CREATE MATERIALIZED VIEW`;
