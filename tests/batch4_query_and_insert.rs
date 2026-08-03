@@ -85,6 +85,43 @@ fn formats_fetch_and_general_set_operations() {
 }
 
 #[test]
+fn set_operation_branches_own_their_from_clauses() {
+    assert_format(
+        "select id, created_at from active_items where ready = true union all select id, created_at from archived_items where ready = true order by created_at desc;",
+        "SELECT id, created_at FROM active_items WHERE ready = TRUE\n\nUNION ALL\n\nSELECT id, created_at FROM archived_items WHERE ready = TRUE ORDER BY created_at DESC;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn set_operation_branches_own_their_named_window_clauses() {
+    assert_format(
+        "select row_number() over w from active_items window w as (order by id) union all select row_number() over w from archived_items window w as (order by id);",
+        "SELECT row_number() OVER w FROM active_items WINDOW w AS (ORDER BY id)\n\nUNION ALL\n\nSELECT row_number() OVER w FROM archived_items WINDOW w AS (ORDER BY id);",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn select_expressions_do_not_treat_is_distinct_from_as_a_from_clause() {
+    assert_format(
+        "select old_value is distinct from new_value as changed;",
+        "SELECT old_value IS DISTINCT FROM new_value AS changed;",
+        &FormatOptions::default(),
+    );
+    assert_format(
+        "select item.old_value is distinct from item.new_value as changed from items item;",
+        "SELECT item.old_value IS DISTINCT FROM item.new_value AS changed FROM items item;",
+        &FormatOptions::default(),
+    );
+    assert_format(
+        "select 1 where old_value is not distinct from new_value;",
+        "SELECT 1 WHERE old_value IS NOT DISTINCT FROM new_value;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
 fn shares_with_ownership_with_update_and_delete() {
     assert_format(
         "with source as (select id,title from staging.items) update public.items set title=source.title from source where public.items.id=source.id returning public.items.id;",

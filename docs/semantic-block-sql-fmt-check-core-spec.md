@@ -127,7 +127,8 @@ If the selected parser already exposes syntax errors with negligible extra compl
 
 - return them as `syntax.*` diagnostics;
 - do not classify them as style violations;
-- do not attempt partial formatting.
+- do not format any part of a document whose top-level statement boundaries
+  cannot be established reliably.
 
 If reliable syntax diagnostics are unavailable, the core may return one generic parse-failure diagnostic.
 
@@ -157,11 +158,19 @@ format(format(source, config).output, config).output
 
 ### 5.3 Fail-safe behavior
 
-If the formatter cannot parse or safely format the input:
+If the formatter cannot parse the document well enough to establish trusted
+top-level statement spans, return the complete original source and a diagnostic.
 
-- return the original source unchanged;
-- return a diagnostic;
-- do not emit a partially formatted result.
+After those spans are established, safety is statement-granular:
+
+- preserve an unformattable statement byte-for-byte;
+- emit `format.statement_skipped` for its complete source range;
+- under the default skip policy, continue formatting independent sibling
+  statements;
+- under the strict policy, elevate skipped statements to errors and return the
+  complete original document unchanged;
+- never emit a partially formatted statement or perform a partial filesystem
+  write.
 
 ### 5.4 Existing valid layout
 
@@ -500,6 +509,7 @@ layout.exception_handler
 
 syntax.parse_failure
 syntax.unsupported
+format.statement_skipped
 ```
 
 Each diagnostic should contain:
@@ -535,7 +545,10 @@ It must not guess when:
 - parsing failed;
 - safe grouping cannot be determined.
 
-In those cases, return the original source and a diagnostic.
+If parsing failed before trustworthy statement boundaries exist, return the
+complete original source and a diagnostic. If one parser-proven statement
+cannot pass formatter ownership or safety gates, preserve that statement and
+apply the statement-granular default/strict policy from section 5.3.
 
 ## 16. Acceptance criteria
 
@@ -548,7 +561,8 @@ Required tests:
 5. Authored-group preservation tests.
 6. Soft/hard boundary tests with configurable widths.
 7. Already-compliant input remains unchanged.
-8. Malformed and unsupported SQL returns unchanged source plus diagnostics.
+8. Malformed SQL returns unchanged source; unsupported or unformattable
+   parser-proven statements remain byte-identical and produce diagnostics.
 9. PL/pgSQL `CASE`, `IF`, and multiple `EXCEPTION` handler tests.
 10. CTE, set operation, `ON CONFLICT`, `MERGE`, DDL, function, and procedure fixtures.
 11. Embedded/template protected-range tests.
@@ -560,7 +574,8 @@ The `fmt/check` core is complete when:
 
 - all acceptance tests pass;
 - formatting is idempotent;
-- failed formatting never returns partial output;
+- failed formatting never returns a partially formatted statement or a
+  partially written file;
 - default configuration matches this specification;
 - `check(format(source))` reports no style violations for successfully formatted input;
 - the formatter does not alter SQL semantics in the maintained regression corpus.

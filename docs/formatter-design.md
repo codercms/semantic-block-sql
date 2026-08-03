@@ -141,9 +141,12 @@ same result independently of traversal order or job count.
 
 ### No partial rewrites
 
-A source file is the atomic unit. If any required parse, formatting,
-post-format validation, idempotence, host reparse, or write step fails, the
-original file remains unchanged.
+A source file remains the atomic filesystem-write unit. A top-level parse or
+split failure, host reparse failure, project preflight failure, or write failure
+leaves the original file unchanged. Once PostgreSQL has established trustworthy
+top-level statement spans, the default policy may reconstruct a document from
+successfully formatted statements and byte-identical skipped statements. No
+statement is ever partially formatted and no file is ever partially written.
 
 ### Evidence-based support
 
@@ -785,9 +788,11 @@ blocks, SQL statements, assignments, conditionals, loops, `FOREACH`, procedural
 and reviewed `RETURN QUERY` forms are covered. Transaction control remains opaque
 and follows the default/strict unsupported policy.
 
-## Statement-granular unsupported policy
+## Statement-granular opaque policy
 
-The formatter classifies every parser-proven top-level statement independently. A supported statement is formatted through the normal validation, ownership, equivalence, protected-token, and idempotence gates. A valid but unsupported statement is copied byte-for-byte and receives `syntax.unsupported`. The default `UnsupportedPolicy::Skip` reports that diagnostic as a warning and continues with supported siblings. `UnsupportedPolicy::Error` collects all unsupported statements, elevates them to errors, and returns the complete original document unchanged. PostgreSQL parse errors and formatter safety failures remain fatal under both policies.
+The formatter classifies every parser-proven top-level statement independently. A supported statement is formatted through the normal validation, ownership, equivalence, protected-token, hard-width, and idempotence gates. A valid but unsupported statement is copied byte-for-byte and receives `syntax.unsupported`. A statement that enters the supported pipeline but cannot pass one of those formatter gates is also copied byte-for-byte and receives `format.statement_skipped`, including its source line in the message.
+
+The default `UnsupportedPolicy::Skip` reports both opaque outcomes as warnings and continues with supported siblings. `UnsupportedPolicy::Error` elevates both to errors and returns the complete original document unchanged. A PostgreSQL parse or split failure remains document-fatal because statement boundaries are not trustworthy. This explicit project requirement supersedes the earlier file-wide formatter-safety rule while retaining statement atomicity and atomic filesystem replacement.
 
 `COPY ... FROM STDIN` is split into an AST-validated header plus a protected payload ending at `\.`. Only the header is formatted; payload bytes are never scanned or rewritten.
 

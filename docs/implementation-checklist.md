@@ -691,6 +691,26 @@ Evidence:
 - [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
   GitNexus change-scope review before commit.
 
+## Statement-granular safety and FROM ownership regression batch
+
+- [x] Add failing fixtures for SELECT and UPDATE uses of
+  `IS [NOT] DISTINCT FROM`, including UPDATE FROM and WHERE positions.
+- [x] Add a failing multi-branch set-operation fixture with branch-owned FROM
+  clauses, named windows, and a final ORDER BY.
+- [x] Bind FROM from typed statement ownership and exclude the distinctness
+  operator token sequence.
+- [x] Treat set-operation root FROM ownership separately from lexical query
+  branches.
+- [x] Preserve only a failed parser-proven statement under the default policy,
+  diagnose it with its starting line, and continue formatting siblings.
+- [x] Preserve complete-document behavior for untrusted parse/split failures
+  and strict policy.
+- [x] Cover CLI statement-level writes and strict Go static-concatenation
+  atomicity.
+- [x] Verify the reported real SQL file formats without an ownership failure.
+- [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
+  GitNexus change-scope review before commit.
+
 ## Batch 7 — Performance and release polish
 
 - [ ] Establish correctness-preserving benchmarks.

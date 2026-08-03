@@ -619,3 +619,51 @@ fn unsupported_statements_are_skipped_by_default_and_strict_mode_is_atomic() {
         unsupported
     );
 }
+
+#[test]
+fn formatter_failures_skip_one_statement_by_default_and_are_atomic_in_strict_mode() {
+    let project = TempDir::new().expect("temp project");
+    write(
+        project.path(),
+        "semblock.toml",
+        "dialect = \"postgresql\"\n\n[layout]\nsoft_line_width = 32\nhard_line_width = 40\n",
+    );
+    let failed =
+        "ALTER TABLE public.long_table_name ALTER COLUMN long_column_name SET DEFAULT 123;";
+    let source =
+        format!("select id,name from users;\n\n{failed}\n\nselect id,created_at from audit_log;\n");
+    let expected = format!(
+        "SELECT id, name FROM users;\n\n{failed}\n\nSELECT id, created_at\nFROM audit_log;\n"
+    );
+    write(project.path(), "query.sql", &source);
+
+    let output = run(project.path(), &["fmt", "query.sql"], None);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning[format.statement_skipped]"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("statement formatting skipped at line 3"),
+        "{stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(project.path().join("query.sql")).expect("read formatted query"),
+        expected
+    );
+
+    write(project.path(), "query.sql", &source);
+    let strict = run(
+        project.path(),
+        &["--strict-unsupported", "fmt", "query.sql"],
+        None,
+    );
+    assert_eq!(strict.status.code(), Some(3), "{strict:?}");
+    assert!(String::from_utf8_lossy(&strict.stderr).contains("error[format.statement_skipped]"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("query.sql")).expect("read strict query"),
+        source
+    );
+}

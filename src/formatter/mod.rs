@@ -63,7 +63,8 @@ impl Diagnostic {
     }
 }
 
-/// Fail-safe formatting result. Failed formatting retains the original source.
+/// Fail-safe formatting result. Document-fatal failures retain the original
+/// source; default-policy statement failures retain that statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatResult {
     pub output: String,
@@ -114,10 +115,10 @@ pub enum NotEqualPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnsupportedPolicy {
-    /// Preserve unsupported syntax, emit warnings, and continue formatting.
+    /// Preserve opaque statements, emit warnings, and continue formatting.
     #[default]
     Skip,
-    /// Preserve the complete input and emit unsupported syntax as errors.
+    /// Preserve the complete input and emit opaque statements as errors.
     Error,
 }
 
@@ -227,10 +228,13 @@ pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql,
     options.validate()?;
     let first = format_document_once(source, options)?;
     if options.unsupported_policy == UnsupportedPolicy::Error
-        && first
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
+        && first.diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == Severity::Error
+                && matches!(
+                    diagnostic.rule_id.as_str(),
+                    "syntax.unsupported" | "format.statement_skipped"
+                )
+        })
     {
         return Ok(FormattedSql {
             output: source.to_owned(),
@@ -251,16 +255,27 @@ fn format_document_once(
     source: &str,
     options: &FormatOptions,
 ) -> Result<FormattedSql, FormatDiagnostic> {
-    let (output, mut diagnostics) = format_document_content(source, options)?;
-    let warnings = semantic_block::validate_hard_width(&output, options)?;
-    let unsupported_ranges = diagnostics
+    let content = format_document_content(source, options)?;
+    let output = content.output;
+    let mut diagnostics = content.diagnostics;
+    let warnings = semantic_block::validate_hard_width_except(
+        &output,
+        options,
+        &content.opaque_output_ranges,
+    )?;
+    let opaque_source_ranges = diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.rule_id.as_str(),
+                "syntax.unsupported" | "format.statement_skipped"
+            )
+        })
         .map(|diagnostic| diagnostic.source_range)
         .collect::<Vec<_>>();
     let mut style_diagnostics = diagnostics::style_diagnostics(source, &output, options)?;
     style_diagnostics.retain(|diagnostic| {
-        !unsupported_ranges.iter().any(|range| {
+        !opaque_source_ranges.iter().any(|range| {
             diagnostic.source_range.start >= range.start && diagnostic.source_range.end <= range.end
         })
     });
@@ -277,56 +292,108 @@ fn format_document_once(
     })
 }
 
+struct DocumentContent {
+    output: String,
+    diagnostics: Vec<Diagnostic>,
+    opaque_output_ranges: Vec<SourceRange>,
+}
+
 fn format_document_content(
     source: &str,
     options: &FormatOptions,
-) -> Result<(String, Vec<Diagnostic>), FormatDiagnostic> {
+) -> Result<DocumentContent, FormatDiagnostic> {
+    format_document_content_at(source, options, 0)
+}
+
+fn format_document_content_at(
+    source: &str,
+    options: &FormatOptions,
+    source_line_offset: usize,
+) -> Result<DocumentContent, FormatDiagnostic> {
     let Some(region) = find_copy_stdin_region(source)? else {
-        return format_regular_document_content(source, options);
+        return format_regular_document_content(source, options, source_line_offset);
     };
 
-    let (prefix, mut diagnostics) =
-        format_document_content(&source[..region.header_start], options)?;
-    let header_line_offset = completed_line_count(&prefix);
-    let (header, header_diagnostics) =
-        format_regular_document_content(&source[region.header_start..region.header_end], options)
-            .map_err(|error| shift_statement_error_lines(error, header_line_offset))?;
+    let prefix =
+        format_document_content_at(&source[..region.header_start], options, source_line_offset)?;
+    let header_line_offset = completed_line_count(&prefix.output);
+    let header_source_line_offset =
+        source_line_offset + completed_line_count(&source[..region.header_start]);
+    let header = format_regular_document_content(
+        &source[region.header_start..region.header_end],
+        options,
+        header_source_line_offset,
+    )
+    .map_err(|error| shift_statement_error_lines(error, header_line_offset))?;
+    let payload = &source[region.header_end..region.payload_end];
+    let suffix_line_offset =
+        header_line_offset + completed_line_count(&header.output) + completed_line_count(payload);
+    let suffix_source_line_offset =
+        source_line_offset + completed_line_count(&source[..region.payload_end]);
+    let suffix = format_document_content_at(
+        &source[region.payload_end..],
+        options,
+        suffix_source_line_offset,
+    )
+    .map_err(|error| shift_statement_error_lines(error, suffix_line_offset))?;
+
+    let header_output_offset = prefix.output.len();
+    let suffix_output_offset = header_output_offset + header.output.len() + payload.len();
+    let mut diagnostics = prefix.diagnostics;
     diagnostics.extend(
-        header_diagnostics
+        header
+            .diagnostics
             .into_iter()
             .map(|diagnostic| diagnostic.shifted(region.header_start)),
     );
-    let payload = &source[region.header_end..region.payload_end];
-    let suffix_line_offset =
-        header_line_offset + completed_line_count(&header) + completed_line_count(payload);
-    let (suffix, suffix_diagnostics) =
-        format_document_content(&source[region.payload_end..], options)
-            .map_err(|error| shift_statement_error_lines(error, suffix_line_offset))?;
     diagnostics.extend(
-        suffix_diagnostics
+        suffix
+            .diagnostics
             .into_iter()
             .map(|diagnostic| diagnostic.shifted(region.payload_end)),
     );
+    let mut opaque_output_ranges = prefix.opaque_output_ranges;
+    opaque_output_ranges.extend(
+        header
+            .opaque_output_ranges
+            .into_iter()
+            .map(|range| range.shifted(header_output_offset)),
+    );
+    opaque_output_ranges.extend(
+        suffix
+            .opaque_output_ranges
+            .into_iter()
+            .map(|range| range.shifted(suffix_output_offset)),
+    );
 
-    let mut output = String::with_capacity(source.len() + header.len());
-    output.push_str(&prefix);
-    output.push_str(&header);
+    let mut output = String::with_capacity(source.len() + header.output.len());
+    output.push_str(&prefix.output);
+    output.push_str(&header.output);
     output.push_str(payload);
-    output.push_str(&suffix);
-    Ok((output, diagnostics))
+    output.push_str(&suffix.output);
+    Ok(DocumentContent {
+        output,
+        diagnostics,
+        opaque_output_ranges,
+    })
 }
 
 fn format_regular_document_content(
     source: &str,
     options: &FormatOptions,
-) -> Result<(String, Vec<Diagnostic>), FormatDiagnostic> {
+    source_line_offset: usize,
+) -> Result<DocumentContent, FormatDiagnostic> {
     let parsed = pg_query::parse(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
     let split = pg_query::split_with_parser(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
     if parsed.protobuf.stmts.is_empty() {
         let formatted = format_supported_statement(source, options)?;
-        return Ok((formatted.output, Vec::new()));
+        return Ok(DocumentContent {
+            output: formatted.output,
+            diagnostics: Vec::new(),
+            opaque_output_ranges: Vec::new(),
+        });
     }
     if split.len() != parsed.protobuf.stmts.len() {
         return Err(FormatDiagnostic::Ownership(
@@ -336,6 +403,7 @@ fn format_regular_document_content(
     let mut output = String::with_capacity(source.len());
     let mut cursor = 0usize;
     let mut diagnostics = Vec::new();
+    let mut opaque_output_ranges = Vec::new();
 
     for raw in &parsed.protobuf.stmts {
         let (start, end) = statement_span(source, raw);
@@ -346,6 +414,7 @@ fn format_regular_document_content(
         }
         output.push_str(&normalize_document_gap(&source[cursor..start], false));
         let statement = &source[start..end];
+        let statement_output_start = output.len();
         let routine = is_routine_statement(raw);
         match format_statement_once(statement, raw, options) {
             Ok(formatted) => {
@@ -361,6 +430,7 @@ fn format_regular_document_content(
             }
             Err(error @ FormatDiagnostic::UnsupportedSyntax { .. }) => {
                 output.push_str(statement);
+                opaque_output_ranges.push(SourceRange::new(statement_output_start, output.len()));
                 diagnostics.push(
                     diagnostics::unsupported_diagnostic(
                         statement,
@@ -371,14 +441,29 @@ fn format_regular_document_content(
                 );
             }
             Err(error) => {
-                let line_offset = completed_line_count(&output);
-                return Err(shift_statement_error_lines(error, line_offset));
+                output.push_str(statement);
+                opaque_output_ranges.push(SourceRange::new(statement_output_start, output.len()));
+                let statement_line =
+                    source_line_offset + completed_line_count(&source[..start]) + 1;
+                diagnostics.push(
+                    diagnostics::statement_skipped_diagnostic(
+                        statement,
+                        &error,
+                        options.unsupported_policy,
+                        statement_line,
+                    )
+                    .shifted(start),
+                );
             }
         }
         cursor = end;
     }
     output.push_str(&normalize_document_gap(&source[cursor..], true));
-    Ok((output, diagnostics))
+    Ok(DocumentContent {
+        output,
+        diagnostics,
+        opaque_output_ranges,
+    })
 }
 
 fn completed_line_count(source: &str) -> usize {
@@ -669,8 +754,9 @@ fn statement_span(source: &str, raw: &pg_query::protobuf::RawStmt) -> (usize, us
 
 /// Formats SQL without exposing an error-only partial-result path.
 ///
-/// Any parse, scan, semantic-safety, idempotence, or hard-width failure returns
-/// the original source unchanged together with a diagnostic.
+/// Document parse and split failures return the original source unchanged.
+/// With the default policy, a later statement-level failure preserves that
+/// complete statement while independent siblings may still be formatted.
 pub fn format_sql_result(source: &str, options: &FormatOptions) -> FormatResult {
     match format_sql(source, options) {
         Ok(formatted) => FormatResult {

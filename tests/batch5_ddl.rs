@@ -1,7 +1,5 @@
 use pretty_assertions::assert_eq;
-use semblock::{
-    FormatDiagnostic, FormatOptions, check_sql, format_sql, format_sql_result, validate_equivalent,
-};
+use semblock::{FormatOptions, check_sql, format_sql, format_sql_result, validate_equivalent};
 
 fn assert_format(source: &str, expected: &str, options: &FormatOptions) {
     let formatted = format_sql(source, options).expect("format succeeds");
@@ -120,11 +118,14 @@ fn hard_width_errors_use_document_line_numbers() {
         ..FormatOptions::default()
     };
 
-    let error = format_sql(source, &options).expect_err("the action remains breakable over hard");
-    match error {
-        FormatDiagnostic::HardLineExceeded { line, .. } => assert_eq!(line, 4),
-        other => panic!("unexpected formatter error: {other:?}"),
-    }
+    let formatted = format_sql(source, &options).expect("the failed statement is preserved");
+    assert_eq!(formatted.output, source);
+    let diagnostic = formatted
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.rule_id == "format.statement_skipped")
+        .expect("the hard-width failure is diagnosed");
+    assert!(diagnostic.message.contains("line 3"), "{diagnostic:?}");
 }
 
 #[test]

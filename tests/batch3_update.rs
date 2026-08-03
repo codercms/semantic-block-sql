@@ -84,6 +84,30 @@ FROM staging.items source TABLESAMPLE SYSTEM (10);",
 }
 
 #[test]
+fn update_assignments_do_not_treat_is_distinct_from_as_a_from_clause() {
+    assert_format(
+        "update items set changed = old_value is distinct from new_value, updated_at = now() where id = $1;",
+        "UPDATE items SET changed = old_value IS DISTINCT FROM new_value, updated_at = NOW() WHERE id = $1;",
+    );
+}
+
+#[test]
+fn update_predicates_do_not_treat_is_distinct_from_as_a_from_clause() {
+    assert_format(
+        "update items set value = $1 where old_value is distinct from $2 returning id;",
+        "UPDATE items SET value = $1 WHERE old_value IS DISTINCT FROM $2 RETURNING id;",
+    );
+}
+
+#[test]
+fn update_from_is_owned_after_assignment_expressions() {
+    assert_format(
+        "update items item set changed = item.value is distinct from source.value, updated_at = now() from staging.items source where item.id = source.id;",
+        "UPDATE items item\nSET changed = item.value IS DISTINCT FROM source.value, updated_at = NOW()\nFROM staging.items source\nWHERE item.id = source.id;",
+    );
+}
+
+#[test]
 fn unsupported_update_variants_remain_unchanged() {
     for source in [
         "UPDATE ONLY items SET title = 'x';",

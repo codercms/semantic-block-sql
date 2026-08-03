@@ -193,6 +193,31 @@ func queries(columns string) {
 }
 
 #[test]
+fn strict_statement_failure_preserves_static_go_concatenations() {
+    let source = r#"package sample
+
+// semblock:sql
+const query = "select id,name from users;\n\n" +
+    "ALTER TABLE public.long_table_name ALTER COLUMN long_column_name SET DEFAULT 123;\n\n" +
+    "select id from audit_log;"
+"#;
+    let options = FormatOptions {
+        soft_line_width: 32,
+        hard_line_width: 40,
+        unsupported_policy: UnsupportedPolicy::Error,
+        ..FormatOptions::default()
+    };
+
+    let formatted = format_source(source, Language::Go, &options, &Config::default().go)
+        .expect("strict statement skip returns diagnostics");
+
+    assert_eq!(formatted.output, source);
+    assert!(formatted.diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule_id == "format.statement_skipped" && diagnostic.severity == Severity::Error
+    }));
+}
+
+#[test]
 fn auto_detected_parse_failures_are_skipped_but_explicit_malformed_sql_is_fatal() {
     let automatic = r#"package sample
 

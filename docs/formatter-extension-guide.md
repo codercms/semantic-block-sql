@@ -16,9 +16,11 @@ supported only when all three layers agree:
 2. Token ownership binds and verifies that description.
 3. A planner has fixtures for its formatting behavior.
 
-If any layer is missing, return the original statement with
-`syntax.unsupported` or an internal ownership safety diagnostic. Never let a
-known keyword fall through generic whitespace normalization.
+If AST capability is missing, return the original statement with
+`syntax.unsupported`. If an accepted statement later fails ownership or a
+safety gate, preserve that complete statement with `format.statement_skipped`
+under the configured default/strict policy. Never let a known keyword fall
+through generic whitespace normalization.
 
 ## Existing extension points
 

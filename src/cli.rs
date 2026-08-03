@@ -54,7 +54,7 @@ pub struct Cli {
     #[arg(long, global = true, conflicts_with = "quiet")]
     verbose: bool,
 
-    /// Treat unsupported PostgreSQL syntax as a fatal error
+    /// Treat unsupported or safety-skipped statements as fatal errors
     #[arg(long, global = true)]
     strict_unsupported: bool,
 

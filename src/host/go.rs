@@ -380,7 +380,10 @@ pub fn format_go_source(
     replacements.sort_by_key(|replacement| replacement.start);
     let strict_unsupported = options.unsupported_policy == UnsupportedPolicy::Error
         && diagnostics.iter().any(|diagnostic| {
-            diagnostic.rule_id == "syntax.unsupported" && diagnostic.severity == Severity::Error
+            matches!(
+                diagnostic.rule_id.as_str(),
+                "syntax.unsupported" | "format.statement_skipped"
+            ) && diagnostic.severity == Severity::Error
         });
     let mut output = source.to_string();
     if !strict_unsupported {

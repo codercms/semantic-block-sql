@@ -36,7 +36,13 @@ pub(super) fn bind_select(
     let end = statement.range.end;
     let base = statement.base_depth;
     verify_select_shape(tokens, depths, body_start, end, base, spec, "SELECT")?;
-    let from_index = find_kind(tokens, depths, body_start + 1, end, base, Token::From);
+    let from_index = if spec.set_operations == 0 {
+        find_from_clause(tokens, depths, body_start + 1, end, base)
+    } else {
+        // A set-operation root has no direct FROM clause. Its branch clauses
+        // are owned by the recursively validated lexical QueryBlocks.
+        None
+    };
     require_presence(
         "SELECT",
         "FROM clause",
@@ -99,6 +105,11 @@ fn verify_select_shape(
         set_operation_count(tokens, depths, body_start, end, base_depth),
         spec.set_operations,
     )?;
+    if spec.set_operations > 0 {
+        // The root AST node owns the operation tree, not the SELECT clauses in
+        // its recursively validated branches.
+        return Ok(());
+    }
     let window = find_kind(
         tokens,
         depths,
@@ -1276,9 +1287,19 @@ pub(super) fn bind_update(
     let end = statement.range.end;
     let set = find_kind(tokens, depths, body_start + 1, end, base_depth, Token::Set)
         .ok_or_else(|| FormatDiagnostic::Ownership("supported UPDATE has no SET clause".into()))?;
-    let from_index = find_kind(tokens, depths, set + 1, end, base_depth, Token::From);
     let where_clause = find_kind(tokens, depths, set + 1, end, base_depth, Token::Where);
     let returning = find_kind(tokens, depths, set + 1, end, base_depth, Token::Returning);
+    let from_index = if spec.from.items.is_empty() {
+        None
+    } else {
+        find_from_clause(
+            tokens,
+            depths,
+            set + 1,
+            where_clause.or(returning).unwrap_or(end),
+            base_depth,
+        )
+    };
     let assignment_end = [from_index, where_clause, returning]
         .into_iter()
         .flatten()

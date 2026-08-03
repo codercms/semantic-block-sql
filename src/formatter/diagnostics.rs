@@ -232,6 +232,24 @@ pub(super) fn unsupported_diagnostic(
     diagnostic
 }
 
+pub(super) fn statement_skipped_diagnostic(
+    source: &str,
+    error: &FormatDiagnostic,
+    policy: super::UnsupportedPolicy,
+    statement_line: usize,
+) -> Diagnostic {
+    Diagnostic {
+        rule_id: "format.statement_skipped".into(),
+        severity: match policy {
+            super::UnsupportedPolicy::Skip => Severity::Warning,
+            super::UnsupportedPolicy::Error => Severity::Error,
+        },
+        message: format!("statement formatting skipped at line {statement_line}: {error}"),
+        source_range: SourceRange::new(0, source.len()),
+        fix_available: false,
+    }
+}
+
 pub(super) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diagnostic {
     let rule_id = match error {
         FormatDiagnostic::InvalidOptions(_) => "config.invalid",
