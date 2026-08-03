@@ -21,7 +21,17 @@ pub struct FormattedSource {
     pub output: String,
     pub changed: bool,
     pub warnings: Vec<FormatWarning>,
+    /// Diagnostics whose ranges refer to the original input source.
     pub diagnostics: Vec<Diagnostic>,
+    /// Diagnostics whose ranges refer to `output`.
+    pub output_diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SourcePass {
+    output: String,
+    warnings: Vec<FormatWarning>,
+    diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Debug, Error)]
@@ -65,6 +75,7 @@ pub fn format_source(
         output: first.output,
         warnings: first.warnings,
         diagnostics: first.diagnostics,
+        output_diagnostics: second.diagnostics,
     })
 }
 
@@ -73,7 +84,7 @@ fn format_source_once(
     language: Language,
     options: &FormatOptions,
     go: &GoConfig,
-) -> Result<FormattedSource, SourceError> {
+) -> Result<SourcePass, SourceError> {
     match language {
         Language::Auto => Err(SourceError::UnknownLanguage("<source>".into())),
         Language::Sql => {
@@ -82,8 +93,7 @@ fn format_source_once(
             let diagnostics =
                 restore_diagnostic_ranges(formatted.diagnostics, &normalized, newline);
             let output = restore_newlines(formatted.output, newline);
-            Ok(FormattedSource {
-                changed: output != source,
+            Ok(SourcePass {
                 output,
                 warnings: formatted.warnings,
                 diagnostics,
@@ -92,8 +102,7 @@ fn format_source_once(
         Language::Go if !go.enabled => Err(SourceError::GoDisabled),
         Language::Go => {
             let formatted = format_go_source(source, options, go)?;
-            Ok(FormattedSource {
-                changed: formatted.output != source,
+            Ok(SourcePass {
                 output: formatted.output,
                 warnings: formatted.warnings,
                 diagnostics: formatted.diagnostics,

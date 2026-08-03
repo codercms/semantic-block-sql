@@ -1,8 +1,8 @@
 use std::env;
 use std::path::Path;
 
-use semblock::Severity;
 use semblock::source::FormattedSource;
+use semblock::{Diagnostic, Severity};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct CheckOutput {
@@ -13,14 +13,14 @@ pub(super) struct CheckOutput {
 pub(super) fn emit_diagnostics(
     path: &Path,
     source: &str,
-    formatted: &FormattedSource,
+    diagnostics: &[Diagnostic],
     quiet: bool,
     include_style_errors: bool,
 ) {
     if quiet {
         return;
     }
-    for diagnostic in &formatted.diagnostics {
+    for diagnostic in diagnostics {
         if !include_style_errors && diagnostic.severity == Severity::Error {
             continue;
         }
