@@ -289,7 +289,7 @@ impl Cli {
             .map_err(RunError::source)?;
         let has_errors = formatted.diagnostics.iter().any(is_fatal_diagnostic);
         if has_errors {
-            emit_diagnostics(&filename, &source, &formatted, self.quiet, true);
+            emit_diagnostics(&filename, &source, &formatted.diagnostics, self.quiet, true);
             if mode == Mode::Fmt {
                 print!("{}", formatted.output);
             }
@@ -298,12 +298,18 @@ impl Cli {
 
         match mode {
             Mode::Fmt => {
-                emit_diagnostics(&filename, &source, &formatted, self.quiet, false);
+                emit_diagnostics(
+                    &filename,
+                    &formatted.output,
+                    &formatted.output_diagnostics,
+                    self.quiet,
+                    false,
+                );
                 print!("{}", formatted.output);
                 Ok(ExitCode::SUCCESS)
             }
             Mode::Check => {
-                emit_diagnostics(&filename, &source, &formatted, self.quiet, true);
+                emit_diagnostics(&filename, &source, &formatted.diagnostics, self.quiet, true);
                 emit_check_path(&filename, &formatted, check_output, self.quiet);
                 if check_output.summary {
                     emit_check_summary(std::slice::from_ref(&formatted));
@@ -315,7 +321,13 @@ impl Cli {
                 })
             }
             Mode::Diff => {
-                emit_diagnostics(&filename, &source, &formatted, self.quiet, false);
+                emit_diagnostics(
+                    &filename,
+                    &source,
+                    &formatted.diagnostics,
+                    self.quiet,
+                    false,
+                );
                 if formatted.changed {
                     print!(
                         "{}",
@@ -417,7 +429,13 @@ impl Cli {
             .any(|plan| plan.formatted.diagnostics.iter().any(is_fatal_diagnostic));
         if has_errors {
             for plan in &plans {
-                emit_diagnostics(&plan.path, &plan.source, &plan.formatted, self.quiet, true);
+                emit_diagnostics(
+                    &plan.path,
+                    &plan.source,
+                    &plan.formatted.diagnostics,
+                    self.quiet,
+                    true,
+                );
             }
             return Ok(ExitCode::from(3));
         }
@@ -426,12 +444,18 @@ impl Cli {
         match mode {
             Mode::Fmt => {
                 for plan in &plans {
-                    emit_diagnostics(&plan.path, &plan.source, &plan.formatted, self.quiet, false);
-                }
-                for plan in plans.iter().filter(|plan| plan.formatted.changed) {
-                    atomic_replace(&plan.path, &plan.formatted.output)
-                        .map_err(RunError::rewrite)?;
-                    if !self.quiet {
+                    if plan.formatted.changed {
+                        atomic_replace(&plan.path, &plan.formatted.output)
+                            .map_err(RunError::rewrite)?;
+                    }
+                    emit_diagnostics(
+                        &plan.path,
+                        &plan.formatted.output,
+                        &plan.formatted.output_diagnostics,
+                        self.quiet,
+                        false,
+                    );
+                    if plan.formatted.changed && !self.quiet {
                         eprintln!("Formatted: {}", plan.path.display());
                     }
                 }
@@ -439,7 +463,13 @@ impl Cli {
             }
             Mode::Check => {
                 for plan in &plans {
-                    emit_diagnostics(&plan.path, &plan.source, &plan.formatted, self.quiet, true);
+                    emit_diagnostics(
+                        &plan.path,
+                        &plan.source,
+                        &plan.formatted.diagnostics,
+                        self.quiet,
+                        true,
+                    );
                     emit_check_path(&plan.path, &plan.formatted, check_output, self.quiet);
                 }
                 if check_output.summary {
@@ -453,7 +483,13 @@ impl Cli {
             }
             Mode::Diff => {
                 for plan in &plans {
-                    emit_diagnostics(&plan.path, &plan.source, &plan.formatted, self.quiet, false);
+                    emit_diagnostics(
+                        &plan.path,
+                        &plan.source,
+                        &plan.formatted.diagnostics,
+                        self.quiet,
+                        false,
+                    );
                 }
                 for plan in plans.iter().filter(|plan| plan.formatted.changed) {
                     print!(

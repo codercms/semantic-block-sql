@@ -785,6 +785,30 @@ PR #7 Git-aware CLI hardening evidence:
 - [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
   GitNexus change-scope review before commit.
 
+## Effective-source diagnostic coordinates
+
+- [x] Preserve `FormattedSource::diagnostics` as input-relative ranges.
+- [x] Expose second-pass `output_diagnostics` relative to the final output.
+- [x] Keep `check`, `diff`, preflight errors, and fatal or strict `fmt` on input
+  coordinates.
+- [x] Use final-file coordinates after each successful atomic `fmt` replacement.
+- [x] Use formatted-stdout coordinates for successful `fmt --stdin`.
+- [x] Avoid offset-delta tracking and additional parse or formatting passes.
+- [x] Cover repeated `schema.sql` formatting, LF, CRLF, Unicode, exact byte
+  slicing, unsupported and safety-skipped statements, and idempotence.
+- [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
+  GitNexus change-scope review before commit.
+
+Evidence:
+
+- `tests/cli_diagnostic_locations.rs` requires first-run and second-run `fmt`
+  warnings to have identical final-file line, column, byte range, rule, and
+  message; it also pins input-relative `check` / `diff`, formatted stdin, and
+  unchanged strict-policy behavior.
+- `tests/source_diagnostics.rs` slices Unicode CRLF input and formatted output
+  with their respective diagnostic ranges and proves the second-pass view is
+  stable on an idempotent invocation.
+
 ## CREATE TYPE enum comment layout
 
 - [x] Reproduce the multiline enum regression with inline comments.

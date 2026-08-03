@@ -50,11 +50,17 @@ token normalization.
 
 Current application-level decisions are:
 
-- CLI diagnostics render the one-based source `line:column` first and retain
-  the core diagnostic's half-open UTF-8 byte range as secondary metadata. The
-  CLI computes locations from the exact source being formatted, including
-  stdin and staged index blobs; the reusable formatter API continues to expose
-  source ranges without CLI presentation concerns.
+- CLI diagnostics render the one-based effective-source `line:column` first and
+  retain the diagnostic's half-open UTF-8 byte range as secondary metadata.
+  `check` and `diff` use the original input source. Successful `fmt` uses the
+  final formatted file, or formatted stdout for `--stdin`; fatal and
+  strict-policy `fmt` failures use the unchanged input. The reusable source
+  formatter exposes both coordinate spaces: `FormattedSource::diagnostics`
+  remains input-relative for compatibility, while
+  `FormattedSource::output_diagnostics` is relative to `output`.
+- Output-relative diagnostics come from the formatter's already-required
+  idempotence pass. The implementation does not track incremental offset
+  deltas and does not introduce another parse or formatting pass.
 - Go interpreted strings are enabled after a complete decode/format/re-encode
   round trip and runtime-value verification were implemented.
 - Multiline interpreted SQL prefers a raw literal when lossless and otherwise
@@ -379,20 +385,23 @@ entry point remains for internal application layers that must abort a complete
 file or Go host rewrite. Its successful result now carries the same diagnostics
 plus the legacy width-warning field. It must not write files.
 
-Each diagnostic carries:
+Each core diagnostic carries:
 
 ```text
 rule_id
 severity
 message
-source_range   # UTF-8 byte range in the original source
+source_range   # UTF-8 byte range in the source analyzed by that pass
 fix_available
 ```
 
 SQL directive ranges are shifted to document offsets, CRLF normalization is
-mapped back to original byte offsets, and Go-host diagnostics are conservatively
-attributed to the complete owning raw literal until exact envelope mapping is
-implemented.
+mapped back to the matching input or output byte offsets, and Go-host
+diagnostics are conservatively attributed to the complete owning literal until
+exact envelope mapping is implemented. The application-level `FormattedSource`
+stores first-pass diagnostics against the original input and second-pass
+diagnostics against the final output. Because the second pass is also the
+idempotence gate, this dual-coordinate contract adds no parsing work.
 
 The API must serve:
 
@@ -403,8 +412,11 @@ The API must serve:
 - future VS Code and IDEA adapters.
 
 The facade remains pure and performs no filesystem writes. The CLI renders
-successful style diagnostics as `path:start-end: severity[rule_id]: message`;
-`fmt` and `diff` suppress fixed style errors but still surface warnings.
+diagnostics as `path:line:column (bytes start-end): severity[rule_id]: message`.
+Successful filesystem `fmt` writes a file atomically before it emits that
+file's output-relative diagnostics, so a failed replacement cannot publish
+coordinates for bytes that were not installed. `fmt` and `diff` suppress fixed
+style errors but still surface warnings.
 
 ## Code architecture
 
