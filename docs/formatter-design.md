@@ -715,6 +715,13 @@ utilities in addition to the layout-bearing query/DML/DDL families. `DROP`,
 before the shared token renderer may normalize casing and spacing; unknown
 object kinds or option combinations still return `syntax.unsupported`.
 
+`CREATE TYPE ... AS ENUM` remains a validated `CreateEnum` utility, but its
+owned `ENUM (...)` value range participates in the shared parenthesized-list
+planner. Authored value lines and inline comments therefore force a newline
+after `(`, four-space value indentation, and a statement-aligned closing `)`.
+Registration requires both the typed utility kind and its owned `ENUM`
+parenthesis, so unrelated utility parentheses cannot enter list planning.
+
 Query ownership covers `SELECT INTO`, every row-lock strength and wait policy,
 data-modifying CTEs, `SEARCH` / `CYCLE`, and reviewed scalar/predicate subqueries
 inside UPDATE, DELETE, and MERGE expressions. Relation-source capabilities cover

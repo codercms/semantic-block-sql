@@ -785,6 +785,16 @@ PR #7 Git-aware CLI hardening evidence:
 - [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
   GitNexus change-scope review before commit.
 
+## CREATE TYPE enum comment layout
+
+- [x] Reproduce the multiline enum regression with inline comments.
+- [x] Register only the validated `CreateEnum` value parentheses with the
+  shared parenthesized-list planner.
+- [x] Require the authored opening line, four-space item indentation, aligned
+  closing `);`, semantic equivalence, and idempotence.
+- [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
+  GitNexus change-scope review before commit.
+
 ## Go integration hardening workstream
 
 The post-PR-7 fixture-backed Go integration work is tracked durably in

@@ -219,6 +219,7 @@ pub(super) fn format(
             cases: &cases,
             inserts: &inserts,
             merges: &merges,
+            utilities: &utilities,
             values: &values,
         },
         options,
