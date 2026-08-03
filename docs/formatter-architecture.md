@@ -443,7 +443,7 @@ A PostgreSQL upgrade can produce four outcomes:
 | parser rejects syntax | none | unchanged source plus parse diagnostic |
 | parser accepts unknown statement family | unsupported | unchanged statement plus `syntax.unsupported` |
 | known family contains unknown/unowned shape | unsupported | unchanged statement plus `syntax.unsupported` |
-| known and fixture-backed shape | supported | structural formatting and full safety gates |
+| known and fixture-backed shape | supported | structural formatting and full safety gates; byte-identical statement skip if a gate fails |
 
 This policy lets the parser be upgraded independently without allowing new
 syntax to fall accidentally into generic whitespace normalization.
@@ -511,7 +511,14 @@ continue to fail before token planning and preserve complete project atomicity.
 
 ## Statement outcome classifier
 
-Top-level document processing now produces one outcome per PostgreSQL statement: formatted, unsupported/opaque, or fatal-invalid. Unsupported is not an error path by default. Reconstruction preserves source gaps outside owned statement spans, and style diagnostics are suppressed inside opaque unsupported ranges. Strict policy is applied only after all statement outcomes have been collected, preserving complete diagnostics and project-wide no-write behavior.
+Top-level document processing produces one outcome per parser-proven PostgreSQL
+statement: formatted, unsupported/opaque, or safety-skipped/opaque. Document
+parse and split failures remain fatal because no statement boundary may be
+guessed. Unsupported and safety-skipped statements are warnings by default.
+Reconstruction preserves their bytes and source gaps, and suppresses style and
+hard-width enforcement inside their opaque output ranges. Strict policy is
+applied only after all statement outcomes have been collected, preserving
+complete diagnostics and project-wide no-write behavior.
 
 Operational utilities remain a closed `UtilityStatementKind` capability set. Nested-query and option-bearing utilities receive explicit layout ownership; there is no generic parser-success fallback.
 

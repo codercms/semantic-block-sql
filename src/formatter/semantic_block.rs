@@ -11,6 +11,7 @@ use super::structure::TokenStructure;
 use super::tokens::{SqlToken, tokenize};
 use super::{
     FormatDiagnostic, FormatOptions, FormatWarning, INDENT_WIDTH, NotEqualPolicy, SemicolonPolicy,
+    SourceRange,
 };
 
 mod ddl;
@@ -454,6 +455,14 @@ pub(super) fn validate_hard_width(
     output: &str,
     options: &FormatOptions,
 ) -> Result<Vec<FormatWarning>, FormatDiagnostic> {
+    validate_hard_width_except(output, options, &[])
+}
+
+pub(super) fn validate_hard_width_except(
+    output: &str,
+    options: &FormatOptions,
+    ignored_ranges: &[SourceRange],
+) -> Result<Vec<FormatWarning>, FormatDiagnostic> {
     let tokens = tokenize(output)?;
     let mut warnings = Vec::new();
     let mut line_start = 0usize;
@@ -464,7 +473,10 @@ pub(super) fn validate_hard_width(
             .unwrap_or(line_with_newline);
         let width = line.chars().count();
         let line_end = line_start + line.len();
-        if width > options.hard_line_width {
+        let ignored = ignored_ranges
+            .iter()
+            .any(|range| range.start < line_end && range.end > line_start);
+        if width > options.hard_line_width && !ignored {
             let indent = line
                 .chars()
                 .take_while(|character| *character == ' ')

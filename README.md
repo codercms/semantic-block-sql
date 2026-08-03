@@ -2,9 +2,9 @@
 
 `semblock` is a deterministic, fail-safe PostgreSQL formatter and checker implementing the **Semantic Block SQL** style.
 
-It formats supported PostgreSQL syntax structurally, preserves comments and authored logical groups, and skips unsupported statement units byte-identically with a `syntax.unsupported` warning instead of guessing. Strict unsupported enforcement is an explicit opt-in.
+It formats supported PostgreSQL syntax structurally, preserves comments and authored logical groups, and skips opaque statement units byte-identically instead of guessing. Unsupported syntax receives `syntax.unsupported`; formatter safety failures receive `format.statement_skipped`. Strict enforcement is an explicit opt-in.
 
-The project is currently an early, usable release. It is suitable for repository-wide formatting and CI: supported units continue formatting when valid unsupported syntax is present, while malformed input and safety-gate failures remain fatal.
+The project is currently an early, usable release. It is suitable for repository-wide formatting and CI: supported units continue formatting when a parser-proven sibling is unsupported or fails a formatter safety gate, while malformed documents remain fatal.
 
 ## Features
 
@@ -71,7 +71,7 @@ Process Go files explicitly:
 semblock fmt --language go ./internal/...
 ```
 
-`check` and `diff` exit with code `1` when formatting changes are required, making both commands suitable for CI. Add `--strict-unsupported` when unsupported syntax must fail CI and prevent every project write.
+`check` and `diff` exit with code `1` when formatting changes are required, making both commands suitable for CI. Add `--strict-unsupported` when opaque unsupported or safety-skipped statements must fail CI and prevent every project write.
 
 ### Project and Git workflows
 
@@ -170,7 +170,7 @@ The formatter has fixture-backed structural support for substantial PostgreSQL s
 
 Important remaining areas include advanced SQL/JSON (`JSON_TABLE`, SQL-standard JSON query/value/aggregate forms), `CREATE TABLE AS` / `LIKE`, `XMLTABLE`, and procedural transaction control. PL/pgSQL transaction statements are preserved as unsupported units by default while supported siblings continue formatting.
 
-A PostgreSQL statement may be valid while still being unsupported by the formatter. By default, `semblock` preserves that statement byte-for-byte, emits a `syntax.unsupported` warning, and continues formatting supported statements in the same file or project. Set `format.unsupported_policy = "error"` or pass `--strict-unsupported` to make unsupported syntax fatal and retain project-wide no-write preflight. Malformed SQL and formatter safety failures are always errors.
+A PostgreSQL statement may be valid while still being unsupported by the formatter, or a nominally supported statement may fail an ownership or safety gate. By default, `semblock` preserves only that statement byte-for-byte, emits `syntax.unsupported` or `format.statement_skipped`, and continues formatting supported siblings in the same file or project. The skipped-statement diagnostic includes the statement's starting line. Set `format.unsupported_policy = "error"` or pass `--strict-unsupported` to elevate either opaque outcome to an error and retain project-wide no-write preflight. Malformed documents remain fatal because their statement boundaries are not trustworthy.
 
 ## Directives
 

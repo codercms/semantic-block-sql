@@ -284,7 +284,9 @@ fn bind_query_clauses(
             Token::Into => {
                 clauses.into.get_or_insert(index);
             }
-            Token::From => {
+            Token::From
+                if !is_distinct_from_operator(tokens, depths, select + 1, index, base_depth) =>
+            {
                 clauses.from.get_or_insert(index);
             }
             Token::Where => {

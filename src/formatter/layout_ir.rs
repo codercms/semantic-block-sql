@@ -74,6 +74,46 @@ impl QueryClauses {
     }
 }
 
+fn find_from_clause(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    start: usize,
+    end: usize,
+    base_depth: usize,
+) -> Option<usize> {
+    (start..end).find(|index| {
+        depths[*index] == base_depth
+            && tokens[*index].kind == Token::From
+            && !is_distinct_from_operator(tokens, depths, start, *index, base_depth)
+    })
+}
+
+fn is_distinct_from_operator(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    start: usize,
+    from: usize,
+    base_depth: usize,
+) -> bool {
+    let previous = |before| {
+        (start..before)
+            .rev()
+            .find(|index| depths[*index] == base_depth && !tokens[*index].is_comment())
+    };
+    let Some(distinct) = previous(from).filter(|index| tokens[*index].kind == Token::Distinct)
+    else {
+        return false;
+    };
+    let Some(before_distinct) = previous(distinct) else {
+        return false;
+    };
+    if tokens[before_distinct].kind == Token::Is {
+        return true;
+    }
+    tokens[before_distinct].kind == Token::Not
+        && previous(before_distinct).is_some_and(|index| tokens[index].kind == Token::Is)
+}
+
 /// One SELECT query branch, including nested and set-operation branches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct QueryBlock {
@@ -688,5 +728,23 @@ mod tests {
         assert_eq!(layout.predicates().len(), 2);
         assert_eq!(layout.predicates()[0].kind, PredicateKind::JoinOn);
         assert_eq!(layout.predicates()[1].kind, PredicateKind::Where);
+    }
+
+    #[test]
+    fn query_blocks_exclude_distinctness_operators_from_clause_ownership() {
+        let source = "SELECT old_value IS DISTINCT FROM new_value; SELECT item.old_value IS NOT DISTINCT FROM item.new_value FROM items item;";
+        let document = parse_supported_postgresql(source).expect("supported parse");
+        let tokens = tokenize(source).expect("scan succeeds");
+        let structure = TokenStructure::new(&tokens);
+        let layout = LayoutDocument::bind(&document, &tokens, &structure).expect("bind succeeds");
+
+        assert_eq!(layout.queries().len(), 2);
+        assert_eq!(layout.queries()[0].clauses.from, None);
+        let actual_from = layout.queries()[1]
+            .clauses
+            .from
+            .expect("the relation FROM remains owned");
+        assert_eq!(tokens[actual_from].text.to_ascii_uppercase(), "FROM");
+        assert_eq!(tokens[actual_from + 1].text, "items");
     }
 }
