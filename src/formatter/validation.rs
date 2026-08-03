@@ -1,12 +1,14 @@
 use super::FormatDiagnostic;
+use pg_query::protobuf::a_const::Val as AConstValue;
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
     AlterTableStmt, AlterTableType, CmdType, ColumnDef, ConstrType, Constraint, CreateDomainStmt,
-    CreatePolicyStmt, CreateSeqStmt, CreateStmt, CreateTableAsStmt, CreateTrigStmt, DeleteStmt,
-    DropBehavior, DropStmt, GrantRoleStmt, GrantStmt, GrantTargetType, IndexStmt, InsertStmt,
-    JoinExpr, JoinType, LockClauseStrength, LockWaitPolicy, MergeMatchKind, MergeStmt, Node,
-    ObjectType, OnCommitAction, OnConflictAction, OverridingKind, PartitionStrategy, RawStmt,
-    SelectStmt, SetOperation, TruncateStmt, UpdateStmt, ViewCheckOption, ViewStmt,
+    CreatePolicyStmt, CreateSeqStmt, CreateStmt, CreateTableAsStmt, CreateTrigStmt, DefElemAction,
+    DeleteStmt, DropBehavior, DropStmt, GrantRoleStmt, GrantStmt, GrantTargetType, IndexStmt,
+    InsertStmt, JoinExpr, JoinType, LockClauseStrength, LockWaitPolicy, MergeMatchKind, MergeStmt,
+    Node, ObjectType, OnCommitAction, OnConflictAction, OverridingKind, PartitionStrategy, RawStmt,
+    SelectStmt, SetOperation, TransactionStmt, TransactionStmtKind, TruncateStmt, UpdateStmt,
+    ViewCheckOption, ViewStmt,
 };
 use pg_query::{Context, NodeRef};
 mod equivalence;
@@ -160,6 +162,9 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
         NodeEnum::IndexStmt(index) => Ok(StatementSpec::CreateIndex(validate_create_index(index)?)),
         NodeEnum::AlterTableStmt(alter) => {
             Ok(StatementSpec::AlterTable(validate_alter_table(alter)?))
+        }
+        NodeEnum::TransactionStmt(statement) => {
+            Ok(StatementSpec::Utility(validate_transaction(statement)?))
         }
         NodeEnum::DropStmt(statement) => {
             validate_drop(statement)?;
@@ -384,6 +389,61 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
         NodeEnum::DoStmt(_) => Err("DO block"),
         _ => Err("unimplemented PostgreSQL statement family"),
     }
+}
+
+fn validate_transaction(statement: &TransactionStmt) -> Result<UtilityStatementKind, &'static str> {
+    if !statement.savepoint_name.is_empty() || !statement.gid.is_empty() {
+        return Err("unreviewed transaction identifier");
+    }
+
+    match TransactionStmtKind::try_from(statement.kind).unwrap_or(TransactionStmtKind::Undefined) {
+        TransactionStmtKind::TransStmtBegin if !statement.chain => {
+            validate_begin_options(&statement.options)?;
+            Ok(UtilityStatementKind::Begin)
+        }
+        TransactionStmtKind::TransStmtCommit
+            if statement.options.is_empty() && !statement.chain =>
+        {
+            Ok(UtilityStatementKind::Commit)
+        }
+        _ => Err("unreviewed transaction statement"),
+    }
+}
+
+fn validate_begin_options(options: &[Node]) -> Result<(), &'static str> {
+    for option in options {
+        let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
+            return Err("unrecognized BEGIN option");
+        };
+        if !option.defnamespace.is_empty()
+            || DefElemAction::try_from(option.defaction).unwrap_or(DefElemAction::Undefined)
+                != DefElemAction::DefelemUnspec
+        {
+            return Err("unreviewed BEGIN option shape");
+        }
+        let Some(NodeEnum::AConst(value)) =
+            option.arg.as_deref().and_then(|node| node.node.as_ref())
+        else {
+            return Err("BEGIN option without a constant value");
+        };
+        if value.isnull {
+            return Err("NULL BEGIN option");
+        }
+
+        match (option.defname.as_str(), value.val.as_ref()) {
+            ("transaction_isolation", Some(AConstValue::Sval(value)))
+                if matches!(
+                    value.sval.as_str(),
+                    "serializable" | "repeatable read" | "read committed" | "read uncommitted"
+                ) => {}
+            (
+                "transaction_read_only" | "transaction_deferrable",
+                Some(AConstValue::Ival(value)),
+            ) if matches!(value.ival, 0 | 1) => {}
+            _ => return Err("unreviewed BEGIN transaction mode"),
+        }
+    }
+    Ok(())
 }
 
 fn validate_copy(statement: &pg_query::protobuf::CopyStmt) -> Result<(), &'static str> {

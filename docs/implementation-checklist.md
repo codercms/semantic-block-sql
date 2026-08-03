@@ -809,6 +809,21 @@ Evidence:
   with their respective diagnostic ranges and proves the second-pass view is
   stable on an idempotent invocation.
 
+## Top-level BEGIN and COMMIT utilities
+
+- [x] Reproduce leading comments being included in unsupported `BEGIN` ranges
+  and plain `COMMIT` being reported as an unsupported statement family.
+- [x] Characterize PostgreSQL `TransactionStmt` nodes for plain, `WORK`, and
+  option-bearing transaction statements.
+- [x] Accept top-level `BEGIN` transaction modes and unchained `COMMIT` through
+  the closed utility ownership path without a transaction nesting planner.
+- [x] Keep transaction keyword casing statement-scoped so identifier spelling
+  outside transaction utilities is unaffected.
+- [x] Preserve `START TRANSACTION`, rollback, and `COMMIT AND CHAIN` as
+  byte-identical unsupported neighbors.
+- [x] Cover leading comments, supported siblings, semantic equivalence,
+  idempotence, clean formatted `check`, and the reported real SQL file.
+
 ## CREATE TYPE enum comment layout
 
 - [x] Reproduce the multiline enum regression with inline comments.

@@ -727,6 +727,19 @@ utilities in addition to the layout-bearing query/DML/DDL families. `DROP`,
 before the shared token renderer may normalize casing and spacing; unknown
 object kinds or option combinations still return `syntax.unsupported`.
 
+Top-level transaction control follows the same closed utility path. The
+formatter accepts `TransactionStmt` only for `BEGIN` with parser-owned
+`ISOLATION LEVEL`, `READ ONLY` / `READ WRITE`, and `[NOT] DEFERRABLE` modes, or
+for `COMMIT` whose AST chain flag is false, including explicit `AND NO CHAIN`.
+`WORK` and `TRANSACTION` spellings that map to those AST shapes are accepted.
+These statements need no transaction-specific
+nesting planner: the generic utility binder preserves token order, while a
+statement-scoped casing rule handles their unreserved keywords. Leading
+comments remain attached to `BEGIN`. `START TRANSACTION`, rollback, savepoint,
+prepared-transaction, and chained-commit shapes remain byte-identical with
+`syntax.unsupported`; PL/pgSQL transaction control remains opaque as described
+below.
+
 `CREATE TYPE ... AS ENUM` remains a validated `CreateEnum` utility, but its
 owned `ENUM (...)` value range participates in the shared parenthesized-list
 planner. Authored value lines and inline comments therefore force a newline

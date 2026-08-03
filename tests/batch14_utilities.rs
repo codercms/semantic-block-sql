@@ -57,6 +57,41 @@ fn hard_width_errors_after_copy_payload_use_document_line_numbers() {
 }
 
 #[test]
+fn formats_plain_top_level_transactions_without_comment_diagnostics() {
+    let source = include_str!("fixtures/batch14/transactions.input.sql");
+    let expected = include_str!("fixtures/batch14/transactions.expected.sql");
+
+    assert_fixture(source, expected);
+    let formatted = format_sql(source, &FormatOptions::default())
+        .expect("plain transaction formatting succeeds");
+    assert!(
+        formatted
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.rule_id != "syntax.unsupported"),
+        "{:?}",
+        formatted.diagnostics
+    );
+}
+
+#[test]
+fn unreviewed_transaction_controls_remain_unsupported() {
+    for source in ["START TRANSACTION;", "COMMIT AND CHAIN;", "ROLLBACK;"] {
+        let result = format_sql_result(source, &FormatOptions::default());
+        assert_eq!(result.output, source, "{source}");
+        assert!(!result.changed, "{source}");
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.rule_id == "syntax.unsupported"
+                    && diagnostic.severity == Severity::Warning
+            }),
+            "{source}: {:?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
 fn unreviewed_utility_neighbors_are_preserved_and_non_fatal() {
     for source in [
         "CREATE SCHEMA app CREATE TABLE nested(id bigint);",
