@@ -60,3 +60,20 @@ support or change public APIs.
   `CREATE VIEW` changes are outside this batch.
 - A fresh Windows build requires LLVM/libclang or an equivalent build
   environment for the pinned `pg_query` dependency.
+
+## Follow-up compactness refinement
+
+The first implementation exposed two additional over-expansion regressions:
+
+- an INSERT target list inside a commented CTE measured compact width from the
+  CTE body span instead of the local `INSERT` token;
+- predicate owners expanded every `AND` or `OR`, even when a same-precedence
+  two-condition predicate was short and cohesive.
+
+The architecture already contains the necessary ownership and planner
+boundaries, so no ownership-IR redesign is required. Measure INSERT target-list
+width from `InsertBlock::body_start`. Apply the shared mixed/nested/width rule
+to predicates while retaining authored predicate boundaries, and let query
+planning expand a nested query when its containing Boolean range is expanded.
+Regression tests must keep the local predicates compact without collapsing the
+surrounding mixed `OR EXISTS` structure.

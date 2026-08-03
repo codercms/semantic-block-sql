@@ -42,9 +42,11 @@ func run(ctx context.Context) {
     .expect("format Go source");
 
     assert!(formatted.output.contains("const oneLine = \"SELECT 1;\""));
-    assert!(formatted.output.contains(
-        "use(ctx, `SELECT id, name\nFROM users\nWHERE\n    active = TRUE\n    AND id = $1;`, 1)"
-    ));
+    assert!(
+        formatted.output.contains(
+            "use(ctx, \"SELECT id, name FROM users WHERE active = TRUE AND id = $1;\", 1)"
+        )
+    );
     assert!(
         formatted
             .output
@@ -101,9 +103,11 @@ func queries(columns string) {
     )
     .expect("format Go source");
 
-    assert!(formatted.output.contains(
-        "static := `SELECT id, name\nFROM users\nWHERE\n    active = TRUE\n    AND id > 0;`"
-    ));
+    assert!(
+        formatted
+            .output
+            .contains("static := \"SELECT id, name FROM users WHERE active = TRUE AND id > 0;\"")
+    );
     assert!(
         formatted
             .output
@@ -127,17 +131,17 @@ const multiline = "select id,name from users where active=true and id=$1;"
     let formatted = format_source(source, Language::Go, &FormatOptions::default(), &config)
         .expect("format preferred raw strings");
     assert!(formatted.output.contains(
-        "const query = \"SELECT '`' AS marker\\nFROM users\\nWHERE\\n    active = TRUE\\n    AND id = $1;\""
+        "const query = \"SELECT '`' AS marker FROM users WHERE active = TRUE AND id = $1;\""
     ));
     assert!(formatted.output.contains(
-        "const multiline = `SELECT id, name\nFROM users\nWHERE\n    active = TRUE\n    AND id = $1;`"
+        "const multiline = \"SELECT id, name FROM users WHERE active = TRUE AND id = $1;\""
     ));
 
     config.multiline_string_style = GoMultilineStringStyle::Preserve;
     let preserved = format_source(source, Language::Go, &FormatOptions::default(), &config)
         .expect("preserve interpreted strings");
     assert!(preserved.output.contains(
-        "const multiline = \"SELECT id, name\\nFROM users\\nWHERE\\n    active = TRUE\\n    AND id = $1;\""
+        "const multiline = \"SELECT id, name FROM users WHERE active = TRUE AND id = $1;\""
     ));
 }
 
@@ -170,7 +174,7 @@ func queries(columns string) {
     assert!(
         formatted
             .output
-            .contains("`SELECT id\nFROM users\nWHERE\n    active = TRUE\n    AND id > 0;`")
+            .contains("\"SELECT id FROM users WHERE active = TRUE AND id > 0;\"")
     );
     assert!(formatted.diagnostics.iter().any(|diagnostic| {
         diagnostic.rule_id == "syntax.unsupported" && diagnostic.severity == Severity::Warning
@@ -207,9 +211,11 @@ const valid = "select id from users where active=true and id>0;"
             .output
             .contains("const malformed = \"select from;\"")
     );
-    assert!(formatted.output.contains(
-        "const valid = `SELECT id\nFROM users\nWHERE\n    active = TRUE\n    AND id > 0;`"
-    ));
+    assert!(
+        formatted
+            .output
+            .contains("const valid = \"SELECT id FROM users WHERE active = TRUE AND id > 0;\"")
+    );
 
     let explicit = r#"package sample
 

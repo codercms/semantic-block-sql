@@ -765,6 +765,15 @@ also treats a mixed-Boolean item as complex on the first pass, preventing a
 second-pass-only list expansion. Unsupported syntax is still preserved with
 `syntax.unsupported`; this change does not broaden AST support.
 
+Short same-precedence predicates remain compact when they fit the soft width
+and have no authored comment or line boundary. Mixed precedence, nested SQL,
+authored boundaries, or width may still expand the predicate. When an expanded
+Boolean expression contains `EXISTS` or another nested query, query planning
+expands that nested query independently while allowing its own short local
+predicate to remain inline. INSERT target-list width is measured from the
+owned `INSERT` body start, so leading CTE comments or WITH definitions cannot
+force an otherwise compact column list to expand.
+
 ## Parser-backed PL/pgSQL routine bodies
 
 `DO` blocks and dollar-quoted PL/pgSQL function/procedure bodies use a dedicated

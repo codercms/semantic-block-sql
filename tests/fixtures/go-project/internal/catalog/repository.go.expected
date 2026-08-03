@@ -19,12 +19,7 @@ type Queries struct {
 func wrap(query string) string { return query }
 
 func (repository Repository) FindActive(ctx context.Context, minimumID int64) (any, error) {
-	return repository.DB.QueryContext(ctx, `SELECT id, name, metadata
-FROM public.catalog_items
-WHERE
-    active = TRUE
-    AND id >= $1
-ORDER BY id;`, minimumID)
+	return repository.DB.QueryContext(ctx, "SELECT id, name, metadata FROM public.catalog_items WHERE active = TRUE AND id >= $1 ORDER BY id;", minimumID)
 }
 
 func (repository Repository) Archive(ctx context.Context, id int64) (any, error) {
@@ -39,11 +34,7 @@ func DefaultQueries() Queries {
 }
 
 func StaticQuery() string {
-	return `SELECT id, name
-FROM public.catalog_items
-WHERE
-    active = TRUE
-    AND id > 0;`
+	return "SELECT id, name FROM public.catalog_items WHERE active = TRUE AND id > 0;"
 }
 
 func DynamicQuery(columns string) string {

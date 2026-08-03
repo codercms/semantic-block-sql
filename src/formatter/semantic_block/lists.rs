@@ -53,7 +53,7 @@ pub(super) fn parenthesized_lists(
             .inserts
             .iter()
             .find(|insert| insert.target_open == Some(open))
-            .map(|insert| insert.span.start)
+            .map(|insert| insert.body_start)
             .or_else(|| {
                 sources.merges.iter().find_map(|merge| {
                     merge

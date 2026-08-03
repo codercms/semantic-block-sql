@@ -675,6 +675,22 @@ Evidence:
 - [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
   GitNexus change-scope review before commit.
 
+## Compact INSERT-list and predicate refinement batch
+
+- [x] Add a commented, anonymized data-modifying CTE regression whose short
+  INSERT target list must remain inline.
+- [x] Measure INSERT target-list width from the local `InsertBlock::body_start`
+  rather than leading comments in the CTE statement span.
+- [x] Add short same-precedence `JOIN ON`, `WHERE`, and `HAVING` regressions.
+- [x] Preserve authored predicate boundaries while avoiding expansion solely
+  because one `AND` or `OR` is present.
+- [x] Keep nested queries expanded when their containing mixed Boolean range is
+  expanded, without forcing a short nested predicate onto multiple lines.
+- [x] Preserve mixed-Boolean, `OR EXISTS`, comment, equivalence, idempotence,
+  and clean-check coverage in the focused formatter suites.
+- [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
+  GitNexus change-scope review before commit.
+
 ## Batch 7 — Performance and release polish
 
 - [ ] Establish correctness-preserving benchmarks.

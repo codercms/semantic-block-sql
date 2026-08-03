@@ -32,7 +32,7 @@ fn compact_do_nothing_stays_inline() {
 #[test]
 fn separates_conflict_target_update_set_and_action_where() {
     let source = "insert into items (id, title, updated_at) values ($1, $2, now()) on conflict (id) do update set title=excluded.title, updated_at=now() where items.deleted_at is null and excluded.title is not null returning id;";
-    let expected = "INSERT INTO items (id, title, updated_at)\nVALUES ($1, $2, NOW())\nON CONFLICT (id)\nDO UPDATE\nSET\n    title = EXCLUDED.title,\n    updated_at = NOW()\nWHERE\n    items.deleted_at IS NULL\n    AND EXCLUDED.title IS NOT NULL\nRETURNING id;";
+    let expected = "INSERT INTO items (id, title, updated_at)\nVALUES ($1, $2, NOW())\nON CONFLICT (id)\nDO UPDATE\nSET\n    title = EXCLUDED.title,\n    updated_at = NOW()\nWHERE items.deleted_at IS NULL AND EXCLUDED.title IS NOT NULL\nRETURNING id;";
 
     assert_format(source, expected, &FormatOptions::default());
 
@@ -50,7 +50,7 @@ fn separates_conflict_target_update_set_and_action_where() {
 #[test]
 fn complex_target_predicate_remains_owned_by_on_conflict() {
     let source = "insert into items (kp_id, source, title) values ($1, $2, $3) on conflict (kp_id) where kp_id is not null and source = 'kp' do update set title = excluded.title;";
-    let expected = "INSERT INTO items (kp_id, source, title)\nVALUES ($1, $2, $3)\nON CONFLICT (kp_id) WHERE\n    kp_id IS NOT NULL\n    AND source = 'kp'\nDO UPDATE\nSET\n    title = EXCLUDED.title;";
+    let expected = "INSERT INTO items (kp_id, source, title)\nVALUES ($1, $2, $3)\nON CONFLICT (kp_id) WHERE kp_id IS NOT NULL AND source = 'kp'\nDO UPDATE\nSET\n    title = EXCLUDED.title;";
 
     assert_format(source, expected, &FormatOptions::default());
 }

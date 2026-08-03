@@ -32,7 +32,7 @@ fn compact_single_assignment_update_stays_inline() {
 #[test]
 fn update_from_separates_set_source_predicate_and_returning() {
     let source = "update public.items item set title=source.title, updated_at=now() from staging.items source where item.id=source.id and source.ready=true returning item.id, item.updated_at;";
-    let expected = "UPDATE public.items item\nSET title = source.title, updated_at = NOW()\nFROM staging.items source\nWHERE\n    item.id = source.id\n    AND source.ready = TRUE\nRETURNING item.id, item.updated_at;";
+    let expected = "UPDATE public.items item\nSET title = source.title, updated_at = NOW()\nFROM staging.items source\nWHERE item.id = source.id AND source.ready = TRUE\nRETURNING item.id, item.updated_at;";
 
     assert_format(source, expected);
 

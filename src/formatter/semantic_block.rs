@@ -573,11 +573,15 @@ fn plan_query_clauses(
         let has_expanded_boolean = boolean_ranges
             .iter()
             .any(|range| range.start > select && range.start < end);
+        let nested_in_expanded_boolean = boolean_ranges
+            .iter()
+            .any(|range| range.start < select && select < range.end);
         let width_driven = indent * INDENT_WIDTH + compact_width(tokens, select, end, options)
             > options.soft_line_width;
         let expanded = expanded_selects.contains(&select)
             || has_join
             || has_expanded_boolean
+            || nested_in_expanded_boolean
             || with_body_starts.contains(&select)
             || cte_body_selects.contains(&select)
             || width_driven;
@@ -641,8 +645,6 @@ fn boolean_ranges(
 
     for expression in expressions {
         let root_depth = boolean_root_depth(tokens, depths, parens, *expression);
-        let has_connector = (expression.start..expression.end)
-            .any(|candidate| matches!(tokens[candidate].kind, Token::And | Token::Or));
         let has_and = (expression.start..expression.end)
             .any(|candidate| tokens[candidate].kind == Token::And);
         let has_or =
@@ -654,13 +656,15 @@ fn boolean_ranges(
         let hides_structure = expression.root_indent * INDENT_WIDTH
             + compact_width(tokens, expression.start, expression.end, options)
             > options.soft_line_width;
-        let predicate = expression.kind == ExpressionOwnerKind::Predicate;
-
-        let expanded = if predicate {
-            has_connector || hides_structure
-        } else {
-            root_depth.is_some() && ((has_and && has_or) || contains_nested_sql || hides_structure)
-        };
+        let authored_predicate = expression.kind == ExpressionOwnerKind::Predicate
+            && tokens[expression.start..expression.end]
+                .iter()
+                .any(|token| token.is_comment() || token.line_breaks_before > 0);
+        let expanded_boolean = root_depth.is_some()
+            && ((has_and && has_or) || contains_nested_sql || authored_predicate);
+        let expanded = expanded_boolean
+            || (hides_structure
+                && (expression.kind == ExpressionOwnerKind::Predicate || root_depth.is_some()));
 
         if expanded {
             result.push(BooleanRange {

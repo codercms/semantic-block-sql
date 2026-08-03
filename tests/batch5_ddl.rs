@@ -63,12 +63,12 @@ fn wraps_alter_table_check_predicates_like_where_predicates() {
 fn wraps_column_check_predicates_in_create_and_alter_table() {
     assert_format(
         "CREATE TABLE metrics (score integer CHECK (score >= 0 AND score <= 100));",
-        "CREATE TABLE metrics (\n    score integer CHECK (\n        score >= 0\n        AND score <= 100\n    )\n);",
+        "CREATE TABLE metrics (\n    score integer CHECK (score >= 0 AND score <= 100)\n);",
         &FormatOptions::default(),
     );
     assert_format(
         "ALTER TABLE metrics ADD COLUMN weight integer CHECK (weight >= 0 AND weight <= 100);",
-        "ALTER TABLE metrics\n    ADD COLUMN weight integer CHECK (\n        weight >= 0\n        AND weight <= 100\n    );",
+        "ALTER TABLE metrics\n    ADD COLUMN weight integer CHECK (weight >= 0 AND weight <= 100);",
         &FormatOptions::default(),
     );
 }
