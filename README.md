@@ -243,9 +243,21 @@ Example diagnostic:
 query.sql:1:1 (bytes 0-6): error[casing.keyword]: SQL keyword or grammar construct must be `SELECT` instead of `select`
 ```
 
-CLI diagnostics use one-based `line:column` source locations for editor and
-terminal navigation. The original half-open UTF-8 byte range follows in
-parentheses for exact tooling integration.
+CLI diagnostics use one-based `line:column` locations for editor and terminal
+navigation. The matching half-open UTF-8 byte range follows in parentheses for
+exact tooling integration. Coordinates always refer to the source a user can
+act on:
+
+- `check` and `diff` refer to the original input and never rewrite it;
+- successful `fmt` refers to the final formatted file;
+- successful `fmt --stdin` refers to formatted stdout;
+- fatal or strict-policy `fmt` failures refer to the unchanged input.
+
+The reusable source API exposes both views without offset-delta tracking:
+`FormattedSource::diagnostics` is input-relative, and
+`FormattedSource::output_diagnostics` is relative to `FormattedSource::output`.
+The output view is collected from the existing idempotence pass, so it does not
+require another parse.
 
 | Code | Meaning |
 | --- | --- |
