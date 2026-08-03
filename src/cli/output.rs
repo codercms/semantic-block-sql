@@ -12,6 +12,7 @@ pub(super) struct CheckOutput {
 
 pub(super) fn emit_diagnostics(
     path: &Path,
+    source: &str,
     formatted: &FormattedSource,
     quiet: bool,
     include_style_errors: bool,
@@ -27,14 +28,37 @@ pub(super) fn emit_diagnostics(
             Severity::Error => "error",
             Severity::Warning => "warning",
         };
+        let location = source_location(source, diagnostic.source_range.start);
         eprintln!(
-            "{}:{}-{}: {severity}[{}]: {}",
+            "{}:{}:{} (bytes {}-{}): {severity}[{}]: {}",
             path.display(),
+            location.line,
+            location.column,
             diagnostic.source_range.start,
             diagnostic.source_range.end,
             diagnostic.rule_id,
             diagnostic.message
         );
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SourceLocation {
+    line: usize,
+    column: usize,
+}
+
+fn source_location(source: &str, byte_offset: usize) -> SourceLocation {
+    let mut offset = byte_offset.min(source.len());
+    while !source.is_char_boundary(offset) {
+        offset -= 1;
+    }
+
+    let prefix = &source[..offset];
+    let line_start = prefix.rfind('\n').map_or(0, |newline| newline + 1);
+    SourceLocation {
+        line: prefix.bytes().filter(|byte| *byte == b'\n').count() + 1,
+        column: prefix[line_start..].chars().count() + 1,
     }
 }
 

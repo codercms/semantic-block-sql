@@ -50,6 +50,11 @@ token normalization.
 
 Current application-level decisions are:
 
+- CLI diagnostics render the one-based source `line:column` first and retain
+  the core diagnostic's half-open UTF-8 byte range as secondary metadata. The
+  CLI computes locations from the exact source being formatted, including
+  stdin and staged index blobs; the reusable formatter API continues to expose
+  source ranges without CLI presentation concerns.
 - Go interpreted strings are enabled after a complete decode/format/re-encode
   round trip and runtime-value verification were implemented.
 - Multiline interpreted SQL prefers a raw literal when lossless and otherwise
