@@ -38,6 +38,24 @@ fn migration_comments_and_literals_remain_byte_identical() {
 }
 
 #[test]
+fn enum_values_with_inline_comments_keep_owned_multiline_layout() {
+    let source = "CREATE TYPE queue_core.work_status AS ENUM (\n    'pending', -- Задача создана или возобновлена и ожидает обработки.\n    'processing', -- Задача взята обработчиком; available_at - время, до которого она закреплена за ним.\n    'retryable_failed' -- Последняя попытка завершилась временной ошибкой; задачу можно повторить автоматически.\n);";
+    let options = FormatOptions::default();
+
+    let formatted = format_sql(source, &options).expect("format succeeds");
+
+    assert_eq!(formatted.output, source);
+    validate_equivalent(source, &formatted.output).expect("semantic equivalence");
+    assert_eq!(
+        format_sql(&formatted.output, &options)
+            .expect("second format succeeds")
+            .output,
+        source,
+        "formatting must be idempotent",
+    );
+}
+
+#[test]
 fn unreviewed_migration_neighbors_remain_fail_safe() {
     for source in [
         "DROP FUNCTION public.refresh_item(bigint);",

@@ -1,12 +1,13 @@
 use super::statements::{is_insert_list_open, is_merge_list_open};
 use super::*;
-use crate::formatter::layout_ir::ValuesBlock;
-use crate::formatter::ownership::TokenRange;
+use crate::formatter::layout_ir::{UtilityBlock, ValuesBlock};
+use crate::formatter::ownership::{TokenRange, UtilityStatementKind};
 
 pub(super) struct ParenthesizedListSources<'a> {
     pub cases: &'a [CaseRange],
     pub inserts: &'a [InsertBlock],
     pub merges: &'a [MergeBlock],
+    pub utilities: &'a [UtilityBlock],
     pub values: &'a [ValuesBlock],
 }
 
@@ -24,6 +25,7 @@ pub(super) fn parenthesized_lists(
             || !(is_function_call_open(tokens, open)
                 || is_insert_list_open(sources.inserts, open)
                 || is_merge_list_open(sources.merges, open)
+                || is_create_enum_list_open(tokens, sources.utilities, open)
                 || is_values_list_open(sources.values, open))
         {
             continue;
@@ -95,6 +97,21 @@ pub(super) fn parenthesized_lists(
     }
 
     lists
+}
+
+fn is_create_enum_list_open(
+    tokens: &[SqlToken<'_>],
+    utilities: &[UtilityBlock],
+    open: usize,
+) -> bool {
+    tokens
+        .get(open.wrapping_sub(1))
+        .is_some_and(|previous| previous.kind == Token::EnumP)
+        && utilities.iter().any(|utility| {
+            utility.kind == UtilityStatementKind::CreateEnum
+                && open > utility.span.start
+                && open < utility.span.end
+        })
 }
 
 fn is_values_list_open(values: &[ValuesBlock], open: usize) -> bool {

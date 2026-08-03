@@ -240,8 +240,12 @@ Indentation is always four spaces. Authored list groups, blank lines, and commen
 Example diagnostic:
 
 ```text
-query.sql:0-6: error[casing.keyword]: SQL keyword or grammar construct must be `SELECT` instead of `select`
+query.sql:1:1 (bytes 0-6): error[casing.keyword]: SQL keyword or grammar construct must be `SELECT` instead of `select`
 ```
+
+CLI diagnostics use one-based `line:column` source locations for editor and
+terminal navigation. The original half-open UTF-8 byte range follows in
+parentheses for exact tooling integration.
 
 | Code | Meaning |
 | --- | --- |
