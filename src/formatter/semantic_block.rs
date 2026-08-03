@@ -14,6 +14,7 @@ use super::{
 };
 
 mod ddl;
+mod expressions;
 mod lists;
 mod render;
 mod statements;
@@ -22,7 +23,11 @@ use ddl::{
     plan_alter_tables, plan_create_indexes, plan_create_tables, plan_materialized_views,
     plan_values_statements, plan_views,
 };
-use lists::{parenthesized_lists, plan_keyword_list, plan_parenthesized_lists, plan_select_lists};
+use expressions::{ExpressionSources, owned_expression_ranges};
+use lists::{
+    ParenthesizedListSources, parenthesized_lists, plan_keyword_list, plan_parenthesized_lists,
+    plan_select_lists,
+};
 pub(in crate::formatter) use render::needs_space;
 pub(super) use render::{
     is_compact_grammar_parenthesis, is_function_call_name, is_function_call_syntax,
@@ -43,6 +48,7 @@ struct Break {
 struct LayoutPlan {
     before: HashMap<usize, Break>,
     token_indents: Vec<Option<usize>>,
+    indent_offsets: Vec<usize>,
 }
 
 impl LayoutPlan {
@@ -50,6 +56,7 @@ impl LayoutPlan {
         Self {
             before: HashMap::new(),
             token_indents: vec![None; token_count],
+            indent_offsets: vec![0; token_count],
         }
     }
 
@@ -80,14 +87,62 @@ impl LayoutPlan {
     fn indent_for(&self, index: usize, fallback: usize) -> usize {
         self.token_indents[index].unwrap_or(fallback)
     }
+
+    fn line_indent_for(&self, index: usize, fallback: usize) -> usize {
+        self.before
+            .get(&index)
+            .map(|line_break| line_break.indent)
+            .unwrap_or_else(|| self.indent_for(index, fallback))
+    }
+
+    fn shift_indents(&mut self, range: std::ops::Range<usize>, levels: usize) {
+        if levels == 0 {
+            return;
+        }
+        for (index, line_break) in &mut self.before {
+            if range.contains(index) {
+                line_break.indent += levels;
+            }
+        }
+        for indent in self.token_indents[range.clone()].iter_mut().flatten() {
+            *indent += levels;
+        }
+        for offset in &mut self.indent_offsets[range] {
+            *offset += levels;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 struct BooleanRange {
+    kind: ExpressionOwnerKind,
     start: usize,
     end: usize,
     base_depth: usize,
-    indent: usize,
+    root_indent: usize,
+    root_depth: Option<usize>,
+    wrapper_close: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpressionOwnerKind {
+    Predicate,
+    SelectTarget,
+    ReturningItem,
+    AssignmentValue,
+    ValuesItem,
+    CaseCondition,
+    CaseResult,
+    FunctionArgument,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ExpressionRange {
+    kind: ExpressionOwnerKind,
+    start: usize,
+    end: usize,
+    base_depth: usize,
+    root_indent: usize,
     wrapper_close: Option<usize>,
 }
 
@@ -155,9 +210,18 @@ pub(super) fn format(
     let create_indexes = layout.create_indexes().cloned().collect::<Vec<_>>();
     let alter_tables = layout.alter_tables().cloned().collect::<Vec<_>>();
     let utilities = layout.utilities().copied().collect::<Vec<_>>();
-    let parenthesized_lists =
-        parenthesized_lists(&tokens, depths, parens, &cases, &inserts, &merges, options);
-    let boolean_ranges = boolean_ranges(&tokens, depths, layout.predicates(), options);
+    let parenthesized_lists = parenthesized_lists(
+        &tokens,
+        depths,
+        parens,
+        ParenthesizedListSources {
+            cases: &cases,
+            inserts: &inserts,
+            merges: &merges,
+            values: &values,
+        },
+        options,
+    );
     let context = PlanningContext {
         tokens: &tokens,
         depths,
@@ -165,6 +229,22 @@ pub(super) fn format(
         lists: &parenthesized_lists,
         options,
     };
+    let expression_ranges = owned_expression_ranges(
+        &context,
+        parens,
+        ExpressionSources {
+            predicates: layout.predicates(),
+            queries: layout.queries(),
+            inserts: &inserts,
+            updates: &updates,
+            deletes: &deletes,
+            merges: &merges,
+            values: &values,
+            lists: &parenthesized_lists,
+            cases: &cases,
+        },
+    );
+    let boolean_ranges = boolean_ranges(&tokens, depths, &expression_ranges, parens, options);
     let mut plan = LayoutPlan::new(tokens.len());
 
     for span in layout.statement_spans().skip(1) {
@@ -242,8 +322,9 @@ pub(super) fn format(
     );
     plan_window_blocks(&context, layout.window_blocks(), &mut plan);
     plan_set_operations(layout.set_operations(), &mut plan);
-    plan_booleans(&tokens, depths, &boolean_ranges, parens, &mut plan);
     plan_cases(&tokens, depths, &cases, &mut plan);
+    plan_booleans(&tokens, depths, &boolean_ranges, parens, options, &mut plan);
+    plan_expression_comment_continuations(&tokens, &expression_ranges, &mut plan);
     plan_ctes(&tokens, depths, layout.with_blocks(), &mut plan);
 
     let terminal_semicolon = terminal_semicolon_plan(&tokens, options.semicolon_policy);
@@ -492,11 +573,15 @@ fn plan_query_clauses(
         let has_expanded_boolean = boolean_ranges
             .iter()
             .any(|range| range.start > select && range.start < end);
+        let nested_in_expanded_boolean = boolean_ranges
+            .iter()
+            .any(|range| range.start < select && select < range.end);
         let width_driven = indent * INDENT_WIDTH + compact_width(tokens, select, end, options)
             > options.soft_line_width;
         let expanded = expanded_selects.contains(&select)
             || has_join
             || has_expanded_boolean
+            || nested_in_expanded_boolean
             || with_body_starts.contains(&select)
             || cte_body_selects.contains(&select)
             || width_driven;
@@ -552,27 +637,44 @@ fn plan_set_operations(operations: &[SetOperationBlock], plan: &mut LayoutPlan) 
 fn boolean_ranges(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
-    predicates: &[PredicateBlock],
+    expressions: &[ExpressionRange],
+    parens: &HashMap<usize, usize>,
     options: &FormatOptions,
 ) -> Vec<BooleanRange> {
     let mut result = Vec::new();
 
-    for predicate in predicates {
-        let has_connector = (predicate.start..predicate.end).any(|candidate| {
-            depths[candidate] >= predicate.base_depth
-                && matches!(tokens[candidate].kind, Token::And | Token::Or)
+    for expression in expressions {
+        let root_depth = boolean_root_depth(tokens, depths, parens, *expression);
+        let has_and = (expression.start..expression.end)
+            .any(|candidate| tokens[candidate].kind == Token::And);
+        let has_or =
+            (expression.start..expression.end).any(|candidate| tokens[candidate].kind == Token::Or);
+        let contains_nested_sql = (expression.start..expression.end).any(|candidate| {
+            depths[candidate] > expression.base_depth
+                && matches!(tokens[candidate].kind, Token::Select | Token::With)
         });
-        let hides_structure = predicate.indent * INDENT_WIDTH
-            + compact_width(tokens, predicate.introducer, predicate.end, options)
+        let hides_structure = expression.root_indent * INDENT_WIDTH
+            + compact_width(tokens, expression.start, expression.end, options)
             > options.soft_line_width;
+        let authored_predicate = expression.kind == ExpressionOwnerKind::Predicate
+            && tokens[expression.start..expression.end]
+                .iter()
+                .any(|token| token.is_comment() || token.line_breaks_before > 0);
+        let expanded_boolean = root_depth.is_some()
+            && ((has_and && has_or) || contains_nested_sql || authored_predicate);
+        let expanded = expanded_boolean
+            || (hides_structure
+                && (expression.kind == ExpressionOwnerKind::Predicate || root_depth.is_some()));
 
-        if has_connector || hides_structure {
+        if expanded {
             result.push(BooleanRange {
-                start: predicate.start,
-                end: predicate.end,
-                base_depth: predicate.base_depth,
-                indent: predicate.indent,
-                wrapper_close: predicate.wrapper_close,
+                kind: expression.kind,
+                start: expression.start,
+                end: expression.end,
+                base_depth: expression.base_depth,
+                root_indent: expression.root_indent,
+                root_depth,
+                wrapper_close: expression.wrapper_close,
             });
         }
     }
@@ -580,21 +682,72 @@ fn boolean_ranges(
     result
 }
 
+fn boolean_root_depth(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    parens: &HashMap<usize, usize>,
+    range: ExpressionRange,
+) -> Option<usize> {
+    let mut start = range.start;
+    let mut end = range.end;
+    while start < end && tokens[start].kind == Token::Ascii40 {
+        let close = *parens.get(&start)?;
+        if close + 1 != end {
+            break;
+        }
+        start += 1;
+        end = close;
+        while start < end && tokens[start].is_comment() {
+            start += 1;
+        }
+    }
+    if start >= end {
+        return None;
+    }
+    let root_depth = depths[start];
+    let first_connector_depth = (start..end)
+        .filter(|index| matches!(tokens[*index].kind, Token::And | Token::Or))
+        .map(|index| depths[index])
+        .min()?;
+    (first_connector_depth == root_depth || tokens[start].kind == Token::Not)
+        .then_some(first_connector_depth)
+}
+
 fn plan_booleans(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
     ranges: &[BooleanRange],
     parens: &HashMap<usize, usize>,
+    options: &FormatOptions,
     plan: &mut LayoutPlan,
 ) {
     for range in ranges {
-        plan.break_before(range.start, 1, range.indent + 1);
+        let root_has_and = range.root_depth.is_some_and(|root_depth| {
+            (range.start..range.end)
+                .any(|index| depths[index] == root_depth && tokens[index].kind == Token::And)
+        });
+        let root_indent = plan
+            .line_indent_for(
+                range.start,
+                range.root_indent + plan.indent_offsets[range.start],
+            )
+            .max(range.root_indent + plan.indent_offsets[range.start]);
+        if !matches!(
+            range.kind,
+            ExpressionOwnerKind::AssignmentValue
+                | ExpressionOwnerKind::CaseCondition
+                | ExpressionOwnerKind::CaseResult
+        ) {
+            plan.break_before(range.start, 1, root_indent);
+        }
         for index in range.start..range.end {
-            if matches!(tokens[index].kind, Token::And | Token::Or) {
+            if range.root_depth == Some(depths[index])
+                && matches!(tokens[index].kind, Token::And | Token::Or)
+            {
                 plan.break_before(
                     index,
                     1,
-                    range.indent + 1 + depths[index].saturating_sub(range.base_depth),
+                    root_indent + depths[index].saturating_sub(range.base_depth),
                 );
             }
             if tokens[index].kind == Token::Ascii40 {
@@ -612,36 +765,98 @@ fn plan_booleans(
                     });
                 if let Some(query_start) = query_wrapper {
                     if plan.before.contains_key(&query_start) {
+                        let query_indent =
+                            root_indent + 1 + depths[index].saturating_sub(range.base_depth);
+                        let current_indent = plan.line_indent_for(query_start, query_indent);
+                        plan.shift_indents(
+                            query_start..close,
+                            query_indent.saturating_sub(current_indent),
+                        );
                         plan.break_before(
                             close,
                             1,
-                            range.indent + depths[close].saturating_sub(range.base_depth).max(1),
+                            root_indent + depths[close].saturating_sub(range.base_depth),
                         );
                     }
                     continue;
                 }
-                let contains_boolean = (index + 1..close).any(|candidate| {
+                let direct_connectors = (index + 1..close)
+                    .filter(|candidate| {
+                        depths[*candidate] == inner_depth
+                            && matches!(tokens[*candidate].kind, Token::And | Token::Or)
+                    })
+                    .collect::<Vec<_>>();
+                let contains_boolean = !direct_connectors.is_empty();
+                let independently_complex = direct_connectors.len() > 1;
+                let mixed_boolean = direct_connectors
+                    .iter()
+                    .any(|candidate| tokens[*candidate].kind == Token::And)
+                    && direct_connectors
+                        .iter()
+                        .any(|candidate| tokens[*candidate].kind == Token::Or);
+                let precedence_boundary = root_has_and
+                    && direct_connectors
+                        .iter()
+                        .any(|candidate| tokens[*candidate].kind == Token::Or);
+                let contains_nested_sql = (index + 1..close).any(|candidate| {
                     depths[candidate] == inner_depth
-                        && matches!(tokens[candidate].kind, Token::And | Token::Or)
+                        && matches!(tokens[candidate].kind, Token::Select | Token::With)
                 });
-                if contains_boolean {
+                let authored_boundary = tokens[index + 1..close]
+                    .iter()
+                    .any(|token| token.is_comment() || token.line_breaks_before > 1);
+                let over_soft = root_indent * INDENT_WIDTH
+                    + compact_width(tokens, index, close + 1, options)
+                    > options.soft_line_width;
+                let owns_complete_range = index == range.start && close + 1 == range.end;
+                if contains_boolean
+                    && (owns_complete_range
+                        || precedence_boundary
+                        || independently_complex
+                        || mixed_boolean
+                        || contains_nested_sql
+                        || authored_boundary
+                        || over_soft)
+                {
                     if index + 1 < close {
                         plan.break_before(
                             index + 1,
                             1,
-                            range.indent + 1 + inner_depth.saturating_sub(range.base_depth),
+                            root_indent + inner_depth.saturating_sub(range.base_depth),
+                        );
+                    }
+                    for connector in direct_connectors {
+                        plan.break_before(
+                            connector,
+                            1,
+                            root_indent + depths[connector].saturating_sub(range.base_depth),
                         );
                     }
                     plan.break_before(
                         close,
                         1,
-                        range.indent + depths[close].saturating_sub(range.base_depth).max(1),
+                        root_indent + depths[close].saturating_sub(range.base_depth),
                     );
                 }
             }
         }
         if let Some(close) = range.wrapper_close {
-            plan.break_before(close, 1, range.indent);
+            plan.break_before(close, 1, root_indent.saturating_sub(1));
+        }
+    }
+}
+
+fn plan_expression_comment_continuations(
+    tokens: &[SqlToken<'_>],
+    expressions: &[ExpressionRange],
+    plan: &mut LayoutPlan,
+) {
+    for expression in expressions {
+        if expression.start > 0
+            && tokens[expression.start - 1].is_comment()
+            && tokens[expression.start].line_breaks_before > 0
+        {
+            plan.break_before(expression.start, 1, expression.root_indent);
         }
     }
 }
@@ -653,7 +868,7 @@ fn plan_cases(
     plan: &mut LayoutPlan,
 ) {
     for case in cases.iter().filter(|case| case.expanded) {
-        let base_indent = plan.indent_for(case.start, depths[case.start]);
+        let base_indent = plan.line_indent_for(case.start, depths[case.start]);
         plan.set_indent(case.start..case.end + 1, base_indent);
         let mut nested_case_depth = 0usize;
         for (index, token) in tokens

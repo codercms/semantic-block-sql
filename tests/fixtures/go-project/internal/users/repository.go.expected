@@ -35,12 +35,7 @@ SELECT id, name, email FROM public.users WHERE id = $1;
 	query = `SELECT id, name FROM public.users WHERE active = TRUE ORDER BY id;`
 
 	rows, err := repository.DB.QueryContext(ctx, `
-SELECT id, name, email
-FROM public.users
-WHERE
-    active = TRUE
-    AND id >= $1
-ORDER BY id;
+SELECT id, name, email FROM public.users WHERE active = TRUE AND id >= $1 ORDER BY id;
 	`, id)
 	_ = query
 	_ = prepared
@@ -49,11 +44,7 @@ ORDER BY id;
 
 func (repository Repository) ReturnActive(ctx context.Context, minimumID int64) (*sql.Rows, error) {
 	return repository.DB.QueryContext(ctx, `
-SELECT id, name
-FROM public.users
-WHERE
-    active = TRUE
-    AND id >= $1;
+SELECT id, name FROM public.users WHERE active = TRUE AND id >= $1;
 	`, minimumID)
 }
 

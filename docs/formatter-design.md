@@ -747,6 +747,33 @@ additional indentation. Boolean precedence, authored parentheses, comments,
 and source token order therefore follow the same layout rules as `WHERE`
 without treating `CHECK` as a query clause or discovering it globally.
 
+### Owned Boolean expressions
+
+The 2026-08-03 Boolean-expression regression requirement supersedes the older
+predicate-only planning assumption. Boolean layout is context-independent once
+an expression owner has been proven: predicates, SELECT and RETURNING items,
+assignment right-hand sides, VALUES items, CASE conditions and results, and
+function arguments all derive typed half-open expression ranges from the
+already-bound statement/query/list IR.
+
+The shared planner expands mixed or independently complex groups, keeps short
+cohesive child groups inline, places owned `AND`/`OR` connectors at continuation
+starts, and aligns closing parentheses with their group. Owner metadata keeps
+grammar attachment intact: for example `JOIN ... ON`, `SET column = (`, and
+`WHEN (` are not split into connector-only tiers. Parenthesized-list analysis
+also treats a mixed-Boolean item as complex on the first pass, preventing a
+second-pass-only list expansion. Unsupported syntax is still preserved with
+`syntax.unsupported`; this change does not broaden AST support.
+
+Short same-precedence predicates remain compact when they fit the soft width
+and have no authored comment or line boundary. Mixed precedence, nested SQL,
+authored boundaries, or width may still expand the predicate. When an expanded
+Boolean expression contains `EXISTS` or another nested query, query planning
+expands that nested query independently while allowing its own short local
+predicate to remain inline. INSERT target-list width is measured from the
+owned `INSERT` body start, so leading CTE comments or WITH definitions cannot
+force an otherwise compact column list to expand.
+
 ## Parser-backed PL/pgSQL routine bodies
 
 `DO` blocks and dollar-quoted PL/pgSQL function/procedure bodies use a dedicated

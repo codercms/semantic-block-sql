@@ -68,7 +68,7 @@ fn preserves_leading_comment_before_update_with_clause() {
 fn formats_nested_update_and_predicates_inside_cte() {
     assert_format(
         "WITH claimed AS (UPDATE queue q SET status='processing', claimed_revision=q.revision, claim_token=gen_random_uuid(), processing_started_at=NOW(), available_at=NOW()+make_interval(secs=>$2::int), attempts=q.attempts+1, updated_at=NOW() WHERE q.id IN (SELECT c.id FROM queue c WHERE c.status='pending' AND c.available_at<=NOW() AND EXISTS (SELECT 1 FROM cards k WHERE k.id=c.id AND k.source_present) ORDER BY c.id LIMIT $1 FOR UPDATE SKIP LOCKED) RETURNING q.id, q.claimed_revision, q.claim_token, gen_random_uuid() AS request_id) SELECT * FROM claimed;",
-        "WITH claimed AS (\n    UPDATE queue q\n    SET\n        status = 'processing',\n        claimed_revision = q.revision,\n        claim_token = gen_random_uuid(),\n        processing_started_at = NOW(),\n        available_at = NOW() + make_interval(secs => $2::int),\n        attempts = q.attempts + 1,\n        updated_at = NOW()\n    WHERE\n        q.id IN (\n            SELECT c.id\n            FROM queue c\n            WHERE\n                c.status = 'pending'\n                AND c.available_at <= NOW()\n                AND EXISTS (\n                    SELECT 1\n                    FROM cards k\n                    WHERE\n                        k.id = c.id\n                        AND k.source_present\n                )\n            ORDER BY c.id\n            LIMIT $1\n            FOR UPDATE SKIP LOCKED\n        )\n    RETURNING q.id, q.claimed_revision, q.claim_token, gen_random_uuid() AS request_id\n)\nSELECT *\nFROM claimed;",
+        "WITH claimed AS (\n    UPDATE queue q\n    SET\n        status = 'processing',\n        claimed_revision = q.revision,\n        claim_token = gen_random_uuid(),\n        processing_started_at = NOW(),\n        available_at = NOW() + make_interval(secs => $2::int),\n        attempts = q.attempts + 1,\n        updated_at = NOW()\n    WHERE\n        q.id IN (\n            SELECT c.id\n            FROM queue c\n            WHERE\n                c.status = 'pending'\n                AND c.available_at <= NOW()\n                AND EXISTS (\n                    SELECT 1\n                    FROM cards k\n                    WHERE k.id = c.id AND k.source_present\n                )\n            ORDER BY c.id\n            LIMIT $1\n            FOR UPDATE SKIP LOCKED\n        )\n    RETURNING q.id, q.claimed_revision, q.claim_token, gen_random_uuid() AS request_id\n)\nSELECT *\nFROM claimed;",
         &FormatOptions::default(),
     );
 }
@@ -97,6 +97,52 @@ fn formats_scalar_and_predicate_subqueries_in_dml() {
     assert_format(
         "merge into users target using incoming source on target.id=source.id when matched and exists (select 1 from audit where audit.user_id=target.id) then update set active=(select source.active) when not matched then insert (id,active) values (source.id,(select source.active));",
         "MERGE INTO users target\nUSING incoming source ON target.id = source.id\n\nWHEN MATCHED AND EXISTS (SELECT 1 FROM audit WHERE audit.user_id = target.id) THEN UPDATE SET\n    active = (SELECT source.active)\n\nWHEN NOT MATCHED THEN INSERT (id, active)\n    VALUES (\n        source.id,\n        (SELECT source.active)\n    );",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn formats_boolean_result_targets_with_exists_branches() {
+    assert_format(
+        "WITH target AS (\n    SELECT w.card_id,\n        -- Conflicting external mappings prevent application.\n    ((c.bb_nm_id IS NOT NULL AND c.bb_nm_id <> $2::bigint) OR (o.bb_imt_id IS NOT NULL AND o.bb_imt_id <> $1::bigint) OR EXISTS (SELECT 1 FROM cards x WHERE x.bb_nm_id = $2::bigint AND x.id <> w.card_id) OR EXISTS (SELECT 1 FROM offers x WHERE x.bb_imt_id = $1::bigint AND x.offer_id <> w.offer_id)) AS has_conflict,\n        -- A newer external version is already stored.\n    (c.bb_version IS NOT NULL AND c.bb_version >= $3::bigint) AS is_stale\n    FROM waiting w\n    JOIN cards c ON c.offer_id = w.offer_id AND c.id = w.card_id\n    JOIN offers o ON o.offer_id = w.offer_id\n)\nSELECT has_conflict, is_stale FROM target;",
+        "WITH target AS (\n    SELECT\n        w.card_id,\n        -- Conflicting external mappings prevent application.\n        (\n            (c.bb_nm_id IS NOT NULL AND c.bb_nm_id <> $2::bigint)\n            OR (o.bb_imt_id IS NOT NULL AND o.bb_imt_id <> $1::bigint)\n            OR EXISTS (\n                SELECT 1\n                FROM cards x\n                WHERE x.bb_nm_id = $2::bigint AND x.id <> w.card_id\n            )\n            OR EXISTS (\n                SELECT 1\n                FROM offers x\n                WHERE x.bb_imt_id = $1::bigint AND x.offer_id <> w.offer_id\n            )\n        ) AS has_conflict,\n        -- A newer external version is already stored.\n        (c.bb_version IS NOT NULL AND c.bb_version >= $3::bigint) AS is_stale\n    FROM waiting w\n    JOIN cards c ON c.offer_id = w.offer_id AND c.id = w.card_id\n    JOIN offers o ON o.offer_id = w.offer_id\n)\nSELECT has_conflict, is_stale\nFROM target;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn formats_boolean_predicates_across_query_clauses() {
+    assert_format(
+        "SELECT a.id, count(*) FROM a JOIN b ON ((a.x IS NOT NULL AND a.x <> b.x) OR (a.y IS NOT NULL AND a.y <> b.y)) WHERE ((a.ready AND a.visible) OR EXISTS (SELECT 1 FROM c WHERE c.a_id = a.id AND c.active)) GROUP BY a.id HAVING ((count(*) > 1 AND bool_or(b.ready)) OR EXISTS (SELECT 1 FROM d WHERE d.a_id = a.id AND d.active));",
+        "SELECT a.id, COUNT(*)\nFROM a\nJOIN b ON\n    (\n        (a.x IS NOT NULL AND a.x <> b.x)\n        OR (a.y IS NOT NULL AND a.y <> b.y)\n    )\nWHERE\n    (\n        (a.ready AND a.visible)\n        OR EXISTS (\n            SELECT 1\n            FROM c\n            WHERE c.a_id = a.id AND c.active\n        )\n    )\nGROUP BY a.id\nHAVING\n    (\n        (COUNT(*) > 1 AND bool_or(b.ready))\n        OR EXISTS (\n            SELECT 1\n            FROM d\n            WHERE d.a_id = a.id AND d.active\n        )\n    );",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn keeps_short_boolean_predicates_compact_across_query_clauses() {
+    assert_format(
+        "WITH candidate_rows AS (SELECT a.id FROM a JOIN b ON a.id=b.a_id AND b.active WHERE a.ready AND a.visible GROUP BY a.id HAVING count(*)>0 AND bool_or(b.ready)) SELECT id FROM candidate_rows;",
+        "WITH candidate_rows AS (\n    SELECT a.id\n    FROM a\n    JOIN b ON a.id = b.a_id AND b.active\n    WHERE a.ready AND a.visible\n    GROUP BY a.id\n    HAVING COUNT(*) > 0 AND bool_or(b.ready)\n)\nSELECT id\nFROM candidate_rows;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn formats_boolean_values_across_owned_expression_contexts() {
+    assert_format(
+        "UPDATE cards SET conflicted = ((bb_nm_id IS NOT NULL AND bb_nm_id <> $2::bigint) OR EXISTS (SELECT 1 FROM other_cards x WHERE x.bb_nm_id = $2::bigint AND x.id <> cards.id)) WHERE id = $1 RETURNING ((bb_nm_id IS NOT NULL AND bb_nm_id <> $2::bigint) OR EXISTS (SELECT 1 FROM other_cards x WHERE x.bb_nm_id = $2::bigint AND x.id <> cards.id)) AS has_conflict;",
+        "UPDATE cards\nSET\n    conflicted = (\n        (bb_nm_id IS NOT NULL AND bb_nm_id <> $2::bigint)\n        OR EXISTS (\n            SELECT 1\n            FROM other_cards x\n            WHERE x.bb_nm_id = $2::bigint AND x.id <> cards.id\n        )\n    )\nWHERE id = $1\nRETURNING\n    (\n        (bb_nm_id IS NOT NULL AND bb_nm_id <> $2::bigint)\n        OR EXISTS (\n            SELECT 1\n            FROM other_cards x\n            WHERE x.bb_nm_id = $2::bigint AND x.id <> cards.id\n        )\n    ) AS has_conflict;",
+        &FormatOptions::default(),
+    );
+    assert_format(
+        "INSERT INTO audit (card_id, conflicted) VALUES ($1, ((a.ready AND a.visible) OR (a.forced AND a.reviewed))) RETURNING ((a.ready AND a.visible) OR (a.forced AND a.reviewed)) AS has_conflict;",
+        "INSERT INTO audit (card_id, conflicted)\nVALUES (\n    $1,\n    (\n        (a.ready AND a.visible)\n        OR (a.forced AND a.reviewed)\n    )\n)\nRETURNING\n    (\n        (a.ready AND a.visible)\n        OR (a.forced AND a.reviewed)\n    ) AS has_conflict;",
+        &FormatOptions::default(),
+    );
+    assert_format(
+        "SELECT CASE WHEN ((a.ready AND a.visible) OR EXISTS (SELECT 1 FROM b WHERE b.a_id = a.id AND b.active)) THEN ((a.x IS NOT NULL AND a.x <> 0) OR (a.y IS NOT NULL AND a.y <> 0)) ELSE false END AS allowed, COALESCE(((a.ready AND a.visible) OR (a.forced AND a.reviewed)), false) AS fallback FROM a;",
+        "SELECT\n    CASE\n        WHEN (\n            (a.ready AND a.visible)\n            OR EXISTS (\n                SELECT 1\n                FROM b\n                WHERE b.a_id = a.id AND b.active\n            )\n        ) THEN (\n            (a.x IS NOT NULL AND a.x <> 0)\n            OR (a.y IS NOT NULL AND a.y <> 0)\n        )\n        ELSE FALSE\n    END AS allowed,\n    COALESCE(\n        (\n            (a.ready AND a.visible)\n            OR (a.forced AND a.reviewed)\n        ),\n        FALSE\n    ) AS fallback\nFROM a;",
         &FormatOptions::default(),
     );
 }

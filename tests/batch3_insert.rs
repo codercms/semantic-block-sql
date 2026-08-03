@@ -74,6 +74,15 @@ FOR UPDATE;",
 }
 
 #[test]
+fn short_insert_target_list_ignores_leading_cte_comments() {
+    assert_format(
+        "WITH accepted AS (\n    -- Deduplicate using the external event identifier before applying the payload.\n    -- Repeated events must not modify any downstream records.\n    INSERT INTO public.bb_events (event_kind, event_id, entity_uuid, payload )\n    VALUES ('content_batch', $1::text, $2::uuid, $3::jsonb)\n    ON CONFLICT (event_id) DO NOTHING\n    RETURNING entity_uuid\n)\nSELECT entity_uuid FROM accepted;",
+        "WITH accepted AS (\n    -- Deduplicate using the external event identifier before applying the payload.\n    -- Repeated events must not modify any downstream records.\n    INSERT INTO public.bb_events (event_kind, event_id, entity_uuid, payload)\n    VALUES ('content_batch', $1::text, $2::uuid, $3::jsonb)\n    ON CONFLICT (event_id) DO NOTHING\n    RETURNING entity_uuid\n)\nSELECT entity_uuid\nFROM accepted;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
 fn unsupported_insert_variants_remain_unchanged() {
     let source = "INSERT INTO public.items (payload) VALUES (JSON_QUERY(payload, '$.a'));";
     let formatted = format_sql_result(source, &FormatOptions::default());

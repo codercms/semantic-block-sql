@@ -30,12 +30,12 @@ fn assert_format(source: &str, expected: &str) {
 fn formats_multiple_update_and_delete_sources() {
     assert_format(
         "update public.items i set title=s.title,updated_at=now() from public.source_items s, public.batches b where s.item_id=i.id and b.id=s.batch_id returning i.id;",
-        "UPDATE public.items i\nSET title = s.title, updated_at = NOW()\nFROM\n    public.source_items s,\n    public.batches b\nWHERE\n    s.item_id = i.id\n    AND b.id = s.batch_id\nRETURNING i.id;",
+        "UPDATE public.items i\nSET title = s.title, updated_at = NOW()\nFROM\n    public.source_items s,\n    public.batches b\nWHERE s.item_id = i.id AND b.id = s.batch_id\nRETURNING i.id;",
     );
 
     assert_format(
         "delete from public.items i using public.source_items s, public.batches b where i.id=s.item_id and b.id=s.batch_id;",
-        "DELETE FROM public.items i\nUSING\n    public.source_items s,\n    public.batches b\nWHERE\n    i.id = s.item_id\n    AND b.id = s.batch_id;",
+        "DELETE FROM public.items i\nUSING\n    public.source_items s,\n    public.batches b\nWHERE i.id = s.item_id AND b.id = s.batch_id;",
     );
 }
 

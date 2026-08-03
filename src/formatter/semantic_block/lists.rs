@@ -1,14 +1,20 @@
 use super::statements::{is_insert_list_open, is_merge_list_open};
 use super::*;
+use crate::formatter::layout_ir::ValuesBlock;
 use crate::formatter::ownership::TokenRange;
+
+pub(super) struct ParenthesizedListSources<'a> {
+    pub cases: &'a [CaseRange],
+    pub inserts: &'a [InsertBlock],
+    pub merges: &'a [MergeBlock],
+    pub values: &'a [ValuesBlock],
+}
 
 pub(super) fn parenthesized_lists(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
     parens: &HashMap<usize, usize>,
-    cases: &[CaseRange],
-    inserts: &[InsertBlock],
-    merges: &[MergeBlock],
+    sources: ParenthesizedListSources<'_>,
     options: &FormatOptions,
 ) -> Vec<ParenthesizedList> {
     let mut lists = Vec::new();
@@ -16,8 +22,9 @@ pub(super) fn parenthesized_lists(
     for (open, token) in tokens.iter().enumerate() {
         if token.kind != Token::Ascii40
             || !(is_function_call_open(tokens, open)
-                || is_insert_list_open(inserts, open)
-                || is_merge_list_open(merges, open))
+                || is_insert_list_open(sources.inserts, open)
+                || is_merge_list_open(sources.merges, open)
+                || is_values_list_open(sources.values, open))
         {
             continue;
         }
@@ -35,17 +42,20 @@ pub(super) fn parenthesized_lists(
         let authored = tokens[open + 1..close]
             .iter()
             .any(|token| token.line_breaks_before > 0);
-        let contains_complex = cases
+        let contains_complex = sources
+            .cases
             .iter()
             .any(|case| case.expanded && case.start > open && case.end < close)
             || (open + 1..close)
-                .any(|index| tokens[index].kind == Token::Select && depths[index] > depths[open]);
-        let compact_start = inserts
+                .any(|index| tokens[index].kind == Token::Select && depths[index] > depths[open])
+            || contains_mixed_boolean_item(tokens, depths, open + 1, close, inner_depth);
+        let compact_start = sources
+            .inserts
             .iter()
             .find(|insert| insert.target_open == Some(open))
-            .map(|insert| insert.span.start)
+            .map(|insert| insert.body_start)
             .or_else(|| {
-                merges.iter().find_map(|merge| {
+                sources.merges.iter().find_map(|merge| {
                     merge
                         .branches
                         .iter()
@@ -60,6 +70,13 @@ pub(super) fn parenthesized_lists(
                             _ => None,
                         })
                 })
+            })
+            .or_else(|| {
+                sources
+                    .values
+                    .iter()
+                    .find(|values| values.rows.iter().any(|&(row, _)| row == open))
+                    .map(|values| values.span.start)
             })
             .unwrap_or_else(|| open.saturating_sub(1));
         let compact = compact_width(tokens, compact_start, close + 1, options);
@@ -80,7 +97,37 @@ pub(super) fn parenthesized_lists(
     lists
 }
 
-fn is_function_call_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
+fn is_values_list_open(values: &[ValuesBlock], open: usize) -> bool {
+    values
+        .iter()
+        .any(|values| values.rows.iter().any(|&(row, _)| row == open))
+}
+
+fn contains_mixed_boolean_item(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    start: usize,
+    end: usize,
+    item_depth: usize,
+) -> bool {
+    let mut has_and = false;
+    let mut has_or = false;
+    for index in start..end {
+        if depths[index] == item_depth && tokens[index].kind == Token::Ascii44 {
+            if has_and && has_or {
+                return true;
+            }
+            has_and = false;
+            has_or = false;
+            continue;
+        }
+        has_and |= tokens[index].kind == Token::And;
+        has_or |= tokens[index].kind == Token::Or;
+    }
+    has_and && has_or
+}
+
+pub(super) fn is_function_call_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
     open.checked_sub(1).is_some_and(|previous| {
         tokens[previous].kind == Token::Ident
             || matches!(
@@ -420,6 +467,29 @@ fn split_list_items(
         });
     }
     result
+}
+
+pub(super) fn owned_list_item_ranges(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    cases: &[CaseRange],
+    parenthesized_lists: &[ParenthesizedList],
+    start: usize,
+    end: usize,
+    base_depth: usize,
+) -> Vec<(usize, usize)> {
+    split_list_items(
+        tokens,
+        depths,
+        cases,
+        parenthesized_lists,
+        start,
+        end,
+        base_depth,
+    )
+    .into_iter()
+    .map(|item| (item.start, item.end))
+    .collect()
 }
 
 fn item_is_complex(

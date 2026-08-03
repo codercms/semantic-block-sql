@@ -32,7 +32,7 @@ fn compact_delete_stays_inline() {
 #[test]
 fn delete_using_separates_source_predicate_and_returning() {
     let source = "delete from public.items item using staging.items source where item.id=source.id and source.expired=true returning item.id;";
-    let expected = "DELETE FROM public.items item\nUSING staging.items source\nWHERE\n    item.id = source.id\n    AND source.expired = TRUE\nRETURNING item.id;";
+    let expected = "DELETE FROM public.items item\nUSING staging.items source\nWHERE item.id = source.id AND source.expired = TRUE\nRETURNING item.id;";
 
     assert_format(source, expected);
 }

@@ -653,6 +653,44 @@ Evidence:
 - the complete offline gate passes formatting, Clippy with warnings denied, all
   170 tests, Rustdoc, and `git diff --check`.
 
+## Boolean-expression ownership regression batch
+
+- [x] Save the approved implementation and test plan in
+  `docs/boolean-expression-layout-fix-plan.md`.
+- [x] Add the anonymized `bb_*` CTE regression with multiple `OR EXISTS`
+  branches and standalone comments.
+- [x] Derive typed expression ranges from existing predicate, query, DML,
+  VALUES, CASE, and function-list ownership.
+- [x] Reuse one Boolean planner across SELECT, WHERE, HAVING, JOIN ON,
+  RETURNING, assignment, VALUES, CASE, and function-argument contexts.
+- [x] Keep short child `AND` groups compact and align expanded group and
+  subquery closing parentheses.
+- [x] Preserve grammar attachment for assignment values and CASE branches.
+- [x] Classify mixed-Boolean list items before planning so formatting remains
+  idempotent on the first pass.
+- [x] Preserve default `<>`, comments, protected tokens, source order, and
+  fail-closed unsupported behavior.
+- [x] Cover semantic equivalence, idempotence, and clean `check` results in
+  `tests/batch10_query_dml.rs`.
+- [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
+  GitNexus change-scope review before commit.
+
+## Compact INSERT-list and predicate refinement batch
+
+- [x] Add a commented, anonymized data-modifying CTE regression whose short
+  INSERT target list must remain inline.
+- [x] Measure INSERT target-list width from the local `InsertBlock::body_start`
+  rather than leading comments in the CTE statement span.
+- [x] Add short same-precedence `JOIN ON`, `WHERE`, and `HAVING` regressions.
+- [x] Preserve authored predicate boundaries while avoiding expansion solely
+  because one `AND` or `OR` is present.
+- [x] Keep nested queries expanded when their containing mixed Boolean range is
+  expanded, without forcing a short nested predicate onto multiple lines.
+- [x] Preserve mixed-Boolean, `OR EXISTS`, comment, equivalence, idempotence,
+  and clean-check coverage in the focused formatter suites.
+- [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
+  GitNexus change-scope review before commit.
+
 ## Batch 7 — Performance and release polish
 
 - [ ] Establish correctness-preserving benchmarks.
