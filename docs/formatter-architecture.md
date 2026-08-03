@@ -40,6 +40,7 @@ src/formatter/
 ├── semantic_block/
 │   ├── statements.rs           INSERT/UPDATE/DELETE/MERGE planners
 │   ├── ddl.rs                  VALUES and DDL planners
+│   ├── expressions.rs          typed owned-expression range derivation
 │   ├── lists.rs                shared list and parenthesized-argument planning
 │   └── render.rs               casing, spacing, and token rendering
 ├── tokens.rs                   exact scanner tokens and authored gaps
@@ -305,7 +306,7 @@ Current shared analyses include:
 - parenthesis pairs and syntactic depth;
 - source-aware comma-separated list items;
 - compact versus expanded CASE ranges;
-- boolean predicate ranges;
+- typed expression-owner ranges and context-independent Boolean ranges;
 - CTE ownership;
 - terminal semicolon policy;
 - soft and hard width decisions.
@@ -325,7 +326,12 @@ SELECT, INSERT, UPDATE, DELETE, and MERGE spans. Shared child records include:
 The formatter no longer runs independent document-wide statement, SELECT, CTE,
 or predicate discovery passes. Generic expression analyses such as CASE and
 parenthesized-list complexity operate only after every statement has passed AST
-classification and token ownership binding.
+classification and token ownership binding. `semantic_block/expressions.rs`
+derives expression ranges from those records for predicates, SELECT and
+RETURNING items, assignment right-hand sides, VALUES items, CASE branches, and
+function arguments. It does not scan the document for free-floating Boolean
+keywords. The shared Boolean planner then applies one precedence-preserving
+layout policy to every derived range.
 
 These structures are not PostgreSQL parsers. They locate presentation
 boundaries only inside an AST-validated span whose legal shape is already known.

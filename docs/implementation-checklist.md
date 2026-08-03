@@ -653,6 +653,28 @@ Evidence:
 - the complete offline gate passes formatting, Clippy with warnings denied, all
   170 tests, Rustdoc, and `git diff --check`.
 
+## Boolean-expression ownership regression batch
+
+- [x] Save the approved implementation and test plan in
+  `docs/boolean-expression-layout-fix-plan.md`.
+- [x] Add the anonymized `bb_*` CTE regression with multiple `OR EXISTS`
+  branches and standalone comments.
+- [x] Derive typed expression ranges from existing predicate, query, DML,
+  VALUES, CASE, and function-list ownership.
+- [x] Reuse one Boolean planner across SELECT, WHERE, HAVING, JOIN ON,
+  RETURNING, assignment, VALUES, CASE, and function-argument contexts.
+- [x] Keep short child `AND` groups compact and align expanded group and
+  subquery closing parentheses.
+- [x] Preserve grammar attachment for assignment values and CASE branches.
+- [x] Classify mixed-Boolean list items before planning so formatting remains
+  idempotent on the first pass.
+- [x] Preserve default `<>`, comments, protected tokens, source order, and
+  fail-closed unsupported behavior.
+- [x] Cover semantic equivalence, idempotence, and clean `check` results in
+  `tests/batch10_query_dml.rs`.
+- [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and
+  GitNexus change-scope review before commit.
+
 ## Batch 7 — Performance and release polish
 
 - [ ] Establish correctness-preserving benchmarks.

@@ -34,6 +34,7 @@ known keyword fall through generic whitespace normalization.
 | Query binding | `bind_queries`, `bind_predicates` | `layout_ir/query.rs` |
 | Layout dispatch | `StatementLayout` | `layout_ir.rs` |
 | Statement planning | `plan_*_statements` | `semantic_block/statements.rs` |
+| Owned expressions | `owned_expression_ranges` | `semantic_block/expressions.rs` |
 | Shared lists | `plan_keyword_list` and related helpers | `semantic_block/lists.rs` |
 | Token rendering | `render_token`, `needs_space` | `semantic_block/render.rs` |
 | Final safety | `format_sql`, `validate_equivalent` | `mod.rs`, `validation/equivalence.rs` |
@@ -109,9 +110,16 @@ Add a statement-specific record only for genuinely statement-specific grammar.
 
 ### 6. Add planner behavior
 
-Use shared functions in `semantic_block/lists.rs`, existing predicate planning,
-and the token renderer. Keep statement-specific decisions in
-`semantic_block/statements.rs`.
+Use typed ranges from `semantic_block/expressions.rs`, shared functions in
+`semantic_block/lists.rs`, the common Boolean planner, and the token renderer.
+Keep statement-specific decisions in `semantic_block/statements.rs`.
+
+When a newly supported construct owns an expression, derive that expression
+from the construct's existing typed layout record. Add an exhaustive
+`ExpressionOwnerKind` case only when its root indentation or attachment policy
+differs from existing owners. Do not discover expressions through a global
+`AND`/`OR` scan. Parenthesized lists must classify independently complex
+Boolean items during the first pass so list expansion remains idempotent.
 
 The planner must not duplicate AST validation. It receives already-verified
 ownership. Reuse the pass-wide `PlanningContext`; do not add another collection

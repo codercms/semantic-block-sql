@@ -102,6 +102,43 @@ fn formats_scalar_and_predicate_subqueries_in_dml() {
 }
 
 #[test]
+fn formats_boolean_result_targets_with_exists_branches() {
+    assert_format(
+        "WITH target AS (\n    SELECT w.card_id,\n        -- Conflicting external mappings prevent application.\n    ((c.bb_nm_id IS NOT NULL AND c.bb_nm_id <> $2::bigint) OR (o.bb_imt_id IS NOT NULL AND o.bb_imt_id <> $1::bigint) OR EXISTS (SELECT 1 FROM cards x WHERE x.bb_nm_id = $2::bigint AND x.id <> w.card_id) OR EXISTS (SELECT 1 FROM offers x WHERE x.bb_imt_id = $1::bigint AND x.offer_id <> w.offer_id)) AS has_conflict,\n        -- A newer external version is already stored.\n    (c.bb_version IS NOT NULL AND c.bb_version >= $3::bigint) AS is_stale\n    FROM waiting w\n    JOIN cards c ON c.offer_id = w.offer_id AND c.id = w.card_id\n    JOIN offers o ON o.offer_id = w.offer_id\n)\nSELECT has_conflict, is_stale FROM target;",
+        "WITH target AS (\n    SELECT\n        w.card_id,\n        -- Conflicting external mappings prevent application.\n        (\n            (c.bb_nm_id IS NOT NULL AND c.bb_nm_id <> $2::bigint)\n            OR (o.bb_imt_id IS NOT NULL AND o.bb_imt_id <> $1::bigint)\n            OR EXISTS (\n                SELECT 1\n                FROM cards x\n                WHERE\n                    x.bb_nm_id = $2::bigint\n                    AND x.id <> w.card_id\n            )\n            OR EXISTS (\n                SELECT 1\n                FROM offers x\n                WHERE\n                    x.bb_imt_id = $1::bigint\n                    AND x.offer_id <> w.offer_id\n            )\n        ) AS has_conflict,\n        -- A newer external version is already stored.\n        (c.bb_version IS NOT NULL AND c.bb_version >= $3::bigint) AS is_stale\n    FROM waiting w\n    JOIN cards c ON\n        c.offer_id = w.offer_id\n        AND c.id = w.card_id\n    JOIN offers o ON o.offer_id = w.offer_id\n)\nSELECT has_conflict, is_stale\nFROM target;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn formats_boolean_predicates_across_query_clauses() {
+    assert_format(
+        "SELECT a.id, count(*) FROM a JOIN b ON ((a.x IS NOT NULL AND a.x <> b.x) OR (a.y IS NOT NULL AND a.y <> b.y)) WHERE ((a.ready AND a.visible) OR EXISTS (SELECT 1 FROM c WHERE c.a_id = a.id AND c.active)) GROUP BY a.id HAVING ((count(*) > 1 AND bool_or(b.ready)) OR EXISTS (SELECT 1 FROM d WHERE d.a_id = a.id AND d.active));",
+        "SELECT a.id, COUNT(*)\nFROM a\nJOIN b ON\n    (\n        (a.x IS NOT NULL AND a.x <> b.x)\n        OR (a.y IS NOT NULL AND a.y <> b.y)\n    )\nWHERE\n    (\n        (a.ready AND a.visible)\n        OR EXISTS (\n            SELECT 1\n            FROM c\n            WHERE\n                c.a_id = a.id\n                AND c.active\n        )\n    )\nGROUP BY a.id\nHAVING\n    (\n        (COUNT(*) > 1 AND bool_or(b.ready))\n        OR EXISTS (\n            SELECT 1\n            FROM d\n            WHERE\n                d.a_id = a.id\n                AND d.active\n        )\n    );",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn formats_boolean_values_across_owned_expression_contexts() {
+    assert_format(
+        "UPDATE cards SET conflicted = ((bb_nm_id IS NOT NULL AND bb_nm_id <> $2::bigint) OR EXISTS (SELECT 1 FROM other_cards x WHERE x.bb_nm_id = $2::bigint AND x.id <> cards.id)) WHERE id = $1 RETURNING ((bb_nm_id IS NOT NULL AND bb_nm_id <> $2::bigint) OR EXISTS (SELECT 1 FROM other_cards x WHERE x.bb_nm_id = $2::bigint AND x.id <> cards.id)) AS has_conflict;",
+        "UPDATE cards\nSET\n    conflicted = (\n        (bb_nm_id IS NOT NULL AND bb_nm_id <> $2::bigint)\n        OR EXISTS (\n            SELECT 1\n            FROM other_cards x\n            WHERE\n                x.bb_nm_id = $2::bigint\n                AND x.id <> cards.id\n        )\n    )\nWHERE id = $1\nRETURNING\n    (\n        (bb_nm_id IS NOT NULL AND bb_nm_id <> $2::bigint)\n        OR EXISTS (\n            SELECT 1\n            FROM other_cards x\n            WHERE\n                x.bb_nm_id = $2::bigint\n                AND x.id <> cards.id\n        )\n    ) AS has_conflict;",
+        &FormatOptions::default(),
+    );
+    assert_format(
+        "INSERT INTO audit (card_id, conflicted) VALUES ($1, ((a.ready AND a.visible) OR (a.forced AND a.reviewed))) RETURNING ((a.ready AND a.visible) OR (a.forced AND a.reviewed)) AS has_conflict;",
+        "INSERT INTO audit (card_id, conflicted)\nVALUES (\n    $1,\n    (\n        (a.ready AND a.visible)\n        OR (a.forced AND a.reviewed)\n    )\n)\nRETURNING\n    (\n        (a.ready AND a.visible)\n        OR (a.forced AND a.reviewed)\n    ) AS has_conflict;",
+        &FormatOptions::default(),
+    );
+    assert_format(
+        "SELECT CASE WHEN ((a.ready AND a.visible) OR EXISTS (SELECT 1 FROM b WHERE b.a_id = a.id AND b.active)) THEN ((a.x IS NOT NULL AND a.x <> 0) OR (a.y IS NOT NULL AND a.y <> 0)) ELSE false END AS allowed, COALESCE(((a.ready AND a.visible) OR (a.forced AND a.reviewed)), false) AS fallback FROM a;",
+        "SELECT\n    CASE\n        WHEN (\n            (a.ready AND a.visible)\n            OR EXISTS (\n                SELECT 1\n                FROM b\n                WHERE\n                    b.a_id = a.id\n                    AND b.active\n            )\n        ) THEN (\n            (a.x IS NOT NULL AND a.x <> 0)\n            OR (a.y IS NOT NULL AND a.y <> 0)\n        )\n        ELSE FALSE\n    END AS allowed,\n    COALESCE(\n        (\n            (a.ready AND a.visible)\n            OR (a.forced AND a.reviewed)\n        ),\n        FALSE\n    ) AS fallback\nFROM a;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
 fn unreviewed_query_neighbors_remain_fail_safe() {
     for source in [
         "SELECT * INTO TEMP TABLE copied WITH NO DATA FROM items;",
