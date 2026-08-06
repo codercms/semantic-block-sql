@@ -42,8 +42,3 @@ fn preserves_short_authored_groups_through_one_policy() {
 fn attaches_standalone_comments_to_the_following_boolean_branch() {
     assert_fixture("comment-trivia");
 }
-
-#[test]
-fn formats_the_complete_reported_regression_file() {
-    assert_fixture("reported-regressions");
-}

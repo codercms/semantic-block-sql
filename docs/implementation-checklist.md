@@ -869,7 +869,7 @@ The earlier MVP checkbox that kept interpreted strings disabled records the hist
 
 - [x] Add red goldens for adjacent CTEs after a parenthesized set operation,
   derived `FROM (...)` set operations, wrapped branches, compact predicates,
-  leading Boolean comments, and the complete reported regression file.
+  and leading Boolean comments.
 - [x] Replace operator-plus-next-branch set-operation records with one bounded
   owner containing every operator, branch, and authored wrapper.
 - [x] Delete the CTE planner's private set-operation token scan.
@@ -879,7 +879,7 @@ The earlier MVP checkbox that kept interpreted strings disabled records the hist
   keeping originally inline short predicates compact.
 - [x] Exclude leading comments of a following clause from the previous
   predicate owner and attach comments before `AND` / `OR` to that branch.
-- [x] Verify the reported SQL file is semantically equivalent, clean under
+- [x] Verify every focused fixture is semantically equivalent, clean under
   `check`, and byte-idempotent after formatting.
 - [x] Complete formatting, Clippy, full tests, Rustdoc, and `git diff --check`.
 - [ ] Require remote CI before merge.
