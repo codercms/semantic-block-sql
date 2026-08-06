@@ -220,12 +220,14 @@ owned layouts and acceptance fixtures.
 
 ### Authored group model
 
-Within list-like syntax, original line boundaries are soft group hints. Blank
-lines and comments are hard boundaries.
+Within list-like syntax, original non-empty line groups are authored groups
+that remain stable while safely breakable within the hard limit. Blank lines
+and comments are hard boundaries. Ordinary line breaks inside predicates are
+soft layout hints rather than authored comma-list groups.
 
 The formatter:
 
-- preserves a hinted group while it is at or below hard width;
+- preserves an authored list group while it is at or below hard width;
 - never merges across a hard boundary;
 - does not split a group merely for soft width;
 - splits an over-hard group at safe AST/CST argument boundaries;
@@ -787,6 +789,17 @@ additional indentation. Boolean precedence, authored parentheses, comments,
 and source token order therefore follow the same layout rules as `WHERE`
 without treating `CHECK` as a query clause or discovering it globally.
 
+### Shared layout-group decision
+
+`semantic_block/groups.rs` is the single compact-versus-expanded policy for
+comma lists and Boolean/expression owners. Owners still define grammar-specific
+safe boundaries, but they do not independently reinterpret soft width,
+structural complexity, comments, blank lines, or unavoidable overflow.
+Authored comma-list groups are passed as a required expansion fact; ordinary
+predicate newlines are not. This distinction preserves the 1.0.1 authored-list
+contract while allowing a short `JOIN ... ON`, `WHERE`, or `HAVING` predicate
+to return to compact form.
+
 ### Owned Boolean expressions
 
 The 2026-08-03 Boolean-expression regression requirement supersedes the older
@@ -805,9 +818,10 @@ also treats a mixed-Boolean item as complex on the first pass, preventing a
 second-pass-only list expansion. Unsupported syntax is still preserved with
 `syntax.unsupported`; this change does not broaden AST support.
 
-Short same-precedence predicates remain compact when they fit the soft width
-and have no authored comment or line boundary. Mixed precedence, nested SQL,
-authored boundaries, or width may still expand the predicate. When an expanded
+Short same-precedence predicates remain compact when they fit the soft width,
+even when the author placed ordinary breaks before their connectors. Mixed
+precedence, nested SQL, attached comments or blank lines, and width may still
+expand the predicate. When an expanded
 Boolean expression contains `EXISTS` or another nested query, query planning
 expands that nested query independently while allowing its own short local
 predicate to remain inline. INSERT target-list width is measured from the
@@ -836,11 +850,13 @@ parameter defaults are parser-owned and preserved; they are not the cause of an
 SQL-body diagnostic. Multi-statement bodies and unreviewed routine attributes
 remain byte-identical with `syntax.unsupported`.
 
-Parenthesized set-operation branches inside a CTE are bound from the shallowest
-AST-expected `SELECT` token when no root-depth `SELECT` exists. This exception is
-restricted to a validated `SelectSpec` with set operations; all other statement
-families retain exact root-depth binding. This resolves the reported routine
-body without introducing a permissive keyword fallback.
+Set operations now use a complete bounded owner rather than an
+operator-plus-next-`SELECT` record. Each owner contains all operators, all
+branches, and authored branch wrappers inside one CTE body, derived source, or
+statement range. Branch cardinality is checked during binding, and planners
+consume the owned branches without a second `UNION` scan. This prevents an
+operator in a parenthesized CTE from claiming the following CTE and gives a
+`FROM (SELECT ... UNION ... SELECT ...)` source one coherent indentation owner.
 
 ## Statement-granular opaque policy
 

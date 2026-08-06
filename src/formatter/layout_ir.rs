@@ -126,11 +126,23 @@ pub(super) struct QueryBlock {
     pub clauses: QueryClauses,
 }
 
-/// UNION / INTERSECT / EXCEPT ownership between two query branches.
+/// One branch owned by a bounded UNION / INTERSECT / EXCEPT expression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SetOperationBranch {
+    pub start: usize,
+    pub end: usize,
+    pub query_start: usize,
+    pub wrapper: Option<(usize, usize)>,
+}
+
+/// Complete bounded ownership for one set-operation expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SetOperationBlock {
-    pub operator: usize,
-    pub next_branch: usize,
+    pub owner_start: usize,
+    pub owner_end: usize,
+    pub owner_wrapper: Option<(usize, usize)>,
+    pub operators: Vec<usize>,
+    pub branches: Vec<SetOperationBranch>,
     pub base_depth: usize,
 }
 
@@ -521,7 +533,7 @@ impl LayoutDocument {
 
         let queries = bind_queries(tokens, structure, &top_level_statements);
         let predicates = bind_predicates(tokens, structure.depths(), &queries, &statements);
-        let set_operations = bind_set_operations(tokens, structure.depths(), &top_level_statements);
+        let set_operations = bind_set_operations(tokens, structure, &top_level_statements)?;
         let window_blocks = bind_window_blocks(tokens, structure, &queries);
 
         Ok(Self {

@@ -320,7 +320,7 @@ SELECT, INSERT, UPDATE, DELETE, and MERGE spans. Shared child records include:
 - `PredicateBlock` for WHERE, HAVING, JOIN ON, and ON CONFLICT predicates;
 - `InsertBlock`, `UpdateBlock`, and `DeleteBlock` for family-specific clauses;
 - `MergeBlock`, `MergeBranch`, and `MergeAction` for branch ownership;
-- `SetOperationBlock` for UNION / INTERSECT / EXCEPT boundaries;
+- `SetOperationBlock` for a bounded UNION / INTERSECT / EXCEPT owner, all of its operators, and every owned branch;
 - `TokenSpan` for reusable owned token ranges.
 
 The formatter no longer runs independent document-wide statement, SELECT, CTE,
@@ -332,6 +332,25 @@ RETURNING items, assignment right-hand sides, VALUES items, CASE branches, and
 function arguments. It does not scan the document for free-floating Boolean
 keywords. The shared Boolean planner then applies one precedence-preserving
 layout policy to every derived range.
+
+Compact-versus-expanded decisions flow through one `LayoutGroup` contract.
+List, predicate, and expression owners provide only their compact width,
+structural-complexity facts, hard comment/blank-line boundaries, authored-group
+requirements, and whether an overflow is genuinely indivisible. Comma lists
+retain authored non-empty line groups, while ordinary predicate line breaks are
+soft hints; both still use the same width and structural decision order.
+
+Set-operation binding is likewise owner-bounded. Operators are grouped only
+inside their innermost parenthesized query owner or top-level statement span,
+and the binder records every branch plus any authored wrapper. The planner no
+longer searches forward for the next `SELECT`, and CTE planning does not
+rediscover `UNION` tokens. A set-operation branch therefore cannot claim a
+sibling CTE or escape a derived `FROM (...)` source.
+
+Standalone comments immediately preceding a Boolean connector are treated as
+leading trivia for that branch. Standalone comments immediately preceding the
+next query clause are excluded from the previous predicate owner, so they
+cannot force an unrelated short `JOIN ... ON` group to expand.
 
 These structures are not PostgreSQL parsers. They locate presentation
 boundaries only inside an AST-validated span whose legal shape is already known.

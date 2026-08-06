@@ -4,11 +4,15 @@ LANGUAGE SQL STABLE STRICT
 BEGIN ATOMIC
     -- Include current and archived rows.
     WITH active AS (
-        (SELECT id FROM public.items WHERE deleted_at IS NULL)
+        (
+            SELECT id FROM public.items WHERE deleted_at IS NULL
+        )
 
-        UNION ALL (
+        UNION ALL
 
-        SELECT id FROM archived_items WHERE deleted_at IS NULL)
+        (
+            SELECT id FROM archived_items WHERE deleted_at IS NULL
+        )
     )
     SELECT id
     FROM active

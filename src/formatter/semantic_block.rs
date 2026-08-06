@@ -16,6 +16,7 @@ use super::{
 
 mod ddl;
 mod expressions;
+mod groups;
 mod lists;
 mod render;
 mod statements;
@@ -25,6 +26,7 @@ use ddl::{
     plan_values_statements, plan_views,
 };
 use expressions::{ExpressionSources, owned_expression_ranges};
+use groups::{GroupLayout, LayoutGroup, has_hard_boundary, has_list_hard_boundary};
 use lists::{
     ParenthesizedListSources, parenthesized_lists, plan_keyword_list, plan_parenthesized_lists,
     plan_select_lists,
@@ -642,8 +644,31 @@ fn plan_query_clauses(
 
 fn plan_set_operations(operations: &[SetOperationBlock], plan: &mut LayoutPlan) {
     for operation in operations {
-        plan.break_before(operation.operator, 2, operation.base_depth);
-        plan.break_before(operation.next_branch, 2, operation.base_depth);
+        debug_assert_eq!(
+            operation.branches.len(),
+            operation.operators.len() + 1,
+            "validated set-operation ownership must be complete",
+        );
+
+        if operation.owner_start < operation.owner_end {
+            plan.break_before(operation.branches[0].start, 1, operation.base_depth);
+        }
+        if let Some((_, close)) = operation.owner_wrapper {
+            plan.break_before(close, 1, operation.base_depth.saturating_sub(1));
+        }
+
+        for branch in &operation.branches {
+            if let Some((open, close)) = branch.wrapper {
+                plan.break_before(open, 1, operation.base_depth);
+                plan.break_before(branch.query_start, 1, operation.base_depth + 1);
+                plan.break_before(close, 1, operation.base_depth);
+            }
+        }
+        for (position, operator) in operation.operators.iter().copied().enumerate() {
+            plan.break_before(operator, 2, operation.base_depth);
+            let branch = &operation.branches[position + 1];
+            plan.break_before(branch.start, 2, operation.base_depth);
+        }
     }
 }
 
@@ -666,18 +691,19 @@ fn boolean_ranges(
             depths[candidate] > expression.base_depth
                 && matches!(tokens[candidate].kind, Token::Select | Token::With)
         });
-        let hides_structure = expression.root_indent * INDENT_WIDTH
-            + compact_width(tokens, expression.start, expression.end, options)
-            > options.soft_line_width;
-        let authored_predicate = expression.kind == ExpressionOwnerKind::Predicate
-            && tokens[expression.start..expression.end]
-                .iter()
-                .any(|token| token.is_comment() || token.line_breaks_before > 0);
-        let expanded_boolean = root_depth.is_some()
-            && ((has_and && has_or) || contains_nested_sql || authored_predicate);
-        let expanded = expanded_boolean
-            || (hides_structure
-                && (expression.kind == ExpressionOwnerKind::Predicate || root_depth.is_some()));
+        let hard_boundary = has_hard_boundary(tokens, expression.start, expression.end);
+        let layout = LayoutGroup {
+            compact_line_width: expression.root_indent * INDENT_WIDTH
+                + compact_width(tokens, expression.start, expression.end, options),
+            structurally_complex: root_depth.is_some()
+                && ((has_and && has_or) || contains_nested_sql),
+            hard_boundary,
+            force_expand: false,
+            compact_overflow_is_unavoidable: false,
+        }
+        .decide(options);
+        let expanded = layout == GroupLayout::Expanded
+            && (expression.kind == ExpressionOwnerKind::Predicate || root_depth.is_some());
 
         if expanded {
             result.push(BooleanRange {
@@ -757,11 +783,19 @@ fn plan_booleans(
             if range.root_depth == Some(depths[index])
                 && matches!(tokens[index].kind, Token::And | Token::Or)
             {
-                plan.break_before(
-                    index,
-                    1,
-                    root_indent + depths[index].saturating_sub(range.base_depth),
-                );
+                let indent = root_indent + depths[index].saturating_sub(range.base_depth);
+                let mut trivia_start = index;
+                while trivia_start > range.start
+                    && tokens[trivia_start - 1].is_comment()
+                    && tokens[trivia_start].line_breaks_before == 1
+                {
+                    trivia_start -= 1;
+                }
+                if trivia_start < index {
+                    plan.set_indent(trivia_start..index, indent);
+                    plan.break_before(trivia_start, 1, indent);
+                }
+                plan.break_before(index, 1, indent);
             }
             if tokens[index].kind == Token::Ascii40 {
                 let Some(&close) = parens.get(&index) else {
@@ -940,18 +974,6 @@ fn plan_ctes(
                     }
                 }
                 plan.break_before(block.body_start, 1, base_indent);
-            }
-
-            for index in open + 1..close {
-                if depths[index] != base_indent + 1 || tokens[index].kind != Token::Union {
-                    continue;
-                }
-                plan.break_before(index, 2, base_indent + 1);
-                let next_select =
-                    (index + 1..close).find(|&candidate| tokens[candidate].kind == Token::Select);
-                if let Some(next_select) = next_select {
-                    plan.break_before(next_select, 2, base_indent + 1);
-                }
             }
         }
         plan.break_before(block.body_start, 1, base_indent);
