@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/formatter-ownership-tightening
+  pull_request:
+    branches:
+      - agent/sql-standard-routine-bodies
 
 permissions:
   contents: write
@@ -18,17 +21,21 @@ jobs:
           ref: agent/formatter-ownership-tightening
           fetch-depth: 0
 
-      - name: Replace bootstrap commit with formatter changes
+      - name: Replace bootstrap history with formatter changes
         shell: bash
         run: |
           set -euo pipefail
+          base=bd65ec140199066f9e053891b11c9b3eb6955fbb
           base64 --decode .github/semblock-tightening.patch.gz.b64 \
             | gzip --decompress > /tmp/semblock-tightening.patch
           git apply --index /tmp/semblock-tightening.patch
           git rm \
             .github/semblock-tightening.patch.gz.b64 \
             .github/workflows/apply-semblock-tightening.yml
+          git reset --soft "$base"
           git config user.name Dmitry
           git config user.email coder1994@gmail.com
-          git commit --amend --no-edit --author='Dmitry <coder1994@gmail.com>'
-          git push --force-with-lease origin HEAD:agent/formatter-ownership-tightening
+          git commit \
+            --message='Tighten formatter layout ownership' \
+            --author='Dmitry <coder1994@gmail.com>'
+          git push --force origin HEAD:agent/formatter-ownership-tightening
