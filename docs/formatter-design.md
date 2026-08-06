@@ -221,9 +221,10 @@ owned layouts and acceptance fixtures.
 ### Authored group model
 
 Within list-like syntax, original non-empty line groups are authored groups
-that remain stable while safely breakable within the hard limit. Blank lines
-and comments are hard boundaries. Ordinary line breaks inside predicates are
-soft layout hints rather than authored comma-list groups.
+that remain stable while safely breakable within the hard limit. Predicates use
+the same rule for a break after `ON` / `WHERE` / `HAVING` and for breaks before
+root `AND` / `OR` connectors. Blank lines and comments are hard boundaries.
+Line breaks owned only by a nested child expression do not expand its parent.
 
 The formatter:
 
@@ -795,10 +796,12 @@ without treating `CHECK` as a query clause or discovering it globally.
 comma lists and Boolean/expression owners. Owners still define grammar-specific
 safe boundaries, but they do not independently reinterpret soft width,
 structural complexity, comments, blank lines, or unavoidable overflow.
-Authored comma-list groups are passed as a required expansion fact; ordinary
-predicate newlines are not. This distinction preserves the 1.0.1 authored-list
-contract while allowing a short `JOIN ... ON`, `WHERE`, or `HAVING` predicate
-to return to compact form.
+Authored comma-list groups and predicate root boundaries are passed as
+required expansion facts. If an authored predicate is otherwise compact, the
+planner preserves only those authored root breaks; if structure or width also
+requires expansion, it may add breaks at the remaining safe connectors. Thus
+an inline short predicate stays inline while an authored multiline predicate
+stays multiline.
 
 ### Owned Boolean expressions
 
@@ -818,10 +821,10 @@ also treats a mixed-Boolean item as complex on the first pass, preventing a
 second-pass-only list expansion. Unsupported syntax is still preserved with
 `syntax.unsupported`; this change does not broaden AST support.
 
-Short same-precedence predicates remain compact when they fit the soft width,
-even when the author placed ordinary breaks before their connectors. Mixed
-precedence, nested SQL, attached comments or blank lines, and width may still
-expand the predicate. When an expanded
+Short same-precedence predicates remain compact when authored inline and fit
+the soft width. A valid authored break after the predicate owner or before a
+root connector is preserved. Mixed precedence, nested SQL, attached comments
+or blank lines, and width may add further safe breaks. When an expanded
 Boolean expression contains `EXISTS` or another nested query, query planning
 expands that nested query independently while allowing its own short local
 predicate to remain inline. INSERT target-list width is measured from the

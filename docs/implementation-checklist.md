@@ -875,8 +875,8 @@ The earlier MVP checkbox that kept interpreted strings disabled records the hist
 - [x] Delete the CTE planner's private set-operation token scan.
 - [x] Route SELECT/RETURNING/grouping/order/function lists and owned Boolean
   expressions through the shared `LayoutGroup` decision contract.
-- [x] Preserve authored comma-list groups while treating ordinary predicate
-  newlines as soft hints.
+- [x] Preserve authored comma-list groups and root predicate boundaries while
+  keeping originally inline short predicates compact.
 - [x] Exclude leading comments of a following clause from the previous
   predicate owner and attach comments before `AND` / `OR` to that branch.
 - [x] Verify the reported SQL file is semantically equivalent, clean under

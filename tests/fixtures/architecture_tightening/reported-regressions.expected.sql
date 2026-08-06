@@ -12,9 +12,7 @@ RETURNS TABLE (
 BEGIN ATOMIC
     -- Freeze the upper availability bound so every cursor group sees the same batch.
     WITH max_av_dt AS (
-        (
-            SELECT id_seq FROM item_availability_dates WHERE globalLastIdSeq IS NULL ORDER BY id_seq DESC LIMIT 1
-        )
+        (SELECT id_seq FROM item_availability_dates WHERE globalLastIdSeq IS NULL ORDER BY id_seq DESC LIMIT 1)
 
         UNION ALL
 
@@ -61,8 +59,12 @@ BEGIN ATOMIC
             rel.rel_type,
             NULL::user_stats.list_type AS list_type
         FROM pre_agg
-        JOIN item_related_items rel ON rel.rel_item_id = pre_agg.item_id AND rel.rel_type IN ('sequel', 'prequel', 'spin_off')
-        JOIN user_stats.watch_progress uw ON uw.user_id = c_uid AND uw.item_id = rel.item_id
+        JOIN item_related_items rel ON
+            rel.rel_item_id = pre_agg.item_id
+            AND rel.rel_type IN ('sequel', 'prequel', 'spin_off')
+        JOIN user_stats.watch_progress uw ON
+            uw.user_id = c_uid
+            AND uw.item_id = rel.item_id
         -- Filter the originating title before DISTINCT/deduplication so another
         -- unmuted relation to the same new title can still produce a notification.
         WHERE
@@ -89,8 +91,13 @@ BEGIN ATOMIC
             rel.rel_type,
             ul.list_type
         FROM pre_agg
-        JOIN item_related_items rel ON rel.rel_item_id = pre_agg.item_id AND rel.rel_type IN ('sequel', 'prequel', 'spin_off')
-        JOIN user_stats.watch_lists ul ON ul.user_id = c_uid AND ul.item_id = rel.item_id AND ul.list_type != 'abandoned'
+        JOIN item_related_items rel ON
+            rel.rel_item_id = pre_agg.item_id
+            AND rel.rel_type IN ('sequel', 'prequel', 'spin_off')
+        JOIN user_stats.watch_lists ul ON
+            ul.user_id = c_uid
+            AND ul.item_id = rel.item_id
+            AND ul.list_type != 'abandoned'
         -- The relation source, not the newly available title, owns this mute.
         WHERE
             NOT EXISTS (
@@ -116,7 +123,10 @@ BEGIN ATOMIC
             NULL::related_item_rel_type AS rel_type,
             ul.list_type
         FROM pre_agg
-        JOIN user_stats.watch_lists ul ON ul.user_id = c_uid AND ul.item_id = pre_agg.item_id AND ul.list_type NOT IN ('abandoned', 'watched')
+        JOIN user_stats.watch_lists ul ON
+            ul.user_id = c_uid
+            AND ul.item_id = pre_agg.item_id
+            AND ul.list_type NOT IN ('abandoned', 'watched')
         -- Direct-list notifications originate from the newly available/listed title itself.
         WHERE
             NOT EXISTS (
@@ -172,9 +182,7 @@ RETURNS TABLE (
 BEGIN ATOMIC
     -- Freeze the upper episode-availability bound for this generation batch.
     WITH max_av_dt AS (
-        (
-            SELECT id_seq FROM item_episode_availability_dates WHERE globalLastIdSeq IS NULL ORDER BY id_seq DESC LIMIT 1
-        )
+        (SELECT id_seq FROM item_episode_availability_dates WHERE globalLastIdSeq IS NULL ORDER BY id_seq DESC LIMIT 1)
 
         UNION ALL
 
@@ -215,7 +223,10 @@ BEGIN ATOMIC
                 SELECT id_seq
                 FROM max_av_dt
             )
-        LEFT JOIN item_episodes ie ON ie.item_id = av_dt.item_id AND ie.season = av_dt.season AND ie.episode = av_dt.episode
+        LEFT JOIN item_episodes ie ON
+            ie.item_id = av_dt.item_id
+            AND ie.season = av_dt.season
+            AND ie.episode = av_dt.episode
     ),
     -- Episode notifications for titles with watch progress.
     user_new_episodes_by_watch AS (
@@ -228,7 +239,9 @@ BEGIN ATOMIC
             pre_agg.episode,
             NULL::user_stats.list_type AS user_list
         FROM pre_agg
-        JOIN user_stats.watch_progress uw ON uw.user_id = c_uid AND uw.item_id = pre_agg.item_id
+        JOIN user_stats.watch_progress uw ON
+            uw.user_id = c_uid
+            AND uw.item_id = pre_agg.item_id
         -- Episode notifications originate from their parent title; filter before deduplication.
         WHERE
             NOT EXISTS (
@@ -240,7 +253,10 @@ BEGIN ATOMIC
             AND NOT EXISTS (
                 SELECT 1
                 FROM user_stats.watch_progress_per_episode usw
-                WHERE usw.user_id = c_uid AND usw.item_id = pre_agg.item_id AND usw.episode_id = pre_agg.episode_id
+                WHERE
+                    usw.user_id = c_uid
+                    AND usw.item_id = pre_agg.item_id
+                    AND usw.episode_id = pre_agg.episode_id
             )
     ),
     -- Episode notifications for titles in active user lists.
@@ -254,7 +270,10 @@ BEGIN ATOMIC
             pre_agg.episode,
             ul.list_type AS user_list
         FROM pre_agg
-        JOIN user_stats.watch_lists ul ON ul.user_id = c_uid AND ul.item_id = pre_agg.item_id AND ul.list_type NOT IN ('abandoned', 'watched')
+        JOIN user_stats.watch_lists ul ON
+            ul.user_id = c_uid
+            AND ul.item_id = pre_agg.item_id
+            AND ul.list_type NOT IN ('abandoned', 'watched')
         -- Episode notifications originate from their parent title; filter before deduplication.
         WHERE
             NOT EXISTS (
@@ -266,7 +285,10 @@ BEGIN ATOMIC
             AND NOT EXISTS (
                 SELECT 1
                 FROM user_stats.watch_progress_per_episode usw
-                WHERE usw.user_id = c_uid AND usw.item_id = pre_agg.item_id AND usw.episode_id = pre_agg.episode_id
+                WHERE
+                    usw.user_id = c_uid
+                    AND usw.item_id = pre_agg.item_id
+                    AND usw.episode_id = pre_agg.episode_id
             )
     ),
     -- Collapse watch/list eligibility to one notification per user and episode event.

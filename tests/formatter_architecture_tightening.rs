@@ -34,7 +34,7 @@ fn owns_set_operations_inside_ctes_and_derived_sources() {
 }
 
 #[test]
-fn compacts_short_authored_groups_through_one_policy() {
+fn preserves_short_authored_groups_through_one_policy() {
     assert_fixture("compact-groups");
 }
 

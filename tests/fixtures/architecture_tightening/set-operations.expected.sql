@@ -1,7 +1,5 @@
 WITH active_rows AS (
-    (
-        SELECT id FROM active_items
-    )
+    (SELECT id FROM active_items)
 
     UNION ALL
 

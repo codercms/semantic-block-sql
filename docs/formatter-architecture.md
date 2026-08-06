@@ -337,8 +337,10 @@ Compact-versus-expanded decisions flow through one `LayoutGroup` contract.
 List, predicate, and expression owners provide only their compact width,
 structural-complexity facts, hard comment/blank-line boundaries, authored-group
 requirements, and whether an overflow is genuinely indivisible. Comma lists
-retain authored non-empty line groups, while ordinary predicate line breaks are
-soft hints; both still use the same width and structural decision order.
+retain authored non-empty line groups, and predicates retain authored breaks
+after their owner and before root `AND` / `OR` connectors. Nested child breaks
+do not expand the parent by themselves; every owner still uses the same width
+and structural decision order.
 
 Set-operation binding is likewise owner-bounded. Operators are grouped only
 inside their innermost parenthesized query owner or top-level statement span,
