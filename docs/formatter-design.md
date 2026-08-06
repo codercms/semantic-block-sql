@@ -825,6 +825,23 @@ blocks, SQL statements, assignments, conditionals, loops, `FOREACH`, procedural
 and reviewed `RETURN QUERY` forms are covered. Transaction control remains opaque
 and follows the default/strict unsupported policy.
 
+## SQL-standard routine bodies
+
+`LANGUAGE SQL` functions and procedures with `BEGIN ATOMIC` use a separate
+outer-routine boundary from dollar-quoted PL/pgSQL. The reviewed subset owns
+exactly one SQL body statement, formats that statement through the canonical
+ordinary-SQL pipeline, indents it one level, and validates the complete routine
+with PostgreSQL structural equivalence and document idempotence. Function
+parameter defaults are parser-owned and preserved; they are not the cause of an
+SQL-body diagnostic. Multi-statement bodies and unreviewed routine attributes
+remain byte-identical with `syntax.unsupported`.
+
+Parenthesized set-operation branches inside a CTE are bound from the shallowest
+AST-expected `SELECT` token when no root-depth `SELECT` exists. This exception is
+restricted to a validated `SelectSpec` with set operations; all other statement
+families retain exact root-depth binding. This resolves the reported routine
+body without introducing a permissive keyword fallback.
+
 ## Statement-granular opaque policy
 
 The formatter classifies every parser-proven top-level statement independently. A supported statement is formatted through the normal validation, ownership, equivalence, protected-token, hard-width, and idempotence gates. A valid but unsupported statement is copied byte-for-byte and receives `syntax.unsupported`. A statement that enters the supported pipeline but cannot pass one of those formatter gates is also copied byte-for-byte and receives `format.statement_skipped`, including its source line in the message.

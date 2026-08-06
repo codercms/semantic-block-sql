@@ -105,7 +105,7 @@ fn validate_outer(source: &str) -> Result<(), FormatDiagnostic> {
     Ok(())
 }
 
-fn option_string(option: &pg_query::protobuf::DefElem) -> Option<String> {
+pub(super) fn option_string(option: &pg_query::protobuf::DefElem) -> Option<String> {
     use pg_query::protobuf::node::Node;
     match option.arg.as_deref()?.node.as_ref()? {
         Node::String(value) => Some(value.sval.to_ascii_lowercase()),
@@ -553,7 +553,7 @@ fn strip_locations(value: &mut Value) {
     }
 }
 
-fn normalize_outer_tokens(
+pub(super) fn normalize_outer_tokens(
     source: &str,
     options: &FormatOptions,
 ) -> Result<String, FormatDiagnostic> {
@@ -565,6 +565,9 @@ fn normalize_outer_tokens(
         if ["function", "procedure", "language", "returns"]
             .iter()
             .any(|keyword| token.text.eq_ignore_ascii_case(keyword))
+            || (token.text.eq_ignore_ascii_case("sql")
+                && index > 0
+                && tokens[index - 1].text.eq_ignore_ascii_case("language"))
         {
             output.push_str(&token.text.to_ascii_uppercase());
         } else {

@@ -14,8 +14,16 @@ pub(super) fn bind_body_start(
     statement: &StatementTokens,
 ) -> Result<usize, FormatDiagnostic> {
     let expected = statement.spec.expected_token();
+    let wrapped_set_operation = matches!(
+        &statement.spec,
+        StatementSpec::Select(spec) if spec.set_operations > 0
+    );
     (statement.range.start..statement.range.end)
-        .find(|index| depths[*index] == statement.base_depth && tokens[*index].kind == expected)
+        .filter(|index| {
+            tokens[*index].kind == expected
+                && (depths[*index] == statement.base_depth || wrapped_set_operation)
+        })
+        .min_by_key(|index| depths[*index])
         .ok_or_else(|| {
             FormatDiagnostic::Ownership(format!(
                 "{} statement has no top-level {:?} token",

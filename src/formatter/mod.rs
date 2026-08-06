@@ -3,6 +3,7 @@ mod layout_ir;
 mod ownership;
 mod procedural;
 mod semantic_block;
+mod sql_standard_routine;
 mod structure;
 mod tokens;
 mod validation;
@@ -680,6 +681,12 @@ fn format_statement_once(
     options: &FormatOptions,
 ) -> Result<FormattedSql, FormatDiagnostic> {
     if is_routine_statement(raw) {
+        if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(statement)) =
+            raw.stmt.as_deref().and_then(|node| node.node.as_ref())
+            && statement.sql_body.is_some()
+        {
+            return sql_standard_routine::format_single_routine(source, statement, options);
+        }
         return procedural::format_single_routine(source, options);
     }
     format_supported_statement(source, options)
