@@ -220,12 +220,15 @@ owned layouts and acceptance fixtures.
 
 ### Authored group model
 
-Within list-like syntax, original line boundaries are soft group hints. Blank
-lines and comments are hard boundaries.
+Within list-like syntax, original non-empty line groups are authored groups
+that remain stable while safely breakable within the hard limit. Predicates use
+the same rule for a break after `ON` / `WHERE` / `HAVING` and for breaks before
+root `AND` / `OR` connectors. Blank lines and comments are hard boundaries.
+Line breaks owned only by a nested child expression do not expand its parent.
 
 The formatter:
 
-- preserves a hinted group while it is at or below hard width;
+- preserves an authored list group while it is at or below hard width;
 - never merges across a hard boundary;
 - does not split a group merely for soft width;
 - splits an over-hard group at safe AST/CST argument boundaries;
@@ -787,6 +790,19 @@ additional indentation. Boolean precedence, authored parentheses, comments,
 and source token order therefore follow the same layout rules as `WHERE`
 without treating `CHECK` as a query clause or discovering it globally.
 
+### Shared layout-group decision
+
+`semantic_block/groups.rs` is the single compact-versus-expanded policy for
+comma lists and Boolean/expression owners. Owners still define grammar-specific
+safe boundaries, but they do not independently reinterpret soft width,
+structural complexity, comments, blank lines, or unavoidable overflow.
+Authored comma-list groups and predicate root boundaries are passed as
+required expansion facts. If an authored predicate is otherwise compact, the
+planner preserves only those authored root breaks; if structure or width also
+requires expansion, it may add breaks at the remaining safe connectors. Thus
+an inline short predicate stays inline while an authored multiline predicate
+stays multiline.
+
 ### Owned Boolean expressions
 
 The 2026-08-03 Boolean-expression regression requirement supersedes the older
@@ -805,9 +821,10 @@ also treats a mixed-Boolean item as complex on the first pass, preventing a
 second-pass-only list expansion. Unsupported syntax is still preserved with
 `syntax.unsupported`; this change does not broaden AST support.
 
-Short same-precedence predicates remain compact when they fit the soft width
-and have no authored comment or line boundary. Mixed precedence, nested SQL,
-authored boundaries, or width may still expand the predicate. When an expanded
+Short same-precedence predicates remain compact when authored inline and fit
+the soft width. A valid authored break after the predicate owner or before a
+root connector is preserved. Mixed precedence, nested SQL, attached comments
+or blank lines, and width may add further safe breaks. When an expanded
 Boolean expression contains `EXISTS` or another nested query, query planning
 expands that nested query independently while allowing its own short local
 predicate to remain inline. INSERT target-list width is measured from the
@@ -824,6 +841,25 @@ blocks, SQL statements, assignments, conditionals, loops, `FOREACH`, procedural
 `CASE`, dynamic execution, cursor operations, diagnostics, exceptions, `ASSERT`,
 and reviewed `RETURN QUERY` forms are covered. Transaction control remains opaque
 and follows the default/strict unsupported policy.
+
+## SQL-standard routine bodies
+
+`LANGUAGE SQL` functions and procedures with `BEGIN ATOMIC` use a separate
+outer-routine boundary from dollar-quoted PL/pgSQL. The reviewed subset owns
+exactly one SQL body statement, formats that statement through the canonical
+ordinary-SQL pipeline, indents it one level, and validates the complete routine
+with PostgreSQL structural equivalence and document idempotence. Function
+parameter defaults are parser-owned and preserved; they are not the cause of an
+SQL-body diagnostic. Multi-statement bodies and unreviewed routine attributes
+remain byte-identical with `syntax.unsupported`.
+
+Set operations now use a complete bounded owner rather than an
+operator-plus-next-`SELECT` record. Each owner contains all operators, all
+branches, and authored branch wrappers inside one CTE body, derived source, or
+statement range. Branch cardinality is checked during binding, and planners
+consume the owned branches without a second `UNION` scan. This prevents an
+operator in a parenthesized CTE from claiming the following CTE and gives a
+`FROM (SELECT ... UNION ... SELECT ...)` source one coherent indentation owner.
 
 ## Statement-granular opaque policy
 

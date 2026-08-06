@@ -37,6 +37,7 @@ through generic whitespace normalization.
 | Layout dispatch | `StatementLayout` | `layout_ir.rs` |
 | Statement planning | `plan_*_statements` | `semantic_block/statements.rs` |
 | Owned expressions | `owned_expression_ranges` | `semantic_block/expressions.rs` |
+| Shared layout decision | `LayoutGroup::decide` | `semantic_block/groups.rs` |
 | Shared lists | `plan_keyword_list` and related helpers | `semantic_block/lists.rs` |
 | Token rendering | `render_token`, `needs_space` | `semantic_block/render.rs` |
 | Final safety | `format_sql`, `validate_equivalent` | `mod.rs`, `validation/equivalence.rs` |
@@ -126,6 +127,14 @@ Boolean items during the first pass so list expansion remains idempotent.
 The planner must not duplicate AST validation. It receives already-verified
 ownership. Reuse the pass-wide `PlanningContext`; do not add another collection
 of token/depth/list/options parameters or suppress `clippy::too_many_arguments`.
+Use `LayoutGroup::decide` for compact-versus-expanded policy. A new owner may
+supply different safe breakpoints or an authored-group requirement, but it must
+not implement another width/comment/complexity decision tree.
+
+For set operations, bind the complete expression owner and all branches inside
+that owner. Never represent an operation as an operator plus a forward search
+for the next query keyword, and never rescan CTEs or statements for `UNION` in
+the planner.
 
 ### 7. Add evidence
 

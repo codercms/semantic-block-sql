@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use pg_query::protobuf::Token;
 
@@ -154,10 +154,12 @@ fn select_list_start(
 
 pub(super) fn bind_set_operations(
     tokens: &[SqlToken<'_>],
-    depths: &[usize],
+    structure: &TokenStructure,
     statements: &[StatementTokens],
-) -> Vec<SetOperationBlock> {
-    let mut result = Vec::new();
+) -> Result<Vec<SetOperationBlock>, FormatDiagnostic> {
+    let depths = structure.depths();
+    let mut owners = BTreeMap::<(usize, usize, usize), (Option<(usize, usize)>, Vec<usize>)>::new();
+
     for statement in statements {
         for operator in statement.range.start..statement.range.end {
             if !matches!(
@@ -167,18 +169,135 @@ pub(super) fn bind_set_operations(
                 continue;
             }
             let base_depth = depths[operator];
-            let next_branch = (operator + 1..statement.range.end)
-                .find(|index| depths[*index] == base_depth && tokens[*index].kind == Token::Select);
-            if let Some(next_branch) = next_branch {
-                result.push(SetOperationBlock {
-                    operator,
-                    next_branch,
-                    base_depth,
-                });
-            }
+            let owner_wrapper = structure
+                .parenthesis_pairs()
+                .iter()
+                .filter(|(open, close)| {
+                    **open < operator && operator < **close && depths[**open] + 1 == base_depth
+                })
+                .max_by_key(|(open, _)| **open)
+                .map(|(open, close)| (*open, *close));
+            let (owner_start, owner_end) = owner_wrapper
+                .map(|(open, close)| (open + 1, close))
+                .unwrap_or((statement.range.start, statement.range.end));
+            owners
+                .entry((owner_start, owner_end, base_depth))
+                .or_insert_with(|| (owner_wrapper, Vec::new()))
+                .1
+                .push(operator);
         }
     }
-    result
+
+    let mut result = Vec::with_capacity(owners.len());
+    for ((owner_start, owner_end, base_depth), (owner_wrapper, mut operators)) in owners {
+        operators.sort_unstable();
+        operators.dedup();
+        operators.retain(|operator| depths[*operator] == base_depth);
+        if operators.is_empty() {
+            continue;
+        }
+
+        let mut branches = Vec::with_capacity(operators.len() + 1);
+        let mut branch_start = owner_start;
+        for &operator in &operators {
+            branches.push(bind_set_operation_branch(
+                tokens,
+                structure,
+                branch_start,
+                operator,
+                base_depth,
+            )?);
+            branch_start = operator + 1;
+            if let Some(modifier) = (branch_start..owner_end)
+                .find(|index| !tokens[*index].is_comment())
+                .filter(|index| matches!(tokens[*index].kind, Token::All | Token::Distinct))
+            {
+                branch_start = modifier + 1;
+            }
+        }
+        branches.push(bind_set_operation_branch(
+            tokens,
+            structure,
+            branch_start,
+            owner_end,
+            base_depth,
+        )?);
+
+        if branches.len() != operators.len() + 1 {
+            return Err(FormatDiagnostic::Ownership(
+                "set-operation branch cardinality disagrees with its bounded owner".into(),
+            ));
+        }
+        result.push(SetOperationBlock {
+            owner_start,
+            owner_end,
+            owner_wrapper,
+            operators,
+            branches,
+            base_depth,
+        });
+    }
+    result.sort_by_key(|operation| operation.owner_start);
+    Ok(result)
+}
+
+fn bind_set_operation_branch(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    start: usize,
+    mut end: usize,
+    base_depth: usize,
+) -> Result<SetOperationBranch, FormatDiagnostic> {
+    let owned_start = start;
+    let mut syntax_start = start;
+    while syntax_start < end && tokens[syntax_start].is_comment() {
+        syntax_start += 1;
+    }
+    while syntax_start < end && tokens[end - 1].is_comment() {
+        end -= 1;
+    }
+    if syntax_start >= end {
+        return Err(FormatDiagnostic::Ownership(
+            "set operation contains an empty branch".into(),
+        ));
+    }
+
+    let wrapper = if tokens[syntax_start].kind == Token::Ascii40 {
+        structure
+            .matching_parenthesis(syntax_start)
+            .filter(|close| *close < end)
+            .filter(|close| {
+                (*close + 1..end).all(|index| tokens[index].is_comment()) || *close + 1 == end
+            })
+            .map(|close| (syntax_start, close))
+    } else {
+        None
+    };
+    let search_start = wrapper.map_or(syntax_start, |(open, _)| open + 1);
+    let search_end = wrapper.map_or(end, |(_, close)| close);
+    let query_start = (search_start..search_end)
+        .find(|index| {
+            !tokens[*index].is_comment()
+                && matches!(
+                    tokens[*index].kind,
+                    Token::Select | Token::With | Token::Values
+                )
+                && depths_match_branch(structure.depths()[*index], base_depth, wrapper.is_some())
+        })
+        .ok_or_else(|| {
+            FormatDiagnostic::Ownership("set-operation branch has no bounded query start".into())
+        })?;
+
+    Ok(SetOperationBranch {
+        start: owned_start,
+        end,
+        query_start,
+        wrapper,
+    })
+}
+
+fn depths_match_branch(depth: usize, base_depth: usize, wrapped: bool) -> bool {
+    depth == base_depth + usize::from(wrapped)
 }
 
 pub(super) fn bind_window_blocks(
@@ -507,6 +626,15 @@ pub(super) fn bind_predicates(
         }
     }
 
+    for predicate in &mut result {
+        while predicate.end > predicate.start
+            && tokens[predicate.end - 1].is_comment()
+            && tokens[predicate.end - 1].line_breaks_before > 0
+        {
+            predicate.end -= 1;
+        }
+    }
+    result.retain(|predicate| predicate.start < predicate.end);
     result.sort_by_key(|predicate| predicate.introducer);
     result
 }

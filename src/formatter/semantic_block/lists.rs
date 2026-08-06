@@ -86,13 +86,18 @@ pub(super) fn parenthesized_lists(
             .any(|index| tokens[index].kind == Token::Ascii44 && depths[index] == inner_depth);
         let unavoidable_single_argument = !has_top_level_comma
             && range_is_unavoidably_over_hard(tokens, open + 1, close, depths[open] + 1, options);
+        let layout = LayoutGroup {
+            compact_line_width: depths[open] * INDENT_WIDTH + compact,
+            structurally_complex: contains_complex,
+            hard_boundary: has_list_hard_boundary(tokens, open + 1, close),
+            force_expand: authored,
+            compact_overflow_is_unavoidable: unavoidable_single_argument,
+        }
+        .decide(options);
         lists.push(ParenthesizedList {
             open,
             close,
-            expanded: authored
-                || contains_complex
-                || (!unavoidable_single_argument
-                    && depths[open] * INDENT_WIDTH + compact > options.soft_line_width),
+            expanded: layout == GroupLayout::Expanded,
         });
     }
 
@@ -196,11 +201,16 @@ pub(super) fn plan_keyword_list(
     let has_complex = items.iter().any(|item| item.complex);
     let compact_line_width =
         base_depth * INDENT_WIDTH + compact_width(tokens, keyword, list_end, options);
-    let expanded = authored
-        || has_complex
-        || (force_expand && (tokens[keyword].kind == Token::Set || items.len() > 1))
-        || compact_line_width > options.soft_line_width;
-    if !expanded {
+    let layout = LayoutGroup {
+        compact_line_width,
+        structurally_complex: has_complex,
+        hard_boundary: has_list_hard_boundary(tokens, items[0].start, list_end),
+        force_expand: authored
+            || (force_expand && (tokens[keyword].kind == Token::Set || items.len() > 1)),
+        compact_overflow_is_unavoidable: false,
+    }
+    .decide(options);
+    if layout == GroupLayout::Compact {
         return;
     }
 
@@ -282,7 +292,15 @@ pub(super) fn plan_owned_delimited_list(
     let has_complex = items.iter().any(|item| item.complex);
     let compact_line_width = owner_indent * INDENT_WIDTH
         + compact_width(tokens, owner.start, owner.end, context.options);
-    if !authored && !has_complex && compact_line_width <= context.options.soft_line_width {
+    let layout = LayoutGroup {
+        compact_line_width,
+        structurally_complex: has_complex,
+        hard_boundary: has_list_hard_boundary(tokens, items[0].start, close),
+        force_expand: authored,
+        compact_overflow_is_unavoidable: false,
+    }
+    .decide(context.options);
+    if layout == GroupLayout::Compact {
         return;
     }
 
@@ -380,10 +398,15 @@ pub(super) fn plan_select_lists(
                 indent,
                 options,
             );
-        let expanded = authored
-            || has_complex
-            || (!unavoidable_single_item && compact_line_width > options.soft_line_width);
-        if !expanded {
+        let layout = LayoutGroup {
+            compact_line_width,
+            structurally_complex: has_complex,
+            hard_boundary: has_list_hard_boundary(tokens, items[0].start, end),
+            force_expand: authored,
+            compact_overflow_is_unavoidable: unavoidable_single_item,
+        }
+        .decide(options);
+        if layout == GroupLayout::Compact {
             continue;
         }
 
