@@ -776,6 +776,17 @@ PR #7 Git-aware CLI hardening evidence:
 - [ ] Unsupported syntax is not advertised.
 - [ ] Dead code and obsolete compatibility paths are removed.
 
+## SQL-standard routine body batch
+
+- [x] Reproduce `LANGUAGE SQL ... BEGIN ATOMIC` being reported as unsupported.
+- [x] Prove a function parameter default is preserved and is not the rejection cause.
+- [x] Add a dedicated one-statement SQL routine boundary that reuses the canonical SQL formatter.
+- [x] Indent the SQL body one level and preserve body comments.
+- [x] Keep multi-statement SQL routine bodies byte-identical and unsupported.
+- [x] Fix parenthesized set-operation CTE body binding through the typed SELECT capability.
+- [x] Verify both routines in the reported migration format without unsupported or skipped diagnostics.
+- [x] Complete formatting, Clippy, full tests, Rustdoc, `git diff --check`, and GitNexus change-scope review before commit.
+
 ## CLI diagnostic source locations
 
 - [x] Reproduce the raw-byte-offset-only warning and error output.
