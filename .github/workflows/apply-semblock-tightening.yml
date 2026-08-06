@@ -39,3 +39,5 @@ jobs:
             --message='Tighten formatter layout ownership' \
             --author='Dmitry <coder1994@gmail.com>'
           git push --force origin HEAD:agent/formatter-ownership-tightening
+
+# Connector Contents API push trigger.
