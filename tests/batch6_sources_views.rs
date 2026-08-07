@@ -1,30 +1,8 @@
-use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, check_sql, format_sql, format_sql_result, validate_equivalent};
+mod support;
 
-fn assert_format(source: &str, expected: &str) {
-    let options = FormatOptions::default();
-    let formatted = format_sql(source, &options).expect("format succeeds");
-    assert_eq!(formatted.output, expected);
-    assert!(
-        formatted.warnings.is_empty(),
-        "warnings: {:?}",
-        formatted.warnings
-    );
-    validate_equivalent(source, expected).expect("semantic equivalence");
-    assert_eq!(
-        format_sql(expected, &options)
-            .expect("second format succeeds")
-            .output,
-        expected,
-        "formatting must be idempotent"
-    );
-    let checked = check_sql(expected, &options);
-    assert!(
-        checked.compliant,
-        "formatted SQL must pass check: {:?}",
-        checked.diagnostics
-    );
-}
+use pretty_assertions::assert_eq;
+use semblock::{FormatOptions, format_sql_result};
+use support::assert_sql as assert_format;
 
 #[test]
 fn formats_multiple_update_and_delete_sources() {
@@ -117,12 +95,12 @@ fn formats_merge_with_derived_and_joined_sources() {
 fn formats_create_view_options_query_and_check_mode() {
     assert_format(
         "create or replace view public.active_items (id,title) with (security_barrier=true) as select id,title from public.items where active with local check option;",
-        "CREATE OR REPLACE VIEW public.active_items (id, title) WITH (security_barrier = TRUE)\nAS\nSELECT id, title\nFROM public.items\nWHERE active\nWITH LOCAL CHECK OPTION;",
+        "CREATE OR REPLACE VIEW public.active_items (id, title) WITH (security_barrier = TRUE) AS\nSELECT id, title\nFROM public.items\nWHERE active\nWITH LOCAL CHECK OPTION;",
     );
 
     assert_format(
         "create view public.item_ids as select id from public.items with check option;",
-        "CREATE VIEW public.item_ids\nAS\nSELECT id\nFROM public.items\nWITH CHECK OPTION;",
+        "CREATE VIEW public.item_ids AS\nSELECT id\nFROM public.items\nWITH CHECK OPTION;",
     );
 }
 
@@ -130,24 +108,24 @@ fn formats_create_view_options_query_and_check_mode() {
 fn formats_materialized_view_storage_and_population_mode() {
     assert_format(
         "create materialized view if not exists public.item_counts (kind,total) using heap with (fillfactor=90) tablespace fast as select kind,count(*) as total from public.items group by kind with no data;",
-        "CREATE MATERIALIZED VIEW IF NOT EXISTS public.item_counts (kind, total)\nUSING heap\nWITH (fillfactor = 90)\nTABLESPACE fast\nAS\nSELECT kind, COUNT(*) AS total\nFROM public.items\nGROUP BY kind\nWITH NO DATA;",
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS public.item_counts (kind, total)\nUSING heap\nWITH (fillfactor = 90)\nTABLESPACE fast AS\nSELECT kind, COUNT(*) AS total\nFROM public.items\nGROUP BY kind\nWITH NO DATA;",
     );
 
     assert_format(
         "create materialized view public.item_ids as select id from public.items with data;",
-        "CREATE MATERIALIZED VIEW public.item_ids\nAS\nSELECT id\nFROM public.items\nWITH DATA;",
+        "CREATE MATERIALIZED VIEW public.item_ids AS\nSELECT id\nFROM public.items\nWITH DATA;",
     );
 
     assert_format(
         "create materialized view public.item_ids_default as select id from public.items;",
-        "CREATE MATERIALIZED VIEW public.item_ids_default\nAS\nSELECT id\nFROM public.items;",
+        "CREATE MATERIALIZED VIEW public.item_ids_default AS\nSELECT id\nFROM public.items;",
     );
 }
 
 #[test]
 fn comments_remain_attached_across_source_and_view_boundaries() {
     let source = "UPDATE items i\nSET title = s.title\nFROM source_items s -- source ownership\nJOIN batches b ON b.id = s.batch_id\nWHERE i.id = s.item_id;\n\nCREATE VIEW active_items AS\nSELECT id -- public identifier\nFROM items\nWHERE active\nWITH LOCAL CHECK OPTION;\n";
-    let expected = "UPDATE items i\nSET title = s.title\nFROM source_items s -- source ownership\nJOIN batches b ON b.id = s.batch_id\nWHERE i.id = s.item_id;\n\nCREATE VIEW active_items\nAS\nSELECT id -- public identifier\nFROM items\nWHERE active\nWITH LOCAL CHECK OPTION;\n";
+    let expected = "UPDATE items i\nSET title = s.title\nFROM source_items s -- source ownership\nJOIN batches b ON b.id = s.batch_id\nWHERE i.id = s.item_id;\n\nCREATE VIEW active_items AS\nSELECT id -- public identifier\nFROM items\nWHERE active\nWITH LOCAL CHECK OPTION;\n";
     assert_format(source, expected);
 }
 

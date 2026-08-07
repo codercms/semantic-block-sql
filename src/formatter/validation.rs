@@ -19,9 +19,10 @@ use super::ownership::{
     AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec, ConflictActionSpec, ConflictSpec,
     CreateIndexSpec, CreateTableElementSpec, CreateTableSpec, CteStatementSpec, DeleteSpec,
     InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeBranchSpec,
-    MergeSpec, OverrideSpec, RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec,
-    RelationJoinTypeSpec, RelationListSpec, SelectSpec, StatementSpec, SupportedDocument,
-    UpdateSpec, UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
+    MergeSpec, OverrideSpec, QuerySpec, RelationItemSpec, RelationJoinConstraintSpec,
+    RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec, SelectSpec, StatementSpec,
+    SupportedDocument, UpdateSpec, UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec,
+    source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -52,8 +53,35 @@ pub(super) fn parse_supported_postgresql(
         statements.push(source_statement(source, raw, spec, ctes));
     }
 
-    for (node, _, context, _) in parsed.protobuf.nodes() {
-        validate_nested_node(node, context).map_err(|feature| {
+    for raw in &parsed.protobuf.stmts {
+        let root = raw
+            .stmt
+            .as_deref()
+            .and_then(|statement| statement.node.as_ref())
+            .ok_or_else(|| FormatDiagnostic::UnsupportedSyntax {
+                feature: "empty PostgreSQL statement".into(),
+                start: 0,
+                end: source.len(),
+            })?;
+        validate_complete_tree(root).map_err(|feature| FormatDiagnostic::UnsupportedSyntax {
+            feature: feature.into(),
+            start: 0,
+            end: source.len(),
+        })?;
+    }
+
+    let mut queries = Vec::new();
+    for (statement_index, raw) in parsed.protobuf.stmts.iter().enumerate() {
+        let root = raw
+            .stmt
+            .as_deref()
+            .and_then(|statement| statement.node.as_ref())
+            .ok_or_else(|| FormatDiagnostic::UnsupportedSyntax {
+                feature: "empty PostgreSQL statement".into(),
+                start: 0,
+                end: source.len(),
+            })?;
+        collect_query_specs(root, statement_index, &mut queries).map_err(|feature| {
             FormatDiagnostic::UnsupportedSyntax {
                 feature: feature.into(),
                 start: 0,
@@ -61,8 +89,143 @@ pub(super) fn parse_supported_postgresql(
             }
         })?;
     }
+    queries.sort_by_key(|query| (query.statement_index, query.anchor.unwrap_or(usize::MAX)));
 
-    Ok(SupportedDocument::new(statements))
+    Ok(SupportedDocument::with_queries(statements, queries))
+}
+
+/// Walk every reviewed PostgreSQL child field that semblock depends on.
+///
+/// `pg_query::NodeEnum::nodes()` deliberately omits several expression-bearing
+/// protobuf fields. Query ownership and unsupported-syntax validation must use
+/// the same completed traversal contract; otherwise a nested SELECT can be
+/// discovered in a field whose unsupported expression nodes were never checked.
+fn walk_complete_tree<F>(root: &NodeEnum, visitor: &mut F) -> Result<(), &'static str>
+where
+    F: for<'a> FnMut(NodeRef<'a>, Context) -> Result<(), &'static str>,
+{
+    for (node, _, context, _) in root.nodes() {
+        visitor(node, context)?;
+        walk_omitted_children(node, visitor)?;
+    }
+    Ok(())
+}
+
+fn walk_omitted_children<F>(node: NodeRef<'_>, visitor: &mut F) -> Result<(), &'static str>
+where
+    F: for<'a> FnMut(NodeRef<'a>, Context) -> Result<(), &'static str>,
+{
+    match node {
+        NodeRef::SelectStmt(select) => {
+            walk_nodes(&select.distinct_clause, visitor)?;
+            walk_nodes(&select.window_clause, visitor)?;
+            walk_nodes(&select.values_lists, visitor)?;
+            walk_optional_node(select.limit_offset.as_deref(), visitor)?;
+            walk_optional_node(select.limit_count.as_deref(), visitor)?;
+        }
+        NodeRef::InsertStmt(insert) => walk_nodes(&insert.returning_list, visitor)?,
+        NodeRef::UpdateStmt(update) => walk_nodes(&update.returning_list, visitor)?,
+        NodeRef::DeleteStmt(delete) => walk_nodes(&delete.returning_list, visitor)?,
+        NodeRef::MergeStmt(merge) => walk_nodes(&merge.returning_list, visitor)?,
+        NodeRef::MergeWhenClause(branch) => {
+            walk_optional_node(branch.condition.as_deref(), visitor)?;
+            walk_nodes(&branch.target_list, visitor)?;
+            walk_nodes(&branch.values, visitor)?;
+        }
+        NodeRef::OnConflictClause(conflict) => {
+            if let Some(infer) = conflict.infer.as_deref() {
+                walk_nodes(&infer.index_elems, visitor)?;
+                walk_optional_node(infer.where_clause.as_deref(), visitor)?;
+            }
+            walk_nodes(&conflict.target_list, visitor)?;
+            walk_optional_node(conflict.where_clause.as_deref(), visitor)?;
+        }
+        NodeRef::WindowDef(window) => {
+            walk_nodes(&window.partition_clause, visitor)?;
+            walk_nodes(&window.order_clause, visitor)?;
+            walk_optional_node(window.start_offset.as_deref(), visitor)?;
+            walk_optional_node(window.end_offset.as_deref(), visitor)?;
+        }
+        NodeRef::RuleStmt(rule) => {
+            walk_optional_node(rule.where_clause.as_deref(), visitor)?;
+            walk_nodes(&rule.actions, visitor)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn walk_nodes<F>(nodes: &[Node], visitor: &mut F) -> Result<(), &'static str>
+where
+    F: for<'a> FnMut(NodeRef<'a>, Context) -> Result<(), &'static str>,
+{
+    for node in nodes {
+        walk_optional_node(Some(node), visitor)?;
+    }
+    Ok(())
+}
+
+fn walk_optional_node<F>(node: Option<&Node>, visitor: &mut F) -> Result<(), &'static str>
+where
+    F: for<'a> FnMut(NodeRef<'a>, Context) -> Result<(), &'static str>,
+{
+    let Some(root) = node.and_then(|node| node.node.as_ref()) else {
+        return Ok(());
+    };
+    walk_complete_tree(root, visitor)
+}
+
+fn validate_complete_tree(root: &NodeEnum) -> Result<(), &'static str> {
+    walk_complete_tree(root, &mut |node, context| {
+        validate_nested_node(node, context)
+    })
+}
+
+/// Retain parser-validated ownership for every lexical SELECT that the ordinary
+/// formatter may lay out, using the same completed traversal as capability
+/// validation.
+fn collect_query_specs(
+    root: &NodeEnum,
+    statement_index: usize,
+    queries: &mut Vec<QuerySpec>,
+) -> Result<(), &'static str> {
+    walk_complete_tree(root, &mut |node, _| {
+        if let NodeRef::SelectStmt(select) = node {
+            push_query_spec(select, statement_index, queries)?;
+        }
+        Ok(())
+    })
+}
+
+fn push_query_spec(
+    select: &SelectStmt,
+    statement_index: usize,
+    queries: &mut Vec<QuerySpec>,
+) -> Result<(), &'static str> {
+    if is_values_select_shape(select) {
+        return Ok(());
+    }
+    queries.push(QuerySpec {
+        statement_index,
+        anchor: select_query_anchor(select),
+        select: validate_select(select, false)?,
+    });
+    Ok(())
+}
+
+fn select_query_anchor(select: &SelectStmt) -> Option<usize> {
+    select_target_anchor(select)
+        .or_else(|| select.larg.as_deref().and_then(select_query_anchor))
+        .or_else(|| select.rarg.as_deref().and_then(select_query_anchor))
+}
+
+fn select_target_anchor(select: &SelectStmt) -> Option<usize> {
+    select.target_list.iter().find_map(|target| {
+        let NodeEnum::ResTarget(target) = target.node.as_ref()? else {
+            return None;
+        };
+        usize::try_from(target.location).ok()
+    })
 }
 
 fn validated_cte_specs(raw: &RawStmt) -> Result<Vec<CteStatementSpec>, &'static str> {
@@ -1272,13 +1435,12 @@ fn column_check_constraint_count(column: &ColumnDef) -> usize {
 
 fn validate_ddl_expression(expression: &Node) -> Result<(), &'static str> {
     let root = expression.node.as_ref().ok_or("empty DDL expression")?;
-    for (node, _, context, _) in root.nodes() {
+    walk_complete_tree(root, &mut |node, context| {
         if matches!(node, NodeRef::SubLink(_)) {
             return Err("subquery in DDL expression");
         }
-        validate_nested_node(node, context)?;
-    }
-    Ok(())
+        validate_nested_node(node, context)
+    })
 }
 
 fn validate_merge(merge: &MergeStmt) -> Result<MergeSpec, &'static str> {
@@ -1781,10 +1943,7 @@ fn validate_dml_expression(expression: &Node) -> Result<(), &'static str> {
         .node
         .as_ref()
         .ok_or("empty data-modifying expression")?;
-    for (node, _, context, _) in root.nodes() {
-        validate_nested_node(node, context)?;
-    }
-    Ok(())
+    validate_complete_tree(root)
 }
 
 fn validate_on_conflict(
@@ -1921,6 +2080,9 @@ fn validate_select(
         has_into: select.into_clause.is_some(),
         set_operations,
         named_windows: select.window_clause.len(),
+        has_order_by: !select.sort_clause.is_empty(),
+        has_limit_offset: select.limit_offset.is_some(),
+        has_limit_count: select.limit_count.is_some(),
         locking_clauses: select.locking_clause.len(),
         from,
     })

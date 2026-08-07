@@ -1,24 +1,7 @@
-use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, check_sql, format_sql, validate_equivalent};
+mod support;
 
-fn assert_format(source: &str, expected: &str, options: &FormatOptions) {
-    let formatted = format_sql(source, options).expect("format succeeds");
-    assert_eq!(formatted.output, expected);
-    validate_equivalent(source, expected).expect("semantic equivalence");
-    assert_eq!(
-        format_sql(expected, options)
-            .expect("second format succeeds")
-            .output,
-        expected,
-        "formatting must be idempotent"
-    );
-    let checked = check_sql(expected, options);
-    assert!(
-        checked.compliant,
-        "formatted SQL must pass check: {:?}",
-        checked.diagnostics
-    );
-}
+use semblock::FormatOptions;
+use support::assert_sql_with as assert_format;
 
 #[test]
 fn supports_insert_overriding_and_default_values() {
@@ -88,7 +71,7 @@ fn formats_fetch_and_general_set_operations() {
 fn set_operation_branches_own_their_from_clauses() {
     assert_format(
         "select id, created_at from active_items where ready = true union all select id, created_at from archived_items where ready = true order by created_at desc;",
-        "SELECT id, created_at FROM active_items WHERE ready = TRUE\n\nUNION ALL\n\nSELECT id, created_at FROM archived_items WHERE ready = TRUE ORDER BY created_at DESC;",
+        "SELECT id, created_at FROM active_items WHERE ready = TRUE\n\nUNION ALL\n\nSELECT id, created_at FROM archived_items WHERE ready = TRUE\nORDER BY created_at DESC;",
         &FormatOptions::default(),
     );
 }

@@ -10,8 +10,24 @@ pub(super) struct SelectSpec {
     pub has_into: bool,
     pub set_operations: usize,
     pub named_windows: usize,
+    pub has_order_by: bool,
+    pub has_limit_offset: bool,
+    pub has_limit_count: bool,
     pub locking_clauses: usize,
     pub from: RelationListSpec,
+}
+
+/// Parser-proven ownership for one lexical SELECT query.
+///
+/// `statement_index` scopes ownership to the top-level parser statement.
+/// `anchor` is the byte location of the first target expression when the AST
+/// exposes one. Empty target lists have no anchor; layout preserves their AST
+/// cardinality and binds them only within that owning statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct QuerySpec {
+    pub statement_index: usize,
+    pub anchor: Option<usize>,
+    pub select: SelectSpec,
 }
 
 /// Top-level VALUES capabilities proven by PostgreSQL AST validation.
@@ -473,15 +489,31 @@ pub(super) struct CteStatementSpec {
 #[derive(Debug, Default)]
 pub(super) struct SupportedDocument {
     statements: Vec<SourceStatement>,
+    queries: Vec<QuerySpec>,
 }
 
 impl SupportedDocument {
+    #[cfg(test)]
     pub fn new(statements: Vec<SourceStatement>) -> Self {
-        Self { statements }
+        Self {
+            statements,
+            queries: Vec::new(),
+        }
+    }
+
+    pub fn with_queries(statements: Vec<SourceStatement>, queries: Vec<QuerySpec>) -> Self {
+        Self {
+            statements,
+            queries,
+        }
     }
 
     pub fn statements(&self) -> &[SourceStatement] {
         &self.statements
+    }
+
+    pub fn queries(&self) -> &[QuerySpec] {
+        &self.queries
     }
 }
 
@@ -621,6 +653,9 @@ mod tests {
                     has_into: false,
                     set_operations: 0,
                     named_windows: 0,
+                    has_order_by: false,
+                    has_limit_offset: false,
+                    has_limit_count: false,
                     locking_clauses: 0,
                     from: RelationListSpec::default(),
                 }),
@@ -660,6 +695,9 @@ mod tests {
                 has_into: false,
                 set_operations: 0,
                 named_windows: 0,
+                has_order_by: false,
+                has_limit_offset: false,
+                has_limit_count: false,
                 locking_clauses: 0,
                 from: RelationListSpec::default(),
             }),

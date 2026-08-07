@@ -139,13 +139,34 @@ locations. The range includes the terminal semicolon when one exists.
 ```rust
 pub(super) struct SupportedDocument {
     statements: Vec<SourceStatement>,
+    queries: Vec<QuerySpec>,
 }
 ```
 
-This is produced by `validation::parse_supported_postgresql`. It proves that
-every top-level statement and every checked nested construct belongs to the
-fixture-backed support boundary. The full protobuf tree is deliberately not
-exposed to layout code.
+`QuerySpec` retains the already-validated `SelectSpec`, the owning top-level
+statement index, and a parser source anchor when PostgreSQL exposes one. Layout
+uses those records to seed lexical `QueryBlock` binding; it never treats every
+scanner `SELECT` token as a query. PostgreSQL permits an empty SELECT target
+list, whose `SelectStmt` may expose no useful source anchor. Those unanchored
+records therefore keep their parser cardinality and are bound only within their
+owning statement: an identical capability group is accepted only when its count
+exactly matches the remaining lexical queries with that shape. Contextual
+grammar such as `GRANT SELECT` and `CREATE POLICY ... FOR SELECT` consequently
+cannot be borrowed from another statement to satisfy query ownership.
+
+`pg_query`'s convenience node traversal does not visit every expression-bearing
+protobuf field. One validation adapter completes the reviewed traversal for
+SELECT suffixes/windows, DML `RETURNING`, `ON CONFLICT`, MERGE branches, and
+rule actions. Both nested unsupported-syntax validation and `QuerySpec`
+collection use that same completed walk, so a field cannot contribute layout
+ownership while bypassing the support boundary. Each discovered SELECT still
+passes the existing `validate_select` capability check; this is traversal
+completion, not a second SQL parser.
+
+`SupportedDocument` is produced by `validation::parse_supported_postgresql`. It
+proves that every top-level statement and every checked nested construct belongs
+to the fixture-backed support boundary. The full protobuf tree is deliberately
+not exposed to layout code.
 
 ### `StatementTokens`
 
@@ -315,7 +336,7 @@ All statement planners now consume one `LayoutDocument` produced by
 `layout_ir::LayoutDocument::bind`. Its closed `StatementLayout` sum type owns
 SELECT, INSERT, UPDATE, DELETE, and MERGE spans. Shared child records include:
 
-- `QueryBlock` and `QueryClauses` for every SELECT branch;
+- `QueryBlock` and `QueryClauses` for every parser-owned SELECT branch, including its validated relation-source ownership;
 - `WithBlock` for CTE definitions and the owning statement body;
 - `PredicateBlock` for WHERE, HAVING, JOIN ON, and ON CONFLICT predicates;
 - `InsertBlock`, `UpdateBlock`, and `DeleteBlock` for family-specific clauses;
@@ -344,10 +365,15 @@ and structural decision order.
 
 Set-operation binding is likewise owner-bounded. Operators are grouped only
 inside their innermost parenthesized query owner or top-level statement span,
-and the binder records every branch plus any authored wrapper. The planner no
-longer searches forward for the next `SELECT`, and CTE planning does not
-rediscover `UNION` tokens. A set-operation branch therefore cannot claim a
-sibling CTE or escape a derived `FROM (...)` source.
+and the binder records every branch plus any authored wrapper. Query-level
+suffix recognition is capability-gated by the validated set-operation
+`SelectSpec`: only parser-proven `ORDER BY`, limit/offset/fetch, or locking
+clause kinds may shorten the final branch. Shared grammar-aware token ownership
+then locates that proven clause, so qualified identifiers such as `t.order`,
+`t.limit`, or `t.for` cannot terminate a branch merely because of their
+spelling. The planner no longer searches forward for the next `SELECT`, and CTE
+planning does not rediscover `UNION` tokens. A set-operation branch therefore
+cannot claim a sibling CTE or escape a derived `FROM (...)` source.
 
 Standalone comments immediately preceding a Boolean connector are treated as
 leading trivia for that branch. Standalone comments immediately preceding the

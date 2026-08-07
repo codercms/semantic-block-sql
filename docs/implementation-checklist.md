@@ -883,3 +883,53 @@ The earlier MVP checkbox that kept interpreted strings disabled records the hist
   `check`, and byte-idempotent after formatting.
 - [x] Complete formatting, Clippy, full tests, Rustdoc, and `git diff --check`.
 - [ ] Require remote CI before merge.
+
+## Cross-cutting SQL coverage pass
+
+- [x] Replace duplicated SQL success assertions with one shared test contract.
+- [x] Document when to use named inline cases versus fixture pairs.
+- [x] Cover every PostgreSQL join header and SELECT/UPDATE/DELETE/MERGE relation context.
+- [x] Cover authored, inline, width-driven, comment, and blank-line layouts across list
+  and predicate owners.
+- [x] Cover recursive UNION/INTERSECT/EXCEPT trees, branch wrappers, query suffixes,
+  comments, and every supported query container.
+- [x] Cover JSONPath, hstore, array, range, network, full-text, regex, and contextual
+  operator grammar.
+- [x] Pair high-risk supported features with adjacent valid-but-unsupported boundaries.
+- [x] Keep focused regressions instead of copied production queries.
+- [ ] Require remote CI before merge.
+
+
+## PR #35 review hardening
+
+- [x] Reproduce authored multiline `JOIN ... USING (...)` groups in CTEs, views,
+  materialized views, derived queries, INSERT sources, predicate subqueries, and
+  set-operation branches before changing ownership.
+- [x] Seed every lexical `QueryBlock` from a parser-validated `QuerySpec` and
+  carry its typed relation-source ownership into layout.
+- [x] Complete query-spec traversal for parser-owned protobuf fields omitted by
+  the `pg_query` convenience walker, including DML `RETURNING`, `ON CONFLICT`,
+  MERGE branch expressions, SELECT suffix/window fields, and rule actions.
+- [x] Cover qualified final-branch identifiers named `order`, `limit`, `offset`,
+  `fetch`, and `for`.
+- [x] Gate set-operation suffix kinds from validated AST capabilities and use
+  shared grammar-aware token ownership only to locate those proven clauses.
+- [x] Scope SQL-standard and PL/pgSQL routine `LANGUAGE` casing to the actual
+  parser-owned `DefElem.location`; keep same-spelled arguments and type names as
+  identifiers.
+- [x] Preserve AST-owned routine-kind casing and the realistic Go SQL corpus
+  after removing broad routine keyword rendering.
+- [x] Cover contextual `SELECT` outside queries so GRANT and row-security policy
+  grammar cannot be mistaken for lexical query ownership.
+- [x] Preserve parser cardinality for empty-target SELECTs that expose no source
+  anchor, and scope their lexical matching to the owning top-level statement.
+- [x] Scope SQL-standard and PL/pgSQL `RETURNS` casing to the parser-owned return
+  type boundary while preserving same-spelled parameter and type identifiers.
+- [x] Share one completed `pg_query` traversal between `QuerySpec` collection and
+  nested unsupported-syntax validation, including SELECT suffix/window and DML
+  fields omitted by the convenience walker.
+- [x] Reject unsupported SQL/JSON expressions in those omitted fields without
+  rewriting the owning statement.
+- [x] Run every library, binary, and integration test target with the locked
+  offline toolchain, plus formatting, Clippy, Rustdoc, and diff hygiene.
+- [x] Require remote CI before merge.

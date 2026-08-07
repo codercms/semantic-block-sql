@@ -8,7 +8,7 @@ use super::layout_ir::{
 };
 use super::ownership::SupportedDocument;
 use super::structure::TokenStructure;
-use super::tokens::{SqlToken, tokenize};
+use super::tokens::{SqlToken, is_join_start, tokenize};
 use super::{
     FormatDiagnostic, FormatOptions, FormatWarning, INDENT_WIDTH, NotEqualPolicy, SemicolonPolicy,
     SourceRange,
@@ -28,8 +28,8 @@ use ddl::{
 use expressions::{ExpressionSources, owned_expression_ranges};
 use groups::{GroupLayout, LayoutGroup, has_hard_boundary, has_list_hard_boundary};
 use lists::{
-    ParenthesizedListSources, parenthesized_lists, plan_keyword_list, plan_parenthesized_lists,
-    plan_select_lists,
+    ParenthesizedListSources, parenthesized_lists, plan_keyword_list_at_indent,
+    plan_parenthesized_lists, plan_select_lists,
 };
 pub(in crate::formatter) use render::needs_space;
 pub(super) use render::{
@@ -170,6 +170,7 @@ struct ParenthesizedList {
     open: usize,
     close: usize,
     expanded: bool,
+    base_indent: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -214,6 +215,35 @@ pub(super) fn format(
     let create_indexes = layout.create_indexes().cloned().collect::<Vec<_>>();
     let alter_tables = layout.alter_tables().cloned().collect::<Vec<_>>();
     let utilities = layout.utilities().copied().collect::<Vec<_>>();
+    let mut join_using_lists = layout
+        .queries()
+        .iter()
+        .flat_map(|query| {
+            query.from.iter().flat_map(move |source| {
+                source.joins.iter().filter_map(move |join| {
+                    join.using_open.map(|open| {
+                        (
+                            open,
+                            query.indent + depths[open].saturating_sub(query.base_depth),
+                        )
+                    })
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    join_using_lists.extend(
+        updates
+            .iter()
+            .filter_map(|update| update.from.as_ref())
+            .chain(deletes.iter().filter_map(|delete| delete.using.as_ref()))
+            .chain(merges.iter().map(|merge| &merge.source))
+            .flat_map(|source| {
+                source
+                    .joins
+                    .iter()
+                    .filter_map(|join| join.using_open.map(|open| (open, depths[open])))
+            }),
+    );
     let parenthesized_lists = parenthesized_lists(
         &tokens,
         depths,
@@ -222,6 +252,7 @@ pub(super) fn format(
             cases: &cases,
             inserts: &inserts,
             merges: &merges,
+            join_using_lists: &join_using_lists,
             utilities: &utilities,
             values: &values,
         },
@@ -317,6 +348,13 @@ pub(super) fn format(
         options,
         &mut plan,
     );
+    expanded_selects.extend(
+        layout
+            .window_blocks()
+            .iter()
+            .filter(|block| window_block_expands(&context, block))
+            .map(|block| block.query_start),
+    );
     plan_query_clauses(
         &context,
         layout.queries(),
@@ -391,23 +429,30 @@ fn extend_relation_query_starts(
     }
 }
 
+fn window_block_expands(
+    context: &PlanningContext<'_, '_>,
+    block: &super::layout_ir::WindowBlock,
+) -> bool {
+    let authored = context.tokens[block.open + 1..block.close]
+        .iter()
+        .any(|token| token.line_breaks_before > 0);
+    let width = compact_width(context.tokens, block.open, block.close + 1, context.options)
+        + block.base_depth * INDENT_WIDTH;
+    let has_multiple_sections = [block.partition_by, block.order_by, block.frame]
+        .into_iter()
+        .flatten()
+        .count()
+        > 1;
+    authored || has_multiple_sections || width > context.options.soft_line_width
+}
+
 fn plan_window_blocks(
     context: &PlanningContext<'_, '_>,
     blocks: &[super::layout_ir::WindowBlock],
     plan: &mut LayoutPlan,
 ) {
     for block in blocks {
-        let authored = context.tokens[block.open + 1..block.close]
-            .iter()
-            .any(|token| token.line_breaks_before > 0);
-        let width = compact_width(context.tokens, block.open, block.close + 1, context.options)
-            + block.base_depth * INDENT_WIDTH;
-        let has_multiple_sections = [block.partition_by, block.order_by, block.frame]
-            .into_iter()
-            .flatten()
-            .count()
-            > 1;
-        if !authored && !has_multiple_sections && width <= context.options.soft_line_width {
+        if !window_block_expands(context, block) {
             continue;
         }
         let indent = plan.indent_for(block.open, block.base_depth) + 1;
@@ -429,6 +474,25 @@ fn plan_window_blocks(
             1,
             plan.indent_for(block.open, block.base_depth),
         );
+
+        for section in [block.partition_by, block.order_by].into_iter().flatten() {
+            let by = section + 1;
+            let list_end = [block.partition_by, block.order_by, block.frame]
+                .into_iter()
+                .flatten()
+                .filter(|candidate| *candidate > section)
+                .min()
+                .unwrap_or(block.close);
+            plan_keyword_list_at_indent(
+                context,
+                by,
+                list_end,
+                context.depths[by],
+                indent,
+                false,
+                plan,
+            );
+        }
     }
 }
 
@@ -584,20 +648,40 @@ fn plan_query_clauses(
         let base_depth = query.base_depth;
         let indent = query.indent;
         let end = query.end;
-        let has_join = (select + 1..end)
-            .any(|index| depths[index] == base_depth && is_join_start(tokens, index));
+        let has_join = query
+            .from
+            .as_ref()
+            .is_some_and(|source| !source.joins.is_empty());
         let has_expanded_boolean = boolean_ranges
             .iter()
             .any(|range| range.start > select && range.start < end);
         let nested_in_expanded_boolean = boolean_ranges
             .iter()
             .any(|range| range.start < select && select < range.end);
+        let mut has_expanded_clause_list = false;
+        for clause in [query.clauses.group_by, query.clauses.order_by]
+            .into_iter()
+            .flatten()
+        {
+            let by = clause + 1;
+            let list_end = query.clauses.next_after(clause, end);
+            has_expanded_clause_list |=
+                plan_keyword_list_at_indent(context, by, list_end, base_depth, indent, false, plan);
+        }
+        if let Some(window) = query.clauses.window {
+            let list_end = query.clauses.next_after(window, end);
+            has_expanded_clause_list |= plan_keyword_list_at_indent(
+                context, window, list_end, base_depth, indent, false, plan,
+            );
+        }
+
         let width_driven = indent * INDENT_WIDTH + compact_width(tokens, select, end, options)
             > options.soft_line_width;
         let expanded = expanded_selects.contains(&select)
             || has_join
             || has_expanded_boolean
             || nested_in_expanded_boolean
+            || has_expanded_clause_list
             || with_body_starts.contains(&select)
             || cte_body_selects.contains(&select)
             || width_driven;
@@ -628,18 +712,6 @@ fn plan_query_clauses(
                 plan.break_before(index, 1, indent);
             }
         }
-        for clause in [query.clauses.group_by, query.clauses.order_by]
-            .into_iter()
-            .flatten()
-        {
-            let by = clause + 1;
-            let list_end = query.clauses.next_after(clause, end);
-            plan_keyword_list(context, by, list_end, base_depth, false, plan);
-        }
-        if let Some(window) = query.clauses.window {
-            let list_end = query.clauses.next_after(window, end);
-            plan_keyword_list(context, window, list_end, base_depth, false, plan);
-        }
     }
 }
 
@@ -664,6 +736,14 @@ fn plan_set_operations(
         }
         if let Some((_, close)) = operation.owner_wrapper {
             plan.break_before(close, 1, operation.base_depth.saturating_sub(1));
+        }
+        if operation.owner_end < tokens.len()
+            && matches!(
+                tokens[operation.owner_end].kind,
+                Token::Order | Token::Limit | Token::Offset | Token::Fetch | Token::For
+            )
+        {
+            plan.break_before(operation.owner_end, 1, operation.base_depth);
         }
 
         for branch in &operation.branches {
@@ -1085,30 +1165,6 @@ fn compact_width(
         previous = Some(index);
     }
     width
-}
-
-fn is_join_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
-    let kind = tokens[index].kind;
-    if kind == Token::Join {
-        return index == 0
-            || !matches!(
-                tokens[index - 1].kind,
-                Token::Left
-                    | Token::Right
-                    | Token::Full
-                    | Token::InnerP
-                    | Token::Cross
-                    | Token::Natural
-                    | Token::OuterP
-            );
-    }
-    matches!(
-        kind,
-        Token::Left | Token::Right | Token::Full | Token::InnerP | Token::Cross | Token::Natural
-    ) && tokens[index + 1..]
-        .iter()
-        .take(2)
-        .any(|next| next.kind == Token::Join)
 }
 
 struct Writer {

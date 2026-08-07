@@ -850,16 +850,24 @@ exactly one SQL body statement, formats that statement through the canonical
 ordinary-SQL pipeline, indents it one level, and validates the complete routine
 with PostgreSQL structural equivalence and document idempotence. Function
 parameter defaults are parser-owned and preserved; they are not the cause of an
-SQL-body diagnostic. Multi-statement bodies and unreviewed routine attributes
-remain byte-identical with `syntax.unsupported`.
+SQL-body diagnostic. The actual routine `LANGUAGE` option is located from the
+parser-owned `DefElem.location`; same-spelled parameter names and return-type
+identifiers remain identifiers. The outer routine kind (`FUNCTION` or
+`PROCEDURE`) is likewise scoped to an AST-proven routine header instead of a
+document-wide keyword rule. Multi-statement bodies and unreviewed routine
+attributes remain byte-identical with `syntax.unsupported`.
 
 Set operations now use a complete bounded owner rather than an
 operator-plus-next-`SELECT` record. Each owner contains all operators, all
 branches, and authored branch wrappers inside one CTE body, derived source, or
 statement range. Branch cardinality is checked during binding, and planners
-consume the owned branches without a second `UNION` scan. This prevents an
-operator in a parenthesized CTE from claiming the following CTE and gives a
-`FROM (SELECT ... UNION ... SELECT ...)` source one coherent indentation owner.
+consume the owned branches without a second `UNION` scan. Final query suffix
+kinds are accepted only when the validated set-operation AST owns them; the
+shared lexical clause recognizer merely locates those parser-proven suffixes.
+This prevents same-spelled qualified identifiers from truncating a branch,
+prevents an operator in a parenthesized CTE from claiming the following CTE,
+and gives a `FROM (SELECT ... UNION ... SELECT ...)` source one coherent
+indentation owner.
 
 ## Statement-granular opaque policy
 

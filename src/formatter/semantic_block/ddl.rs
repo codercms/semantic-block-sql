@@ -41,7 +41,6 @@ pub(super) fn plan_views(
     plan: &mut LayoutPlan,
 ) {
     for view in statements {
-        plan.break_before(view.as_index, 1, view.span.base_depth);
         plan.break_before(view.query_start, 1, view.span.base_depth);
         if let Some(check) = view.check_option {
             plan.break_before(check, 1, view.span.base_depth);
@@ -62,7 +61,6 @@ pub(super) fn plan_materialized_views(
             let with = open.saturating_sub(1);
             plan.break_before(with, 1, view.span.base_depth);
         }
-        plan.break_before(view.as_index, 1, view.span.base_depth);
         plan.break_before(view.query_start, 1, view.span.base_depth);
         if let Some(data_clause) = view.data_clause {
             plan.break_before(data_clause, 1, view.span.base_depth);
