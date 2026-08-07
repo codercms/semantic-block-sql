@@ -7,6 +7,7 @@ use crate::formatter::ownership::{
     RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
     RelationListSpec, SelectSpec, StatementTokens, UpdateSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
 };
+use crate::formatter::tokens::is_join_start;
 
 pub(super) fn bind_body_start(
     tokens: &[SqlToken<'_>],
@@ -43,7 +44,12 @@ pub(super) fn bind_select(
     let depths = structure.depths();
     let end = statement.range.end;
     let base = statement.base_depth;
-    verify_select_shape(tokens, depths, body_start, end, base, spec, "SELECT")?;
+    let shape_start = if spec.set_operations > 0 {
+        statement.range.start
+    } else {
+        body_start
+    };
+    verify_select_shape(tokens, depths, shape_start, end, base, spec, "SELECT")?;
     let from_index = if spec.set_operations == 0 {
         find_from_clause(tokens, depths, body_start + 1, end, base)
     } else {
@@ -1773,10 +1779,10 @@ pub(super) fn bind_relation_source(
             .find(|index| depths[*index] == join_depth && tokens[*index].kind == Token::Using);
         let natural = header.iter().any(|token| token.kind == Token::Natural);
         let cross = header.iter().any(|token| token.kind == Token::Cross);
-        let constraint = match (natural, cross, on, using) {
-            (true, false, None, None) => RelationJoinConstraintSpec::Natural,
-            (false, true, None, None) => RelationJoinConstraintSpec::Cross,
-            (false, false, Some(_), None) => RelationJoinConstraintSpec::On,
+        let (constraint, using_open) = match (natural, cross, on, using) {
+            (true, false, None, None) => (RelationJoinConstraintSpec::Natural, None),
+            (false, true, None, None) => (RelationJoinConstraintSpec::Cross, None),
+            (false, false, Some(_), None) => (RelationJoinConstraintSpec::On, None),
             (false, false, None, Some(using)) => {
                 let open = (using + 1..next_boundary)
                     .find(|index| {
@@ -1787,9 +1793,12 @@ pub(super) fn bind_relation_source(
                             "{owner} JOIN USING has no column list"
                         ))
                     })?;
-                RelationJoinConstraintSpec::Using {
-                    columns: parenthesized_item_count(tokens, structure, open)?,
-                }
+                (
+                    RelationJoinConstraintSpec::Using {
+                        columns: parenthesized_item_count(tokens, structure, open)?,
+                    },
+                    Some(open),
+                )
             }
             _ => {
                 return Err(FormatDiagnostic::Ownership(format!(
@@ -1802,6 +1811,7 @@ pub(super) fn bind_relation_source(
             start,
             depth: join_depth,
             predicate: on.map(|on| (on, next_boundary)),
+            using_open,
         });
     }
     actual_specs.sort_unstable();
@@ -1843,7 +1853,17 @@ fn set_operation_count(
     end: usize,
     depth: usize,
 ) -> usize {
-    (start..end)
+    let Some((start, end)) = trimmed_syntax_range(tokens, start, end) else {
+        return 0;
+    };
+
+    if tokens[start].kind == Token::Ascii40
+        && matching_parenthesis_at_depth(tokens, depths, start, end) == Some(end - 1)
+    {
+        return set_operation_count(tokens, depths, start + 1, end - 1, depth + 1);
+    }
+
+    let operators: Vec<_> = (start..end)
         .filter(|index| {
             depths[*index] == depth
                 && matches!(
@@ -1851,7 +1871,64 @@ fn set_operation_count(
                     Token::Union | Token::Intersect | Token::Except
                 )
         })
-        .count()
+        .collect();
+    if operators.is_empty() {
+        return 0;
+    }
+
+    let mut total = operators.len();
+    let mut branch_start = start;
+    for boundary in operators.iter().copied().chain(std::iter::once(end)) {
+        let mut branch_end = boundary;
+        while branch_end > branch_start && tokens[branch_end - 1].is_comment() {
+            branch_end -= 1;
+        }
+        let mut syntax_start = branch_start;
+        while syntax_start < branch_end && tokens[syntax_start].is_comment() {
+            syntax_start += 1;
+        }
+        if syntax_start < branch_end
+            && tokens[syntax_start].kind == Token::Ascii40
+            && matching_parenthesis_at_depth(tokens, depths, syntax_start, branch_end)
+                == Some(branch_end - 1)
+        {
+            total +=
+                set_operation_count(tokens, depths, syntax_start + 1, branch_end - 1, depth + 1);
+        }
+
+        branch_start = boundary.saturating_add(1);
+        while branch_start < end && tokens[branch_start].is_comment() {
+            branch_start += 1;
+        }
+        if branch_start < end && matches!(tokens[branch_start].kind, Token::All | Token::Distinct) {
+            branch_start += 1;
+        }
+    }
+    total
+}
+
+fn trimmed_syntax_range(
+    tokens: &[SqlToken<'_>],
+    mut start: usize,
+    mut end: usize,
+) -> Option<(usize, usize)> {
+    while start < end && tokens[start].is_comment() {
+        start += 1;
+    }
+    while start < end && (tokens[end - 1].is_comment() || tokens[end - 1].kind == Token::Ascii59) {
+        end -= 1;
+    }
+    (start < end).then_some((start, end))
+}
+
+fn matching_parenthesis_at_depth(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    open: usize,
+    end: usize,
+) -> Option<usize> {
+    let depth = depths[open];
+    (open + 1..end).find(|index| tokens[*index].kind == Token::Ascii41 && depths[*index] == depth)
 }
 
 fn require_presence(
@@ -2018,30 +2095,6 @@ fn is_alter_action_start(kind: Token) -> bool {
             | Token::Detach
             | Token::Validate
     )
-}
-
-fn is_join_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
-    let kind = tokens[index].kind;
-    if kind == Token::Join {
-        return index == 0
-            || !matches!(
-                tokens[index - 1].kind,
-                Token::Left
-                    | Token::Right
-                    | Token::Full
-                    | Token::InnerP
-                    | Token::Cross
-                    | Token::Natural
-                    | Token::OuterP
-            );
-    }
-    matches!(
-        kind,
-        Token::Left | Token::Right | Token::Full | Token::InnerP | Token::Cross | Token::Natural
-    ) && tokens[index + 1..]
-        .iter()
-        .take(2)
-        .any(|next| next.kind == Token::Join)
 }
 
 fn bound_override(

@@ -21,6 +21,71 @@ impl SqlToken<'_> {
     }
 }
 
+/// Returns true only for the first significant token of a complete JOIN header.
+///
+/// PostgreSQL headers may contain comments between `NATURAL`, the join type,
+/// `OUTER`, and `JOIN`; callers need one shared definition so query and DML
+/// relation planners break before the same token.
+pub(super) fn is_join_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if join_keyword(tokens, index).is_none() {
+        return false;
+    }
+
+    let previous = previous_non_comment(tokens, index).map(|index| tokens[index].kind);
+    match tokens[index].kind {
+        Token::Natural => true,
+        Token::InnerP | Token::Left | Token::Right | Token::Full | Token::Cross => {
+            previous != Some(Token::Natural)
+        }
+        Token::Join => !previous.is_some_and(|kind| {
+            matches!(
+                kind,
+                Token::Natural
+                    | Token::InnerP
+                    | Token::Left
+                    | Token::Right
+                    | Token::Full
+                    | Token::Cross
+                    | Token::OuterP
+            )
+        }),
+        _ => false,
+    }
+}
+
+fn join_keyword(tokens: &[SqlToken<'_>], start: usize) -> Option<usize> {
+    let mut index = start;
+    if tokens.get(index)?.kind == Token::Natural {
+        index = next_non_comment(tokens, index)?;
+    }
+
+    match tokens.get(index)?.kind {
+        Token::Join => Some(index),
+        Token::InnerP | Token::Cross => {
+            let join = next_non_comment(tokens, index)?;
+            (tokens[join].kind == Token::Join).then_some(join)
+        }
+        Token::Left | Token::Right | Token::Full => {
+            let mut join = next_non_comment(tokens, index)?;
+            if tokens[join].kind == Token::OuterP {
+                join = next_non_comment(tokens, join)?;
+            }
+            (tokens[join].kind == Token::Join).then_some(join)
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn previous_non_comment(tokens: &[SqlToken<'_>], index: usize) -> Option<usize> {
+    (0..index)
+        .rev()
+        .find(|candidate| !tokens[*candidate].is_comment())
+}
+
+pub(super) fn next_non_comment(tokens: &[SqlToken<'_>], index: usize) -> Option<usize> {
+    (index + 1..tokens.len()).find(|candidate| !tokens[*candidate].is_comment())
+}
+
 pub(super) fn tokenize(source: &str) -> Result<Vec<SqlToken<'_>>, FormatDiagnostic> {
     let scanned = pg_query::scan(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlScan(error.to_string()))?;

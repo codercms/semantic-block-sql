@@ -4,6 +4,7 @@ use pg_query::protobuf::Token;
 
 use super::*;
 use crate::formatter::ownership::{StatementSpec, StatementTokens, ViewCheckSpec};
+use crate::formatter::tokens::is_join_start;
 
 pub(super) fn bind_queries(
     tokens: &[SqlToken<'_>],
@@ -177,9 +178,11 @@ pub(super) fn bind_set_operations(
                 })
                 .max_by_key(|(open, _)| **open)
                 .map(|(open, close)| (*open, *close));
-            let (owner_start, owner_end) = owner_wrapper
+            let (owner_start, raw_owner_end) = owner_wrapper
                 .map(|(open, close)| (open + 1, close))
                 .unwrap_or((statement.range.start, statement.range.end));
+            let owner_end =
+                set_operation_owner_end(tokens, depths, operator, raw_owner_end, base_depth);
             owners
                 .entry((owner_start, owner_end, base_depth))
                 .or_insert_with(|| (owner_wrapper, Vec::new()))
@@ -239,6 +242,29 @@ pub(super) fn bind_set_operations(
     }
     result.sort_by_key(|operation| operation.owner_start);
     Ok(result)
+}
+
+fn set_operation_owner_end(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    last_known_operator: usize,
+    end: usize,
+    base_depth: usize,
+) -> usize {
+    (last_known_operator + 1..end)
+        .find(|index| {
+            depths[*index] == base_depth
+                && matches!(
+                    tokens[*index].kind,
+                    Token::Order
+                        | Token::Limit
+                        | Token::Offset
+                        | Token::Fetch
+                        | Token::For
+                        | Token::Ascii59
+                )
+        })
+        .unwrap_or(end)
 }
 
 fn bind_set_operation_branch(
@@ -374,6 +400,7 @@ pub(super) fn bind_window_blocks(
                 }
             }
             result.push(WindowBlock {
+                query_start: query.select,
                 open,
                 close,
                 partition_by,
@@ -720,28 +747,4 @@ fn is_query_clause_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
             .is_some_and(|next| next.kind == Token::By),
         _ => false,
     }
-}
-
-fn is_join_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
-    let kind = tokens[index].kind;
-    if kind == Token::Join {
-        return index == 0
-            || !matches!(
-                tokens[index - 1].kind,
-                Token::Left
-                    | Token::Right
-                    | Token::Full
-                    | Token::InnerP
-                    | Token::Cross
-                    | Token::Natural
-                    | Token::OuterP
-            );
-    }
-    matches!(
-        kind,
-        Token::Left | Token::Right | Token::Full | Token::InnerP | Token::Cross | Token::Natural
-    ) && tokens[index + 1..]
-        .iter()
-        .take(2)
-        .any(|next| next.kind == Token::Join)
 }

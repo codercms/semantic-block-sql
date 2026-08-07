@@ -1,29 +1,7 @@
-use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, check_sql, format_sql, validate_equivalent};
+mod support;
 
-fn assert_format(source: &str, expected: &str, options: &FormatOptions) {
-    let formatted = format_sql(source, options).expect("format succeeds");
-    assert_eq!(formatted.output, expected);
-    assert!(
-        formatted.warnings.is_empty(),
-        "warnings: {:?}",
-        formatted.warnings
-    );
-    validate_equivalent(source, expected).expect("semantic equivalence");
-    assert_eq!(
-        format_sql(expected, options)
-            .expect("second format succeeds")
-            .output,
-        expected,
-        "formatting must be idempotent"
-    );
-    let checked = check_sql(expected, options);
-    assert!(
-        checked.compliant,
-        "formatted SQL must pass check: {:?}",
-        checked.diagnostics
-    );
-}
+use semblock::FormatOptions;
+use support::assert_sql_with as assert_format;
 
 #[test]
 fn formats_casts_array_types_constructors_subscripts_and_slices() {
@@ -74,7 +52,7 @@ fn lowercases_multiword_type_names_without_reclassifying_time_zone_syntax() {
     CAST(value AS timestamp(3) WITH time zone) AS timestamp_value,
     value::double precision AS double_value,
     value::character varying(20) AS text_value,
-    created_at at time zone 'UTC' AS utc_value;";
+    created_at AT TIME ZONE 'UTC' AS utc_value;";
 
     assert_format(source, expected, &FormatOptions::default());
 }

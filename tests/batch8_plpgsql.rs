@@ -1,17 +1,8 @@
-use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, Severity, check_sql, format_sql, format_sql_result};
+mod support;
 
-fn assert_fixture(source: &str, expected: &str) {
-    let formatted = format_sql(source, &FormatOptions::default()).expect("format succeeds");
-    assert_eq!(formatted.output, expected);
-    assert_eq!(
-        format_sql(expected, &FormatOptions::default())
-            .expect("idempotent format succeeds")
-            .output,
-        expected
-    );
-    assert!(check_sql(expected, &FormatOptions::default()).compliant);
-}
+use pretty_assertions::assert_eq;
+use semblock::{FormatOptions, Severity, format_sql_result};
+use support::assert_sql_layout_only as assert_fixture;
 
 #[test]
 fn formats_parser_backed_plpgsql_and_preserves_dollar_tags() {

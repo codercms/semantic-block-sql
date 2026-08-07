@@ -7,6 +7,7 @@ pub(super) struct ParenthesizedListSources<'a> {
     pub cases: &'a [CaseRange],
     pub inserts: &'a [InsertBlock],
     pub merges: &'a [MergeBlock],
+    pub join_using_lists: &'a [usize],
     pub utilities: &'a [UtilityBlock],
     pub values: &'a [ValuesBlock],
 }
@@ -25,6 +26,7 @@ pub(super) fn parenthesized_lists(
             || !(is_function_call_open(tokens, open)
                 || is_insert_list_open(sources.inserts, open)
                 || is_merge_list_open(sources.merges, open)
+                || sources.join_using_lists.contains(&open)
                 || is_create_enum_list_open(tokens, sources.utilities, open)
                 || is_values_list_open(sources.values, open))
         {
@@ -166,17 +168,37 @@ pub(super) fn plan_keyword_list(
     base_depth: usize,
     force_expand: bool,
     plan: &mut LayoutPlan,
-) {
+) -> bool {
+    plan_keyword_list_at_indent(
+        context,
+        keyword,
+        end,
+        base_depth,
+        base_depth,
+        force_expand,
+        plan,
+    )
+}
+
+pub(super) fn plan_keyword_list_at_indent(
+    context: &PlanningContext<'_, '_>,
+    keyword: usize,
+    end: usize,
+    syntax_depth: usize,
+    owner_indent: usize,
+    force_expand: bool,
+    plan: &mut LayoutPlan,
+) -> bool {
     let tokens = context.tokens;
     let depths = context.depths;
     let cases = context.cases;
     let lists = context.lists;
     let options = context.options;
     let list_end = (keyword + 1..end)
-        .find(|&index| depths[index] == base_depth && tokens[index].kind == Token::Ascii59)
+        .find(|&index| depths[index] == syntax_depth && tokens[index].kind == Token::Ascii59)
         .unwrap_or(end);
     if keyword + 1 >= list_end {
-        return;
+        return false;
     }
 
     let mut items = split_list_items(
@@ -186,13 +208,13 @@ pub(super) fn plan_keyword_list(
         lists,
         keyword + 1,
         list_end,
-        base_depth,
+        syntax_depth,
     );
     if items.is_empty() {
-        return;
+        return false;
     }
 
-    let indent = base_depth + 1;
+    let indent = owner_indent + 1;
     let authored = tokens[items[0].start].line_breaks_before > 0
         || items
             .iter()
@@ -200,7 +222,7 @@ pub(super) fn plan_keyword_list(
             .any(|item| tokens[item.start].line_breaks_before > 0);
     let has_complex = items.iter().any(|item| item.complex);
     let compact_line_width =
-        base_depth * INDENT_WIDTH + compact_width(tokens, keyword, list_end, options);
+        owner_indent * INDENT_WIDTH + compact_width(tokens, keyword, list_end, options);
     let layout = LayoutGroup {
         compact_line_width,
         structurally_complex: has_complex,
@@ -211,7 +233,7 @@ pub(super) fn plan_keyword_list(
     }
     .decide(options);
     if layout == GroupLayout::Compact {
-        return;
+        return false;
     }
 
     for item in &items {
@@ -245,6 +267,8 @@ pub(super) fn plan_keyword_list(
             plan.set_indent(item.start..item.end, indent);
         }
     }
+
+    true
 }
 
 pub(super) fn plan_owned_delimited_list(

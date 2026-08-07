@@ -1,18 +1,8 @@
-use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, Severity, check_sql, format_sql, format_sql_result};
+mod support;
 
-fn assert_fixture(source: &str, expected: &str) {
-    let options = FormatOptions::default();
-    let formatted = format_sql(source, &options).expect("utility formatting succeeds");
-    assert_eq!(formatted.output, expected);
-    assert_eq!(
-        format_sql(expected, &options)
-            .expect("utility formatting is idempotent")
-            .output,
-        expected
-    );
-    assert!(check_sql(expected, &options).compliant);
-}
+use pretty_assertions::assert_eq;
+use semblock::{FormatOptions, Severity, format_sql, format_sql_result};
+use support::assert_sql_layout_only as assert_fixture;
 
 #[test]
 fn formats_common_operational_and_migration_utilities() {

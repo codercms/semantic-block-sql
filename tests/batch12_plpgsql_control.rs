@@ -1,20 +1,8 @@
-use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, Severity, UnsupportedPolicy, check_sql, format_sql};
+mod support;
 
-fn assert_fixture(source: &str, expected: &str) {
-    let options = FormatOptions::default();
-    let formatted = format_sql(source, &options).expect("format succeeds");
-    assert_eq!(formatted.output, expected);
-    assert_eq!(
-        format_sql(expected, &options)
-            .expect("second format succeeds")
-            .output,
-        expected,
-        "formatting must be idempotent",
-    );
-    let checked = check_sql(expected, &options);
-    assert!(checked.compliant, "diagnostics: {:?}", checked.diagnostics);
-}
+use pretty_assertions::assert_eq;
+use semblock::{FormatOptions, Severity, UnsupportedPolicy, format_sql};
+use support::assert_sql_layout_only as assert_fixture;
 
 #[test]
 fn formats_loops_foreach_and_labeled_exit_continue() {

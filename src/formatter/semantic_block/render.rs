@@ -1,6 +1,7 @@
 use pg_query::protobuf::{KeywordKind, Token};
 
 use super::*;
+use crate::formatter::tokens::{next_non_comment, previous_non_comment};
 
 pub(in crate::formatter) fn render_token(
     tokens: &[SqlToken<'_>],
@@ -26,6 +27,9 @@ pub(in crate::formatter) fn render_token(
         || is_partition_strategy_keyword(tokens, index)
         || is_transaction_control_keyword(tokens, index)
     {
+        return token.text.to_uppercase();
+    }
+    if is_at_time_zone_keyword(tokens, index) || is_contextual_grammar_keyword(tokens, index) {
         return token.text.to_uppercase();
     }
     if token.kind == Token::Interval {
@@ -305,6 +309,127 @@ fn is_transaction_control_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool
             tokens[index].kind,
             Token::Commit | Token::Transaction | Token::Work | Token::Chain
         ),
+        _ => false,
+    }
+}
+
+fn is_contextual_grammar_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    match tokens[index].kind {
+        Token::Like | Token::Ilike => is_pattern_match_operator(tokens, index),
+        Token::Similar => {
+            next_non_comment(tokens, index).is_some_and(|next| tokens[next].kind == Token::To)
+        }
+        Token::To => previous_non_comment(tokens, index)
+            .is_some_and(|previous| tokens[previous].kind == Token::Similar),
+        Token::Unknown => previous_non_comment(tokens, index)
+            .is_some_and(|previous| tokens[previous].kind == Token::Is),
+        Token::Operator => {
+            next_non_comment(tokens, index).is_some_and(|next| tokens[next].kind == Token::Ascii40)
+        }
+        Token::Language => is_language_clause(tokens, index),
+        _ => false,
+    }
+}
+
+fn is_pattern_match_operator(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    let Some(previous) = previous_non_comment(tokens, index) else {
+        return false;
+    };
+    let Some(next) = next_non_comment(tokens, index) else {
+        return false;
+    };
+    tokens[previous].kind != Token::Ascii46
+        && tokens[next].kind != Token::Ascii46
+        && is_expression_tail(&tokens[previous])
+        && is_expression_head(&tokens[next])
+}
+
+fn is_expression_tail(token: &SqlToken<'_>) -> bool {
+    matches!(
+        token.kind,
+        Token::Ident
+            | Token::Iconst
+            | Token::Fconst
+            | Token::Sconst
+            | Token::Usconst
+            | Token::Param
+            | Token::Ascii41
+            | Token::Ascii93
+            | Token::TrueP
+            | Token::FalseP
+            | Token::NullP
+            | Token::CurrentDate
+            | Token::CurrentTime
+            | Token::CurrentTimestamp
+            | Token::Localtime
+            | Token::Localtimestamp
+    ) || !matches!(
+        token.keyword_kind,
+        KeywordKind::NoKeyword | KeywordKind::ReservedKeyword
+    )
+}
+
+fn is_expression_head(token: &SqlToken<'_>) -> bool {
+    matches!(
+        token.kind,
+        Token::Ident
+            | Token::Iconst
+            | Token::Fconst
+            | Token::Sconst
+            | Token::Usconst
+            | Token::Param
+            | Token::Ascii40
+            | Token::Ascii91
+            | Token::TrueP
+            | Token::FalseP
+            | Token::NullP
+            | Token::CurrentDate
+            | Token::CurrentTime
+            | Token::CurrentTimestamp
+            | Token::Localtime
+            | Token::Localtimestamp
+    ) || !matches!(
+        token.keyword_kind,
+        KeywordKind::NoKeyword | KeywordKind::ReservedKeyword
+    )
+}
+
+fn is_language_clause(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if previous_non_comment(tokens, index)
+        .is_some_and(|previous| tokens[previous].kind == Token::Create)
+    {
+        return true;
+    }
+
+    let statement_start = (0..index)
+        .rev()
+        .find(|candidate| tokens[*candidate].kind == Token::Ascii59)
+        .map_or(0, |semicolon| semicolon + 1);
+    let has_create_routine = (statement_start..index).any(|candidate| {
+        tokens[candidate].kind == Token::Create
+            && (candidate + 1..index).any(|following| {
+                matches!(tokens[following].kind, Token::Function | Token::Procedure)
+            })
+    });
+    let has_do = (statement_start..index).any(|candidate| tokens[candidate].kind == Token::Do);
+    has_create_routine || has_do
+}
+
+fn is_at_time_zone_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    match tokens[index].kind {
+        Token::At => {
+            next_non_comment(tokens, index).is_some_and(|next| tokens[next].kind == Token::Time)
+        }
+        Token::Time => {
+            previous_non_comment(tokens, index)
+                .is_some_and(|previous| tokens[previous].kind == Token::At)
+                && next_non_comment(tokens, index)
+                    .is_some_and(|next| tokens[next].kind == Token::Zone)
+        }
+        Token::Zone => previous_non_comment(tokens, index).is_some_and(|time| {
+            tokens[time].kind == Token::Time
+                && previous_non_comment(tokens, time).is_some_and(|at| tokens[at].kind == Token::At)
+        }),
         _ => false,
     }
 }

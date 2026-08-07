@@ -883,3 +883,18 @@ The earlier MVP checkbox that kept interpreted strings disabled records the hist
   `check`, and byte-idempotent after formatting.
 - [x] Complete formatting, Clippy, full tests, Rustdoc, and `git diff --check`.
 - [ ] Require remote CI before merge.
+
+## Cross-cutting SQL coverage pass
+
+- [x] Replace duplicated SQL success assertions with one shared test contract.
+- [x] Document when to use named inline cases versus fixture pairs.
+- [x] Cover every PostgreSQL join header and SELECT/UPDATE/DELETE/MERGE relation context.
+- [x] Cover authored, inline, width-driven, comment, and blank-line layouts across list
+  and predicate owners.
+- [x] Cover recursive UNION/INTERSECT/EXCEPT trees, branch wrappers, query suffixes,
+  comments, and every supported query container.
+- [x] Cover JSONPath, hstore, array, range, network, full-text, regex, and contextual
+  operator grammar.
+- [x] Pair high-risk supported features with adjacent valid-but-unsupported boundaries.
+- [x] Keep focused regressions instead of copied production queries.
+- [ ] Require remote CI before merge.

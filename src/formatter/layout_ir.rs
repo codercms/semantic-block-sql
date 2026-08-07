@@ -149,6 +149,7 @@ pub(super) struct SetOperationBlock {
 /// Parenthesized window or ordered-aggregate specification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct WindowBlock {
+    pub query_start: usize,
     pub open: usize,
     pub close: usize,
     pub partition_by: Option<usize>,
@@ -196,6 +197,7 @@ pub(super) struct RelationJoinBlock {
     pub start: usize,
     pub depth: usize,
     pub predicate: Option<(usize, usize)>,
+    pub using_open: Option<usize>,
 }
 
 /// FROM/USING relation-list ownership shared by UPDATE, DELETE, and MERGE.
