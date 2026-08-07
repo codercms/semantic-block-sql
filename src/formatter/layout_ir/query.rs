@@ -84,6 +84,8 @@ pub(super) fn bind_queries(
         }
     }
 
+    unanchored_groups.sort_by_key(|(_, spec, _)| !spec.has_with);
+
     for (statement_index, spec, expected) in unanchored_groups {
         let statement = statements.get(statement_index).ok_or_else(|| {
             FormatDiagnostic::Ownership(format!(
@@ -224,8 +226,55 @@ fn query_matches_spec(
     {
         return false;
     }
-    query.clauses.from.is_some() != spec.from.items.is_empty()
+    let compare_suffixes = !is_unwrapped_set_operation_branch(tokens, structure, query);
+    (!spec.has_with || query_has_with(tokens, structure, query))
+        && query.clauses.from.is_some() != spec.from.items.is_empty()
+        && (!compare_suffixes || query.clauses.order_by.is_some() == spec.has_order_by)
+        && (!compare_suffixes || query.clauses.offset.is_some() == spec.has_limit_offset)
+        && (!compare_suffixes
+            || (query.clauses.limit.is_some() || query.clauses.fetch.is_some())
+                == spec.has_limit_count)
         && bind_query_relation_source(tokens, structure, query, spec).is_ok()
+}
+
+fn query_has_with(tokens: &[SqlToken<'_>], structure: &TokenStructure, query: &QueryBlock) -> bool {
+    let start = query.wrapper.map_or_else(
+        || {
+            (0..query.select)
+                .rev()
+                .find(|index| tokens[*index].kind == Token::Ascii59)
+                .map_or(0, |semicolon| semicolon + 1)
+        },
+        |(open, _)| open + 1,
+    );
+    (start..query.select).any(|index| {
+        structure.depths()[index] == query.base_depth
+            && tokens[index].kind == Token::With
+            && tokens
+                .get(index + 1)
+                .is_some_and(|next| next.kind != Token::Ascii40)
+    })
+}
+
+fn is_unwrapped_set_operation_branch(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    query: &QueryBlock,
+) -> bool {
+    if query.wrapper.is_some() {
+        return false;
+    }
+    let start = (0..query.select)
+        .rev()
+        .find(|index| tokens[*index].kind == Token::Ascii59)
+        .map_or(0, |semicolon| semicolon + 1);
+    (start..query.select).any(|index| {
+        structure.depths()[index] == query.base_depth
+            && matches!(
+                tokens[index].kind,
+                Token::Union | Token::Intersect | Token::Except
+            )
+    })
 }
 
 fn bind_query_relation_source(

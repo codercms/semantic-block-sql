@@ -162,3 +162,34 @@ fn binds_identical_unanchored_select_owners_without_collapsing_them() {
         ),
     ]);
 }
+
+#[test]
+fn distinguishes_heterogeneous_unanchored_select_owners() {
+    assert_cases(&[
+        SqlCase::new(
+            "LIMIT versus plain sibling",
+            "select exists(select from a limit 1), exists(select from a);",
+            "SELECT\n    EXISTS (SELECT FROM a LIMIT 1),\n    EXISTS (SELECT FROM a);",
+        ),
+        SqlCase::new(
+            "OFFSET versus plain sibling",
+            "select exists(select from a offset 1), exists(select from a);",
+            "SELECT\n    EXISTS (SELECT FROM a OFFSET 1),\n    EXISTS (SELECT FROM a);",
+        ),
+        SqlCase::new(
+            "ORDER BY versus plain sibling",
+            "select exists(select from a order by a.id), exists(select from a);",
+            "SELECT\n    EXISTS (SELECT FROM a ORDER BY a.id),\n    EXISTS (SELECT FROM a);",
+        ),
+        SqlCase::new(
+            "FETCH versus plain sibling",
+            "select exists(select from a fetch first 1 row only), exists(select from a);",
+            "SELECT\n    EXISTS (SELECT FROM a FETCH FIRST 1 ROW ONLY),\n    EXISTS (SELECT FROM a);",
+        ),
+        SqlCase::new(
+            "WITH versus plain sibling",
+            "select exists(with x as(select 1) select from a), exists(select from a);",
+            "SELECT\n    EXISTS (WITH x AS (SELECT 1) SELECT FROM a),\n    EXISTS (SELECT FROM a);",
+        ),
+    ]);
+}
