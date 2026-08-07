@@ -326,7 +326,7 @@ fn is_contextual_grammar_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool 
         Token::Operator => {
             next_non_comment(tokens, index).is_some_and(|next| tokens[next].kind == Token::Ascii40)
         }
-        Token::Language => is_language_clause(tokens, index),
+        Token::Language => is_create_language_clause(tokens, index),
         _ => false,
     }
 }
@@ -394,25 +394,9 @@ fn is_expression_head(token: &SqlToken<'_>) -> bool {
     )
 }
 
-fn is_language_clause(tokens: &[SqlToken<'_>], index: usize) -> bool {
-    if previous_non_comment(tokens, index)
+fn is_create_language_clause(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    previous_non_comment(tokens, index)
         .is_some_and(|previous| tokens[previous].kind == Token::Create)
-    {
-        return true;
-    }
-
-    let statement_start = (0..index)
-        .rev()
-        .find(|candidate| tokens[*candidate].kind == Token::Ascii59)
-        .map_or(0, |semicolon| semicolon + 1);
-    let has_create_routine = (statement_start..index).any(|candidate| {
-        tokens[candidate].kind == Token::Create
-            && (candidate + 1..index).any(|following| {
-                matches!(tokens[following].kind, Token::Function | Token::Procedure)
-            })
-    });
-    let has_do = (statement_start..index).any(|candidate| tokens[candidate].kind == Token::Do);
-    has_create_routine || has_do
 }
 
 fn is_at_time_zone_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {

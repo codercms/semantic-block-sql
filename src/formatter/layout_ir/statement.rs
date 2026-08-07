@@ -7,7 +7,7 @@ use crate::formatter::ownership::{
     RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
     RelationListSpec, SelectSpec, StatementTokens, UpdateSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
 };
-use crate::formatter::tokens::is_join_start;
+use crate::formatter::tokens::{is_join_start, is_query_clause_start};
 
 pub(super) fn bind_body_start(
     tokens: &[SqlToken<'_>],
@@ -104,7 +104,7 @@ pub(super) fn bind_select(
     })
 }
 
-fn verify_select_shape(
+pub(super) fn verify_select_shape(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
     body_start: usize,
@@ -124,14 +124,11 @@ fn verify_select_shape(
         // its recursively validated branches.
         return Ok(());
     }
-    let window = find_kind(
-        tokens,
-        depths,
-        body_start + 1,
-        end,
-        base_depth,
-        Token::Window,
-    );
+    let window = (body_start + 1..end).find(|index| {
+        depths[*index] == base_depth
+            && tokens[*index].kind == Token::Window
+            && is_query_clause_start(tokens, *index)
+    });
     let named_windows = window
         .map(|window| {
             let list_end = (window + 1..end)
@@ -141,6 +138,7 @@ fn verify_select_shape(
                             tokens[*index].kind,
                             Token::Order | Token::Limit | Token::Offset | Token::Fetch | Token::For
                         )
+                        && is_query_clause_start(tokens, *index)
                 })
                 .unwrap_or(end);
             item_count(tokens, depths, window + 1, list_end, base_depth)
@@ -155,14 +153,22 @@ fn verify_select_shape(
     require_presence(
         owner,
         "INTO clause",
-        find_kind(tokens, depths, body_start + 1, end, base_depth, Token::Into).is_some(),
+        (body_start + 1..end).any(|index| {
+            depths[index] == base_depth
+                && tokens[index].kind == Token::Into
+                && is_query_clause_start(tokens, index)
+        }),
         spec.has_into,
     )?;
     require_count(
         owner,
         "locking-clause count",
         (body_start + 1..end)
-            .filter(|index| depths[*index] == base_depth && tokens[*index].kind == Token::For)
+            .filter(|index| {
+                depths[*index] == base_depth
+                    && tokens[*index].kind == Token::For
+                    && is_query_clause_start(tokens, *index)
+            })
             .count(),
         spec.locking_clauses,
     )?;

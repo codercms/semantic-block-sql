@@ -14,8 +14,23 @@ pub(super) fn format_single_routine(
     body_options.semicolon_policy = SemicolonPolicy::Preserve;
     let formatted_body = super::format_supported_statement(body, &body_options)?;
 
-    let header = super::procedural::normalize_outer_tokens(&source[..header_end], options)?;
-    let footer = super::procedural::normalize_outer_tokens(&source[footer_start..], options)?;
+    let outer_tokens = super::procedural::OuterTokenOwnership {
+        language_location: routine_language_location(statement),
+        routine_kind_location: super::procedural::routine_kind_location(
+            source,
+            statement.is_procedure,
+        )?,
+    };
+    let header = super::procedural::normalize_outer_tokens(
+        &source[..header_end],
+        options,
+        outer_tokens.within(0, header_end),
+    )?;
+    let footer = super::procedural::normalize_outer_tokens(
+        &source[footer_start..],
+        options,
+        outer_tokens.within(footer_start, source.len()),
+    )?;
     let mut output = String::with_capacity(source.len() + formatted_body.output.len());
     output.push_str(header.trim_end());
     output.push('\n');
@@ -47,6 +62,17 @@ pub(super) fn format_single_routine(
         output,
         warnings: Vec::new(),
         diagnostics: Vec::new(),
+    })
+}
+
+fn routine_language_location(statement: &CreateFunctionStmt) -> Option<usize> {
+    statement.options.iter().find_map(|option| {
+        let Node::DefElem(option) = option.node.as_ref()? else {
+            return None;
+        };
+        (option.defname == "language")
+            .then(|| usize::try_from(option.location).ok())
+            .flatten()
     })
 }
 

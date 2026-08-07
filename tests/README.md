@@ -26,7 +26,8 @@ those embedded languages byte-for-byte.
 - `coverage_layout_matrix.rs`: the shared compact/expanded policy across every list
   and predicate owner.
 - `coverage_joins.rs`: every PostgreSQL join header, relation-source context, and
-  join-constraint boundary.
+  join-constraint boundary, including nested query owners and parser-walker
+  omission fields such as DML `RETURNING`, `ON CONFLICT`, and MERGE branches.
 - `coverage_operators.rs`: high-variation PostgreSQL operator families and contextual
   grammar casing.
 - `coverage_set_operations.rs`: recursive set-operation ownership, wrappers, suffixes,

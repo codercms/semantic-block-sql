@@ -100,3 +100,34 @@ fn keeps_comments_attached_to_their_operator_or_branch() {
         ),
     ]);
 }
+
+#[test]
+fn qualified_suffix_words_remain_branch_identifiers() {
+    assert_cases(&[
+        SqlCase::new(
+            "qualified ORDER identifier",
+            "select 1 union select t.order from t;",
+            "SELECT 1\n\nUNION\n\nSELECT t.order FROM t;",
+        ),
+        SqlCase::new(
+            "qualified LIMIT identifier",
+            "select 1 union select t.limit from t;",
+            "SELECT 1\n\nUNION\n\nSELECT t.limit FROM t;",
+        ),
+        SqlCase::new(
+            "qualified OFFSET identifier",
+            "select 1 union select t.offset from t;",
+            "SELECT 1\n\nUNION\n\nSELECT t.offset FROM t;",
+        ),
+        SqlCase::new(
+            "qualified FETCH identifier",
+            "select 1 union select t.fetch from t;",
+            "SELECT 1\n\nUNION\n\nSELECT t.fetch FROM t;",
+        ),
+        SqlCase::new(
+            "qualified FOR identifier",
+            "select 1 union select t.for from t;",
+            "SELECT 1\n\nUNION\n\nSELECT t.for FROM t;",
+        ),
+    ]);
+}

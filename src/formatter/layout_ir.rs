@@ -115,7 +115,7 @@ fn is_distinct_from_operator(
 }
 
 /// One SELECT query branch, including nested and set-operation branches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct QueryBlock {
     pub select: usize,
     pub list_start: usize,
@@ -124,6 +124,7 @@ pub(super) struct QueryBlock {
     pub indent: usize,
     pub wrapper: Option<(usize, usize)>,
     pub clauses: QueryClauses,
+    pub from: Option<RelationSourceBlock>,
 }
 
 /// One branch owned by a bounded UNION / INTERSECT / EXCEPT expression.
@@ -533,9 +534,10 @@ impl LayoutDocument {
             statement_index += 1;
         }
 
-        let queries = bind_queries(tokens, structure, &top_level_statements);
+        let queries = bind_queries(tokens, structure, &top_level_statements, document.queries())?;
         let predicates = bind_predicates(tokens, structure.depths(), &queries, &statements);
-        let set_operations = bind_set_operations(tokens, structure, &top_level_statements)?;
+        let set_operations =
+            bind_set_operations(tokens, structure, &top_level_statements, document.queries())?;
         let window_blocks = bind_window_blocks(tokens, structure, &queries);
 
         Ok(Self {

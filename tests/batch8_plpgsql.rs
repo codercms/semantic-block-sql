@@ -40,3 +40,11 @@ fn rejects_non_plpgsql_bodies() {
             .any(|diagnostic| diagnostic.severity == Severity::Warning)
     );
 }
+
+#[test]
+fn preserves_language_identifiers_in_plpgsql_routine_signatures() {
+    assert_fixture(
+        "CREATE FUNCTION echo_language(language language) RETURNS language LANGUAGE plpgsql AS $$ BEGIN RETURN language; END; $$;",
+        "CREATE FUNCTION echo_language(language language) RETURNS language LANGUAGE plpgsql AS $$\nBEGIN\n    RETURN language;\nEND;\n$$;",
+    );
+}

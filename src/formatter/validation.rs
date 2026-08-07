@@ -19,9 +19,10 @@ use super::ownership::{
     AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec, ConflictActionSpec, ConflictSpec,
     CreateIndexSpec, CreateTableElementSpec, CreateTableSpec, CteStatementSpec, DeleteSpec,
     InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeBranchSpec,
-    MergeSpec, OverrideSpec, RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec,
-    RelationJoinTypeSpec, RelationListSpec, SelectSpec, StatementSpec, SupportedDocument,
-    UpdateSpec, UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
+    MergeSpec, OverrideSpec, QuerySpec, RelationItemSpec, RelationJoinConstraintSpec,
+    RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec, SelectSpec, StatementSpec,
+    SupportedDocument, UpdateSpec, UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec,
+    source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -62,7 +63,163 @@ pub(super) fn parse_supported_postgresql(
         })?;
     }
 
-    Ok(SupportedDocument::new(statements))
+    let mut queries = Vec::new();
+    for raw in &parsed.protobuf.stmts {
+        let root = raw
+            .stmt
+            .as_deref()
+            .and_then(|statement| statement.node.as_ref())
+            .ok_or_else(|| FormatDiagnostic::UnsupportedSyntax {
+                feature: "empty PostgreSQL statement".into(),
+                start: 0,
+                end: source.len(),
+            })?;
+        collect_query_specs(root, &mut queries).map_err(|feature| {
+            FormatDiagnostic::UnsupportedSyntax {
+                feature: feature.into(),
+                start: 0,
+                end: source.len(),
+            }
+        })?;
+    }
+    queries.sort_by_key(|query| query.anchor.unwrap_or(usize::MAX));
+    queries.dedup();
+
+    Ok(SupportedDocument::with_queries(statements, queries))
+}
+
+/// Retain parser-validated ownership for every lexical SELECT that the ordinary
+/// formatter may lay out.
+///
+/// `pg_query::NodeEnum::nodes()` deliberately visits only a useful subset of
+/// PostgreSQL fields. In particular, it omits DML `RETURNING`, MERGE action
+/// expressions, ON CONFLICT children, and several SELECT suffix expressions.
+/// Those omissions are harmless for many AST consumers, but not for semblock:
+/// nested relation ownership (for example an authored `JOIN ... USING (...)`)
+/// must survive into presentation wherever the nested query appears. This
+/// collector therefore reuses the library traversal for the common tree and
+/// explicitly descends through the parser-owned fields it omits. No syntax is
+/// inferred from tokens here.
+fn collect_query_specs(root: &NodeEnum, queries: &mut Vec<QuerySpec>) -> Result<(), &'static str> {
+    for (node, _, _, _) in root.nodes() {
+        match node {
+            NodeRef::SelectStmt(select) => {
+                push_query_spec(select, queries)?;
+                collect_select_query_omissions(select, queries)?;
+            }
+            NodeRef::InsertStmt(insert) => {
+                collect_query_specs_from_nodes(&insert.returning_list, queries)?;
+            }
+            NodeRef::UpdateStmt(update) => {
+                collect_query_specs_from_nodes(&update.returning_list, queries)?;
+            }
+            NodeRef::DeleteStmt(delete) => {
+                collect_query_specs_from_nodes(&delete.returning_list, queries)?;
+            }
+            NodeRef::MergeStmt(merge) => {
+                collect_query_specs_from_nodes(&merge.returning_list, queries)?;
+            }
+            NodeRef::MergeWhenClause(branch) => {
+                if let Some(condition) = branch.condition.as_deref() {
+                    collect_query_specs_from_node(condition, queries)?;
+                }
+                collect_query_specs_from_nodes(&branch.target_list, queries)?;
+                collect_query_specs_from_nodes(&branch.values, queries)?;
+            }
+            NodeRef::OnConflictClause(conflict) => {
+                if let Some(infer) = conflict.infer.as_deref() {
+                    collect_query_specs_from_nodes(&infer.index_elems, queries)?;
+                    if let Some(predicate) = infer.where_clause.as_deref() {
+                        collect_query_specs_from_node(predicate, queries)?;
+                    }
+                }
+                collect_query_specs_from_nodes(&conflict.target_list, queries)?;
+                if let Some(predicate) = conflict.where_clause.as_deref() {
+                    collect_query_specs_from_node(predicate, queries)?;
+                }
+            }
+            NodeRef::WindowDef(window) => {
+                collect_query_specs_from_nodes(&window.partition_clause, queries)?;
+                collect_query_specs_from_nodes(&window.order_clause, queries)?;
+                if let Some(offset) = window.start_offset.as_deref() {
+                    collect_query_specs_from_node(offset, queries)?;
+                }
+                if let Some(offset) = window.end_offset.as_deref() {
+                    collect_query_specs_from_node(offset, queries)?;
+                }
+            }
+            NodeRef::RuleStmt(rule) => {
+                if let Some(predicate) = rule.where_clause.as_deref() {
+                    collect_query_specs_from_node(predicate, queries)?;
+                }
+                collect_query_specs_from_nodes(&rule.actions, queries)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn collect_select_query_omissions(
+    select: &SelectStmt,
+    queries: &mut Vec<QuerySpec>,
+) -> Result<(), &'static str> {
+    collect_query_specs_from_nodes(&select.distinct_clause, queries)?;
+    collect_query_specs_from_nodes(&select.window_clause, queries)?;
+    collect_query_specs_from_nodes(&select.values_lists, queries)?;
+    if let Some(limit) = select.limit_offset.as_deref() {
+        collect_query_specs_from_node(limit, queries)?;
+    }
+    if let Some(limit) = select.limit_count.as_deref() {
+        collect_query_specs_from_node(limit, queries)?;
+    }
+    Ok(())
+}
+
+fn collect_query_specs_from_nodes(
+    nodes: &[Node],
+    queries: &mut Vec<QuerySpec>,
+) -> Result<(), &'static str> {
+    for node in nodes {
+        collect_query_specs_from_node(node, queries)?;
+    }
+    Ok(())
+}
+
+fn collect_query_specs_from_node(
+    node: &Node,
+    queries: &mut Vec<QuerySpec>,
+) -> Result<(), &'static str> {
+    let Some(root) = node.node.as_ref() else {
+        return Ok(());
+    };
+    collect_query_specs(root, queries)
+}
+
+fn push_query_spec(select: &SelectStmt, queries: &mut Vec<QuerySpec>) -> Result<(), &'static str> {
+    if is_values_select_shape(select) {
+        return Ok(());
+    }
+    queries.push(QuerySpec {
+        anchor: select_query_anchor(select),
+        select: validate_select(select, false)?,
+    });
+    Ok(())
+}
+
+fn select_query_anchor(select: &SelectStmt) -> Option<usize> {
+    select_target_anchor(select)
+        .or_else(|| select.larg.as_deref().and_then(select_query_anchor))
+        .or_else(|| select.rarg.as_deref().and_then(select_query_anchor))
+}
+
+fn select_target_anchor(select: &SelectStmt) -> Option<usize> {
+    select.target_list.iter().find_map(|target| {
+        let NodeEnum::ResTarget(target) = target.node.as_ref()? else {
+            return None;
+        };
+        usize::try_from(target.location).ok()
+    })
 }
 
 fn validated_cte_specs(raw: &RawStmt) -> Result<Vec<CteStatementSpec>, &'static str> {
@@ -1921,6 +2078,9 @@ fn validate_select(
         has_into: select.into_clause.is_some(),
         set_operations,
         named_windows: select.window_clause.len(),
+        has_order_by: !select.sort_clause.is_empty(),
+        has_limit_offset: select.limit_offset.is_some(),
+        has_limit_count: select.limit_count.is_some(),
         locking_clauses: select.locking_clause.len(),
         from,
     })

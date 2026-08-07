@@ -170,6 +170,7 @@ struct ParenthesizedList {
     open: usize,
     close: usize,
     expanded: bool,
+    base_indent: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -214,14 +215,35 @@ pub(super) fn format(
     let create_indexes = layout.create_indexes().cloned().collect::<Vec<_>>();
     let alter_tables = layout.alter_tables().cloned().collect::<Vec<_>>();
     let utilities = layout.utilities().copied().collect::<Vec<_>>();
-    let join_using_lists = selects
+    let mut join_using_lists = layout
+        .queries()
         .iter()
-        .filter_map(|select| select.from.as_ref())
-        .chain(updates.iter().filter_map(|update| update.from.as_ref()))
-        .chain(deletes.iter().filter_map(|delete| delete.using.as_ref()))
-        .chain(merges.iter().map(|merge| &merge.source))
-        .flat_map(|source| source.joins.iter().filter_map(|join| join.using_open))
+        .flat_map(|query| {
+            query.from.iter().flat_map(move |source| {
+                source.joins.iter().filter_map(move |join| {
+                    join.using_open.map(|open| {
+                        (
+                            open,
+                            query.indent + depths[open].saturating_sub(query.base_depth),
+                        )
+                    })
+                })
+            })
+        })
         .collect::<Vec<_>>();
+    join_using_lists.extend(
+        updates
+            .iter()
+            .filter_map(|update| update.from.as_ref())
+            .chain(deletes.iter().filter_map(|delete| delete.using.as_ref()))
+            .chain(merges.iter().map(|merge| &merge.source))
+            .flat_map(|source| {
+                source
+                    .joins
+                    .iter()
+                    .filter_map(|join| join.using_open.map(|open| (open, depths[open])))
+            }),
+    );
     let parenthesized_lists = parenthesized_lists(
         &tokens,
         depths,
@@ -626,8 +648,10 @@ fn plan_query_clauses(
         let base_depth = query.base_depth;
         let indent = query.indent;
         let end = query.end;
-        let has_join = (select + 1..end)
-            .any(|index| depths[index] == base_depth && is_join_start(tokens, index));
+        let has_join = query
+            .from
+            .as_ref()
+            .is_some_and(|source| !source.joins.is_empty());
         let has_expanded_boolean = boolean_ranges
             .iter()
             .any(|range| range.start > select && range.start < end);

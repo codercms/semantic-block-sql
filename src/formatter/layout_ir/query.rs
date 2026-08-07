@@ -3,69 +3,205 @@ use std::collections::{BTreeMap, HashSet};
 use pg_query::protobuf::Token;
 
 use super::*;
-use crate::formatter::ownership::{StatementSpec, StatementTokens, ViewCheckSpec};
-use crate::formatter::tokens::is_join_start;
+use crate::formatter::ownership::{
+    QuerySpec, SelectSpec, StatementSpec, StatementTokens, ViewCheckSpec,
+};
+use crate::formatter::tokens::{is_join_start, is_query_clause_start};
 
 pub(super) fn bind_queries(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
     statements: &[StatementTokens],
-) -> Vec<QueryBlock> {
-    let depths = structure.depths();
+    specs: &[QuerySpec],
+) -> Result<Vec<QueryBlock>, FormatDiagnostic> {
     let mut queries = Vec::new();
+    let mut used_selects = HashSet::new();
+
+    for owned in specs
+        .iter()
+        .filter(|owned| owned.select.set_operations == 0)
+    {
+        let select = match owned
+            .anchor
+            .and_then(|anchor| select_before_anchor(tokens, anchor))
+        {
+            Some(select) => select,
+            None => {
+                find_unanchored_query(tokens, structure, statements, &used_selects, &owned.select)?
+            }
+        };
+        if !used_selects.insert(select) {
+            // Recursive AST walking can encounter the same SelectStmt through a
+            // supplemented field and the library's common traversal. Exact
+            // duplicate ownership is harmless; contradictory ownership is not.
+            let duplicate = queries
+                .iter()
+                .find(|query: &&QueryBlock| query.select == select)
+                .expect("used SELECT has a bound query");
+            if !query_matches_spec(tokens, structure, duplicate, &owned.select) {
+                return Err(FormatDiagnostic::Ownership(format!(
+                    "SELECT query at token {select} has contradictory AST ownership"
+                )));
+            }
+            continue;
+        }
+
+        let statement = statements
+            .iter()
+            .find(|statement| statement.range.start <= select && select < statement.range.end)
+            .ok_or_else(|| {
+                FormatDiagnostic::Ownership(format!(
+                    "AST-owned SELECT token {select} is outside every statement"
+                ))
+            })?;
+        let mut query = lexical_query_block(tokens, structure, statement, select);
+        if !query_matches_spec(tokens, structure, &query, &owned.select) {
+            return Err(FormatDiagnostic::Ownership(format!(
+                "SELECT query at token {select} disagrees with its AST-validated query ownership"
+            )));
+        }
+        query.from = bind_query_relation_source(tokens, structure, &query, &owned.select)?;
+        queries.push(query);
+    }
+
+    queries.sort_by_key(|query| query.select);
+    Ok(queries)
+}
+
+fn find_unanchored_query(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statements: &[StatementTokens],
+    used_selects: &HashSet<usize>,
+    spec: &SelectSpec,
+) -> Result<usize, FormatDiagnostic> {
+    let mut matches = Vec::new();
     for statement in statements {
         for select in statement.range.start..statement.range.end {
-            if tokens[select].kind != Token::Select {
+            if tokens[select].kind != Token::Select || used_selects.contains(&select) {
                 continue;
             }
-            let base_depth = depths[select];
-            let structural_end = (select + 1..statement.range.end)
-                .find(|index| {
-                    depths[*index] < base_depth
-                        || (depths[*index] == base_depth
-                            && (matches!(
-                                tokens[*index].kind,
-                                Token::Ascii59
-                                    | Token::Union
-                                    | Token::Intersect
-                                    | Token::Except
-                                    | Token::Returning
-                            ) || (tokens[*index].kind == Token::On
-                                && tokens
-                                    .get(*index + 1)
-                                    .is_some_and(|next| next.kind == Token::Conflict))))
-                })
-                .unwrap_or(statement.range.end);
-            let end = statement_query_suffix(tokens, depths, statement, select, base_depth)
-                .map_or(structural_end, |suffix| structural_end.min(suffix));
-            let list_start = select_list_start(tokens, structure, select, end);
-            let wrapper = (statement.range.start..select)
-                .rev()
-                .find(|open| {
-                    tokens[*open].kind == Token::Ascii40
-                        && structure
-                            .matching_parenthesis(*open)
-                            .is_some_and(|close| close >= end && close < statement.range.end)
-                })
-                .and_then(|open| {
-                    structure
-                        .matching_parenthesis(open)
-                        .map(|close| (open, close))
-                });
-            queries.push(QueryBlock {
-                select,
-                list_start,
-                end,
-                base_depth,
-                indent: base_depth + predicate_subquery_nesting(tokens, structure, select),
-                wrapper,
-                clauses: bind_query_clauses(tokens, depths, select, end, base_depth),
-            });
+            let query = lexical_query_block(tokens, structure, statement, select);
+            if query_matches_spec(tokens, structure, &query, spec) {
+                matches.push(select);
+            }
         }
     }
-    queries.sort_by_key(|query| query.select);
-    queries.dedup_by_key(|query| query.select);
-    queries
+    match matches.as_slice() {
+        [select] => Ok(*select),
+        [] => Err(FormatDiagnostic::Ownership(
+            "unanchored SELECT has no matching lexical query".into(),
+        )),
+        _ => Err(FormatDiagnostic::Ownership(
+            "unanchored SELECT ownership is lexically ambiguous".into(),
+        )),
+    }
+}
+
+fn lexical_query_block(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: &StatementTokens,
+    select: usize,
+) -> QueryBlock {
+    let depths = structure.depths();
+    let base_depth = depths[select];
+    let structural_end = (select + 1..statement.range.end)
+        .find(|index| {
+            depths[*index] < base_depth
+                || (depths[*index] == base_depth
+                    && (matches!(
+                        tokens[*index].kind,
+                        Token::Ascii59
+                            | Token::Union
+                            | Token::Intersect
+                            | Token::Except
+                            | Token::Returning
+                    ) || (tokens[*index].kind == Token::On
+                        && tokens
+                            .get(*index + 1)
+                            .is_some_and(|next| next.kind == Token::Conflict))))
+        })
+        .unwrap_or(statement.range.end);
+    let end = statement_query_suffix(tokens, depths, statement, select, base_depth)
+        .map_or(structural_end, |suffix| structural_end.min(suffix));
+    let list_start = select_list_start(tokens, structure, select, end);
+    let wrapper = (statement.range.start..select)
+        .rev()
+        .find(|open| {
+            tokens[*open].kind == Token::Ascii40
+                && structure
+                    .matching_parenthesis(*open)
+                    .is_some_and(|close| close >= end && close < statement.range.end)
+        })
+        .and_then(|open| {
+            structure
+                .matching_parenthesis(open)
+                .map(|close| (open, close))
+        });
+    QueryBlock {
+        select,
+        list_start,
+        end,
+        base_depth,
+        indent: base_depth + predicate_subquery_nesting(tokens, structure, select),
+        wrapper,
+        clauses: bind_query_clauses(tokens, depths, select, end, base_depth),
+        from: None,
+    }
+}
+
+fn select_before_anchor(tokens: &[SqlToken<'_>], anchor: usize) -> Option<usize> {
+    tokens
+        .iter()
+        .enumerate()
+        .rfind(|(_, token)| token.start <= anchor && token.kind == Token::Select)
+        .map(|(index, _)| index)
+}
+
+fn query_matches_spec(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    query: &QueryBlock,
+    spec: &SelectSpec,
+) -> bool {
+    if super::statement::verify_select_shape(
+        tokens,
+        structure.depths(),
+        query.select,
+        query.end,
+        query.base_depth,
+        spec,
+        "query",
+    )
+    .is_err()
+    {
+        return false;
+    }
+    query.clauses.from.is_some() != spec.from.items.is_empty()
+        && bind_query_relation_source(tokens, structure, query, spec).is_ok()
+}
+
+fn bind_query_relation_source(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    query: &QueryBlock,
+    spec: &SelectSpec,
+) -> Result<Option<RelationSourceBlock>, FormatDiagnostic> {
+    let Some(from) = query.clauses.from else {
+        return Ok(None);
+    };
+    let end = query.clauses.next_after(from, query.end);
+    super::statement::bind_relation_source(
+        tokens,
+        structure,
+        from,
+        end,
+        query.base_depth,
+        &spec.from,
+        "query FROM",
+    )
+    .map(Some)
 }
 
 fn predicate_subquery_nesting(
@@ -157,6 +293,7 @@ pub(super) fn bind_set_operations(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
     statements: &[StatementTokens],
+    specs: &[QuerySpec],
 ) -> Result<Vec<SetOperationBlock>, FormatDiagnostic> {
     let depths = structure.depths();
     let mut owners = BTreeMap::<(usize, usize, usize), (Option<(usize, usize)>, Vec<usize>)>::new();
@@ -181,8 +318,15 @@ pub(super) fn bind_set_operations(
             let (owner_start, raw_owner_end) = owner_wrapper
                 .map(|(open, close)| (open + 1, close))
                 .unwrap_or((statement.range.start, statement.range.end));
-            let owner_end =
-                set_operation_owner_end(tokens, depths, operator, raw_owner_end, base_depth);
+            let owner_end = set_operation_owner_end(
+                tokens,
+                depths,
+                operator,
+                owner_start,
+                raw_owner_end,
+                base_depth,
+                specs,
+            );
             owners
                 .entry((owner_start, owner_end, base_depth))
                 .or_insert_with(|| (owner_wrapper, Vec::new()))
@@ -244,25 +388,60 @@ pub(super) fn bind_set_operations(
     Ok(result)
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct SetOperationSuffixOwnership {
+    order_by: bool,
+    limit_offset: bool,
+    limit_count: bool,
+    locking: bool,
+}
+
 fn set_operation_owner_end(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
     last_known_operator: usize,
+    owner_start: usize,
     end: usize,
     base_depth: usize,
+    specs: &[QuerySpec],
 ) -> usize {
+    let suffix = specs
+        .iter()
+        .filter(|owned| owned.select.set_operations > 0)
+        .filter_map(|owned| {
+            let anchor = owned.anchor?;
+            let select = select_before_anchor(tokens, anchor)?;
+            (owner_start <= select && select < end).then_some(&owned.select)
+        })
+        .fold(
+            SetOperationSuffixOwnership::default(),
+            |mut suffix, spec| {
+                suffix.order_by |= spec.has_order_by;
+                suffix.limit_offset |= spec.has_limit_offset;
+                suffix.limit_count |= spec.has_limit_count;
+                suffix.locking |= spec.locking_clauses > 0;
+                suffix
+            },
+        );
+
     (last_known_operator + 1..end)
         .find(|index| {
-            depths[*index] == base_depth
-                && matches!(
-                    tokens[*index].kind,
-                    Token::Order
-                        | Token::Limit
-                        | Token::Offset
-                        | Token::Fetch
-                        | Token::For
-                        | Token::Ascii59
-                )
+            if depths[*index] != base_depth {
+                return false;
+            }
+            if tokens[*index].kind == Token::Ascii59 {
+                return true;
+            }
+            if !is_query_clause_start(tokens, *index) {
+                return false;
+            }
+            match tokens[*index].kind {
+                Token::Order => suffix.order_by,
+                Token::Offset => suffix.limit_offset,
+                Token::Limit | Token::Fetch => suffix.limit_count,
+                Token::For => suffix.locking,
+                _ => false,
+            }
         })
         .unwrap_or(end)
 }
@@ -423,7 +602,7 @@ fn bind_query_clauses(
 ) -> QueryClauses {
     let mut clauses = QueryClauses::default();
     for index in select + 1..end {
-        if depths[index] != base_depth {
+        if depths[index] != base_depth || !is_query_clause_start(tokens, index) {
             continue;
         }
         match tokens[index].kind {
@@ -729,22 +908,4 @@ fn push_predicate(
         indent,
         wrapper_close: None,
     });
-}
-
-fn is_query_clause_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
-    match tokens[index].kind {
-        Token::Into
-        | Token::From
-        | Token::Where
-        | Token::Having
-        | Token::Window
-        | Token::Limit
-        | Token::Offset
-        | Token::Fetch
-        | Token::For => true,
-        Token::GroupP | Token::Order => tokens
-            .get(index + 1)
-            .is_some_and(|next| next.kind == Token::By),
-        _ => false,
-    }
 }

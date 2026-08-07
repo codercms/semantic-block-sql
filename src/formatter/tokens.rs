@@ -26,6 +26,34 @@ impl SqlToken<'_> {
 /// PostgreSQL headers may contain comments between `NATURAL`, the join type,
 /// `OUTER`, and `JOIN`; callers need one shared definition so query and DML
 /// relation planners break before the same token.
+/// Returns true only when a token can introduce a query clause at its
+/// current lexical position. Qualified identifiers such as `row.limit` or
+/// `row.for` are never clause starts. Callers that distinguish `FROM` from
+/// `IS DISTINCT FROM` still apply that expression-specific proof separately.
+pub(super) fn is_query_clause_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if previous_non_comment(tokens, index)
+        .is_some_and(|previous| tokens[previous].kind == Token::Ascii46)
+    {
+        return false;
+    }
+
+    match tokens[index].kind {
+        Token::Into
+        | Token::From
+        | Token::Where
+        | Token::Having
+        | Token::Window
+        | Token::Limit
+        | Token::Offset
+        | Token::Fetch
+        | Token::For => true,
+        Token::GroupP | Token::Order => {
+            next_non_comment(tokens, index).is_some_and(|next| tokens[next].kind == Token::By)
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn is_join_start(tokens: &[SqlToken<'_>], index: usize) -> bool {
     if join_keyword(tokens, index).is_none() {
         return false;

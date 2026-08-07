@@ -15,3 +15,11 @@ fn preserves_unreviewed_multi_statement_sql_routines() {
         "CREATE FUNCTION f()\nRETURNS void\nLANGUAGE SQL\nBEGIN ATOMIC\nSELECT 1;\nSELECT 2;\nEND;",
     );
 }
+
+#[test]
+fn preserves_language_identifiers_in_sql_standard_routine_signatures() {
+    assert_sql_layout_only(
+        "CREATE FUNCTION echo_language(language language)\nRETURNS language\nLANGUAGE SQL\nBEGIN ATOMIC\n    SELECT language;\nEND;",
+        "CREATE FUNCTION echo_language(language language)\nRETURNS language\nLANGUAGE SQL\nBEGIN ATOMIC\n    SELECT language;\nEND;",
+    );
+}

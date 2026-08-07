@@ -172,3 +172,142 @@ fn inline_join_predicates_remain_inline() {
         "SELECT *\nFROM a\nJOIN b ON a.id = b.a_id AND a.tenant_id = b.tenant_id;",
     );
 }
+
+#[test]
+fn preserves_authored_using_groups_in_nested_query_owners() {
+    assert_cases(&[
+        SqlCase::new(
+            "CTE query USING group",
+            "with q as (select * from a join b using (\n    id,\n    tenant_id\n)) select * from q;",
+            "WITH q AS (\n    SELECT *\n    FROM a\n    JOIN b USING (\n        id,\n        tenant_id\n    )\n)\nSELECT *\nFROM q;",
+        ),
+        SqlCase::new(
+            "view query USING group",
+            "create view q as select * from a join b using (\n    id,\n    tenant_id\n);",
+            "CREATE VIEW q AS\nSELECT *\nFROM a\nJOIN b USING (\n    id,\n    tenant_id\n);",
+        ),
+        SqlCase::new(
+            "derived query USING group",
+            "select * from (select * from a join b using (\n    id,\n    tenant_id\n)) q;",
+            "SELECT *\nFROM (\n    SELECT *\n    FROM a\n    JOIN b USING (\n        id,\n        tenant_id\n    )\n) q;",
+        ),
+        SqlCase::new(
+            "INSERT query USING group",
+            "insert into target (id, tenant_id) select a.id,a.tenant_id from a join b using (\n    id,\n    tenant_id\n);",
+            "INSERT INTO target (id, tenant_id)\nSELECT a.id, a.tenant_id\nFROM a\nJOIN b USING (\n    id,\n    tenant_id\n);",
+        ),
+        SqlCase::new(
+            "materialized view query USING group",
+            "create materialized view q as select * from a join b using (\n    id,\n    tenant_id\n);",
+            "CREATE MATERIALIZED VIEW q AS\nSELECT *\nFROM a\nJOIN b USING (\n    id,\n    tenant_id\n);",
+        ),
+        SqlCase::new(
+            "predicate subquery USING group",
+            "select exists(select 1 from a join b using (\n    id,\n    tenant_id\n));",
+            "SELECT\n    EXISTS (\n        SELECT 1\n        FROM a\n        JOIN b USING (\n            id,\n            tenant_id\n        )\n    );",
+        ),
+        SqlCase::new(
+            "set-operation branch USING group",
+            "select 1 union all select a.id from a join b using (\n    id,\n    tenant_id\n);",
+            "SELECT 1\n\nUNION ALL\n\nSELECT a.id\nFROM a\nJOIN b USING (\n    id,\n    tenant_id\n);",
+        ),
+    ]);
+}
+
+#[test]
+fn preserves_nested_using_groups_in_query_fields_omitted_by_pg_query_walker() {
+    assert_cases(&[
+        SqlCase::new(
+            "UPDATE RETURNING subquery USING group",
+            "update target set value=1 returning exists(select 1 from a join b using (
+    id,
+    tenant_id
+));",
+            "UPDATE target
+SET value = 1
+RETURNING
+    EXISTS (
+        SELECT 1
+        FROM a
+        JOIN b USING (
+            id,
+            tenant_id
+        )
+    );",
+        ),
+        SqlCase::new(
+            "INSERT RETURNING subquery USING group",
+            "insert into target(value) values(1) returning exists(select 1 from a join b using (
+    id,
+    tenant_id
+));",
+            "INSERT INTO target (value)
+VALUES (1)
+RETURNING
+    EXISTS (
+        SELECT 1
+        FROM a
+        JOIN b USING (
+            id,
+            tenant_id
+        )
+    );",
+        ),
+        SqlCase::new(
+            "DELETE RETURNING subquery USING group",
+            "delete from target returning exists(select 1 from a join b using (
+    id,
+    tenant_id
+));",
+            "DELETE FROM target
+RETURNING
+    EXISTS (
+        SELECT 1
+        FROM a
+        JOIN b USING (
+            id,
+            tenant_id
+        )
+    );",
+        ),
+        SqlCase::new(
+            "ON CONFLICT predicate subquery USING group",
+            "insert into target(id,value) values(1,1) on conflict(id) do update set value=excluded.value where exists(select 1 from a join b using (
+    id,
+    tenant_id
+));",
+            "INSERT INTO target (id, value)
+VALUES (1, 1)
+ON CONFLICT (id)
+DO UPDATE
+SET
+    value = EXCLUDED.value
+WHERE EXISTS (
+        SELECT 1
+        FROM a
+        JOIN b USING (
+            id,
+            tenant_id
+        )
+    );",
+        ),
+        SqlCase::new(
+            "MERGE WHEN predicate subquery USING group",
+            "merge into target t using source s on t.id=s.id when matched and exists(select 1 from a join b using (
+    id,
+    tenant_id
+)) then delete;",
+            "MERGE INTO target t
+USING source s ON t.id = s.id
+
+WHEN MATCHED AND EXISTS (
+        SELECT 1
+        FROM a
+        JOIN b USING (
+            id,
+            tenant_id
+        )
+    ) THEN DELETE;",
+        ),
+    ]);
+}

@@ -7,7 +7,7 @@ pub(super) struct ParenthesizedListSources<'a> {
     pub cases: &'a [CaseRange],
     pub inserts: &'a [InsertBlock],
     pub merges: &'a [MergeBlock],
-    pub join_using_lists: &'a [usize],
+    pub join_using_lists: &'a [(usize, usize)],
     pub utilities: &'a [UtilityBlock],
     pub values: &'a [ValuesBlock],
 }
@@ -26,7 +26,10 @@ pub(super) fn parenthesized_lists(
             || !(is_function_call_open(tokens, open)
                 || is_insert_list_open(sources.inserts, open)
                 || is_merge_list_open(sources.merges, open)
-                || sources.join_using_lists.contains(&open)
+                || sources
+                    .join_using_lists
+                    .iter()
+                    .any(|(using_open, _)| *using_open == open)
                 || is_create_enum_list_open(tokens, sources.utilities, open)
                 || is_values_list_open(sources.values, open))
         {
@@ -100,6 +103,10 @@ pub(super) fn parenthesized_lists(
             open,
             close,
             expanded: layout == GroupLayout::Expanded,
+            base_indent: sources
+                .join_using_lists
+                .iter()
+                .find_map(|(using_open, indent)| (*using_open == open).then_some(*indent)),
         });
     }
 
@@ -601,7 +608,9 @@ pub(super) fn plan_parenthesized_lists(
         if items.is_empty() {
             continue;
         }
-        let base_indent = plan.indent_for(list.open, depths[list.open]);
+        let base_indent = list
+            .base_indent
+            .unwrap_or_else(|| plan.indent_for(list.open, depths[list.open]));
         let indent = base_indent + 1;
         for item in &items {
             plan.set_indent(item.start..item.end, indent);
