@@ -19,21 +19,13 @@ pub(super) fn bind_queries(
 
     for owned in specs
         .iter()
-        .filter(|owned| owned.select.set_operations == 0)
+        .filter(|owned| owned.select.set_operations == 0 && owned.anchor.is_some())
     {
-        let select = match owned
+        let select = owned
             .anchor
             .and_then(|anchor| select_before_anchor(tokens, anchor))
-        {
-            Some(select) => select,
-            None => {
-                find_unanchored_query(tokens, structure, statements, &used_selects, &owned.select)?
-            }
-        };
+            .expect("anchored query has an anchor");
         if !used_selects.insert(select) {
-            // Recursive AST walking can encounter the same SelectStmt through a
-            // supplemented field and the library's common traversal. Exact
-            // duplicate ownership is harmless; contradictory ownership is not.
             let duplicate = queries
                 .iter()
                 .find(|query: &&QueryBlock| query.select == select)
@@ -45,57 +37,111 @@ pub(super) fn bind_queries(
             }
             continue;
         }
-
-        let statement = statements
-            .iter()
-            .find(|statement| statement.range.start <= select && select < statement.range.end)
-            .ok_or_else(|| {
-                FormatDiagnostic::Ownership(format!(
-                    "AST-owned SELECT token {select} is outside every statement"
-                ))
-            })?;
-        let mut query = lexical_query_block(tokens, structure, statement, select);
-        if !query_matches_spec(tokens, structure, &query, &owned.select) {
+        let statement = statements.get(owned.statement_index).ok_or_else(|| {
+            FormatDiagnostic::Ownership(format!(
+                "query references missing statement index {}",
+                owned.statement_index
+            ))
+        })?;
+        if !(statement.range.start <= select && select < statement.range.end) {
             return Err(FormatDiagnostic::Ownership(format!(
-                "SELECT query at token {select} disagrees with its AST-validated query ownership"
+                "AST-owned SELECT token {select} is outside statement {}",
+                owned.statement_index
             )));
         }
-        query.from = bind_query_relation_source(tokens, structure, &query, &owned.select)?;
-        queries.push(query);
+        queries.push(bind_query(
+            tokens,
+            structure,
+            statement,
+            select,
+            &owned.select,
+        )?);
+    }
+
+    // A PostgreSQL SELECT target list may be empty, so some SelectStmt nodes
+    // expose no source anchor at all. Do not collapse identical unanchored AST
+    // records: two `SELECT FROM ...` branches are two real queries. Instead,
+    // bind identical capability records as a counted group. This is safe only
+    // when the number of still-unclaimed lexical matches exactly equals the
+    // number of parser-owned queries with that shape; contextual grammar such
+    // as `CREATE POLICY ... FOR SELECT` therefore still fails closed if it
+    // creates an extra lexical match.
+    let mut unanchored_groups = Vec::<(usize, SelectSpec, usize)>::new();
+    for owned in specs
+        .iter()
+        .filter(|owned| owned.select.set_operations == 0 && owned.anchor.is_none())
+    {
+        if let Some((_, _, count)) =
+            unanchored_groups
+                .iter_mut()
+                .find(|(statement_index, spec, _)| {
+                    *statement_index == owned.statement_index && spec == &owned.select
+                })
+        {
+            *count += 1;
+        } else {
+            unanchored_groups.push((owned.statement_index, owned.select.clone(), 1));
+        }
+    }
+
+    for (statement_index, spec, expected) in unanchored_groups {
+        let statement = statements.get(statement_index).ok_or_else(|| {
+            FormatDiagnostic::Ownership(format!(
+                "query references missing statement index {statement_index}"
+            ))
+        })?;
+        let matches = find_unanchored_queries(tokens, structure, statement, &used_selects, &spec);
+        if matches.len() != expected {
+            return Err(FormatDiagnostic::Ownership(format!(
+                "unanchored SELECT ownership in statement {statement_index} expected {expected} lexical match(es), found {}",
+                matches.len()
+            )));
+        }
+        for select in matches {
+            used_selects.insert(select);
+            queries.push(bind_query(tokens, structure, statement, select, &spec)?);
+        }
     }
 
     queries.sort_by_key(|query| query.select);
     Ok(queries)
 }
 
-fn find_unanchored_query(
+fn bind_query(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
-    statements: &[StatementTokens],
+    statement: &StatementTokens,
+    select: usize,
+    spec: &SelectSpec,
+) -> Result<QueryBlock, FormatDiagnostic> {
+    let mut query = lexical_query_block(tokens, structure, statement, select);
+    if !query_matches_spec(tokens, structure, &query, spec) {
+        return Err(FormatDiagnostic::Ownership(format!(
+            "SELECT query at token {select} disagrees with its AST-validated query ownership"
+        )));
+    }
+    query.from = bind_query_relation_source(tokens, structure, &query, spec)?;
+    Ok(query)
+}
+
+fn find_unanchored_queries(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: &StatementTokens,
     used_selects: &HashSet<usize>,
     spec: &SelectSpec,
-) -> Result<usize, FormatDiagnostic> {
+) -> Vec<usize> {
     let mut matches = Vec::new();
-    for statement in statements {
-        for select in statement.range.start..statement.range.end {
-            if tokens[select].kind != Token::Select || used_selects.contains(&select) {
-                continue;
-            }
-            let query = lexical_query_block(tokens, structure, statement, select);
-            if query_matches_spec(tokens, structure, &query, spec) {
-                matches.push(select);
-            }
+    for select in statement.range.start..statement.range.end {
+        if tokens[select].kind != Token::Select || used_selects.contains(&select) {
+            continue;
+        }
+        let query = lexical_query_block(tokens, structure, statement, select);
+        if query_matches_spec(tokens, structure, &query, spec) {
+            matches.push(select);
         }
     }
-    match matches.as_slice() {
-        [select] => Ok(*select),
-        [] => Err(FormatDiagnostic::Ownership(
-            "unanchored SELECT has no matching lexical query".into(),
-        )),
-        _ => Err(FormatDiagnostic::Ownership(
-            "unanchored SELECT ownership is lexically ambiguous".into(),
-        )),
-    }
+    matches
 }
 
 fn lexical_query_block(
@@ -298,7 +344,7 @@ pub(super) fn bind_set_operations(
     let depths = structure.depths();
     let mut owners = BTreeMap::<(usize, usize, usize), (Option<(usize, usize)>, Vec<usize>)>::new();
 
-    for statement in statements {
+    for (statement_index, statement) in statements.iter().enumerate() {
         for operator in statement.range.start..statement.range.end {
             if !matches!(
                 tokens[operator].kind,
@@ -322,9 +368,9 @@ pub(super) fn bind_set_operations(
                 tokens,
                 depths,
                 operator,
-                owner_start,
-                raw_owner_end,
+                owner_start..raw_owner_end,
                 base_depth,
+                statement_index,
                 specs,
             );
             owners
@@ -400,31 +446,47 @@ fn set_operation_owner_end(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
     last_known_operator: usize,
-    owner_start: usize,
-    end: usize,
+    owner: std::ops::Range<usize>,
     base_depth: usize,
+    statement_index: usize,
     specs: &[QuerySpec],
 ) -> usize {
-    let suffix = specs
+    let anchored_specs = specs
         .iter()
-        .filter(|owned| owned.select.set_operations > 0)
-        .filter_map(|owned| {
-            let anchor = owned.anchor?;
-            let select = select_before_anchor(tokens, anchor)?;
-            (owner_start <= select && select < end).then_some(&owned.select)
+        .filter(|owned| owned.statement_index == statement_index && owned.select.set_operations > 0)
+        .filter(|owned| {
+            owned.anchor.is_some_and(|anchor| {
+                select_before_anchor(tokens, anchor)
+                    .is_some_and(|select| owner.start <= select && select < owner.end)
+            })
         })
-        .fold(
-            SetOperationSuffixOwnership::default(),
-            |mut suffix, spec| {
-                suffix.order_by |= spec.has_order_by;
-                suffix.limit_offset |= spec.has_limit_offset;
-                suffix.limit_count |= spec.has_limit_count;
-                suffix.locking |= spec.locking_clauses > 0;
-                suffix
-            },
-        );
+        .map(|owned| &owned.select)
+        .collect::<Vec<_>>();
+    let suffix_specs = if anchored_specs.is_empty() {
+        specs
+            .iter()
+            .filter(|owned| {
+                owned.statement_index == statement_index
+                    && owned.select.set_operations > 0
+                    && owned.anchor.is_none()
+            })
+            .map(|owned| &owned.select)
+            .collect::<Vec<_>>()
+    } else {
+        anchored_specs
+    };
+    let suffix = suffix_specs.into_iter().fold(
+        SetOperationSuffixOwnership::default(),
+        |mut suffix, spec| {
+            suffix.order_by |= spec.has_order_by;
+            suffix.limit_offset |= spec.has_limit_offset;
+            suffix.limit_count |= spec.has_limit_count;
+            suffix.locking |= spec.locking_clauses > 0;
+            suffix
+        },
+    );
 
-    (last_known_operator + 1..end)
+    (last_known_operator + 1..owner.end)
         .find(|index| {
             if depths[*index] != base_depth {
                 return false;
@@ -443,7 +505,7 @@ fn set_operation_owner_end(
                 _ => false,
             }
         })
-        .unwrap_or(end)
+        .unwrap_or(owner.end)
 }
 
 fn bind_set_operation_branch(

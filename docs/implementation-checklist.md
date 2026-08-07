@@ -921,6 +921,15 @@ The earlier MVP checkbox that kept interpreted strings disabled records the hist
   after removing broad routine keyword rendering.
 - [x] Cover contextual `SELECT` outside queries so GRANT and row-security policy
   grammar cannot be mistaken for lexical query ownership.
+- [x] Preserve parser cardinality for empty-target SELECTs that expose no source
+  anchor, and scope their lexical matching to the owning top-level statement.
+- [x] Scope SQL-standard and PL/pgSQL `RETURNS` casing to the parser-owned return
+  type boundary while preserving same-spelled parameter and type identifiers.
+- [x] Share one completed `pg_query` traversal between `QuerySpec` collection and
+  nested unsupported-syntax validation, including SELECT suffix/window and DML
+  fields omitted by the convenience walker.
+- [x] Reject unsupported SQL/JSON expressions in those omitted fields without
+  rewriting the owning statement.
 - [x] Run every library, binary, and integration test target with the locked
   offline toolchain, plus formatting, Clippy, Rustdoc, and diff hygiene.
 - [x] Require remote CI before merge.

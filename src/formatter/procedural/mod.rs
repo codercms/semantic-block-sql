@@ -63,6 +63,7 @@ pub(super) fn format_single_routine(
 pub(super) struct OuterTokenOwnership {
     pub language_location: Option<usize>,
     pub routine_kind_location: Option<usize>,
+    pub returns_location: Option<usize>,
 }
 
 impl OuterTokenOwnership {
@@ -74,6 +75,10 @@ impl OuterTokenOwnership {
                 .map(|location| location - start),
             routine_kind_location: self
                 .routine_kind_location
+                .filter(|location| start <= *location && *location < end)
+                .map(|location| location - start),
+            returns_location: self
+                .returns_location
                 .filter(|location| start <= *location && *location < end)
                 .map(|location| location - start),
         }
@@ -95,8 +100,8 @@ fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic>
         .and_then(|node| node.node.as_ref())
         .ok_or_else(|| unsupported(source, "empty routine statement"))?;
     use pg_query::protobuf::node::Node;
-    let (options, routine_kind_location) = match node {
-        Node::DoStmt(statement) => (&statement.args, None),
+    let (options, routine_kind_location, returns_location) = match node {
+        Node::DoStmt(statement) => (&statement.args, None, None),
         Node::CreateFunctionStmt(statement) => {
             if statement.sql_body.is_some() {
                 return Err(unsupported(source, "SQL-standard routine body"));
@@ -104,6 +109,7 @@ fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic>
             (
                 &statement.options,
                 routine_kind_location(source, statement.is_procedure)?,
+                routine_returns_location(source, statement)?,
             )
         }
         _ => return Err(unsupported(source, "non-routine statement")),
@@ -134,7 +140,30 @@ fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic>
     Ok(OuterTokenOwnership {
         language_location,
         routine_kind_location,
+        returns_location,
     })
+}
+
+pub(super) fn routine_returns_location(
+    source: &str,
+    statement: &pg_query::protobuf::CreateFunctionStmt,
+) -> Result<Option<usize>, FormatDiagnostic> {
+    if statement.is_procedure {
+        return Ok(None);
+    }
+    let Some(return_type) = statement.return_type.as_ref() else {
+        return Ok(None);
+    };
+    let Some(return_type_location) = usize::try_from(return_type.location).ok() else {
+        return Ok(None);
+    };
+    Ok(super::tokens::tokenize(source)?
+        .into_iter()
+        .filter(|token| {
+            token.kind == pg_query::protobuf::Token::Returns && token.start < return_type_location
+        })
+        .map(|token| token.start)
+        .next_back())
 }
 
 pub(super) fn routine_kind_location(
@@ -612,10 +641,15 @@ pub(super) fn normalize_outer_tokens(
         output.push_str(&source[cursor..token.start]);
         let actual_language_clause = ownership.language_location == Some(token.start);
         let actual_routine_kind = ownership.routine_kind_location == Some(token.start);
+        let actual_returns_clause = ownership.returns_location == Some(token.start);
         let sql_language_name = token.text.eq_ignore_ascii_case("sql")
             && index > 0
             && ownership.language_location == Some(tokens[index - 1].start);
-        if actual_language_clause || actual_routine_kind || sql_language_name {
+        if actual_language_clause
+            || actual_routine_kind
+            || actual_returns_clause
+            || sql_language_name
+        {
             output.push_str(&token.text.to_ascii_uppercase());
         } else {
             output.push_str(&super::semantic_block::render_token(

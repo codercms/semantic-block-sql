@@ -73,3 +73,29 @@ fn preserves_adjacent_valid_but_unreviewed_syntax_byte_identically() {
         ),
     ]);
 }
+
+#[test]
+fn rejects_unsupported_expressions_in_pg_query_walker_omissions() {
+    assert_unsupported_cases(&[
+        (
+            "LIMIT expression",
+            "SELECT 1 LIMIT json_value(payload, '$.a');",
+        ),
+        (
+            "DISTINCT ON expression",
+            "SELECT DISTINCT ON (json_value(payload, '$.a')) id FROM items;",
+        ),
+        (
+            "named WINDOW expression",
+            "SELECT row_number() OVER w FROM items WINDOW w AS (PARTITION BY json_value(payload, '$.a'));",
+        ),
+        (
+            "ON CONFLICT assignment",
+            "INSERT INTO t (id, v) VALUES (1, 2) ON CONFLICT (id) DO UPDATE SET v = json_value(payload, '$.a');",
+        ),
+        (
+            "ON CONFLICT inference predicate",
+            "INSERT INTO t (id) VALUES (1) ON CONFLICT (id) WHERE json_exists(payload, '$.a') DO NOTHING;",
+        ),
+    ]);
+}

@@ -20,6 +20,7 @@ pub(super) fn format_single_routine(
             source,
             statement.is_procedure,
         )?,
+        returns_location: super::procedural::routine_returns_location(source, statement)?,
     };
     let header = super::procedural::normalize_outer_tokens(
         &source[..header_end],

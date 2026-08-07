@@ -48,3 +48,11 @@ fn preserves_language_identifiers_in_plpgsql_routine_signatures() {
         "CREATE FUNCTION echo_language(language language) RETURNS language LANGUAGE plpgsql AS $$\nBEGIN\n    RETURN language;\nEND;\n$$;",
     );
 }
+
+#[test]
+fn scopes_returns_casing_to_the_plpgsql_routine_clause() {
+    assert_fixture(
+        "CREATE FUNCTION echo_returns(returns returns) returns returns LANGUAGE plpgsql AS $$\nBEGIN\n    RETURN returns;\nEND;\n$$;",
+        "CREATE FUNCTION echo_returns(returns returns) RETURNS returns LANGUAGE plpgsql AS $$\nBEGIN\n    RETURN returns;\nEND;\n$$;",
+    );
+}

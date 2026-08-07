@@ -143,20 +143,25 @@ pub(super) struct SupportedDocument {
 }
 ```
 
-`QuerySpec` retains the already-validated `SelectSpec` plus a parser source
-anchor when PostgreSQL exposes one. Layout uses those records to seed lexical
-`QueryBlock` binding; it never treats every scanner `SELECT` token as a query.
-This keeps contextual grammar such as `GRANT SELECT` and
-`CREATE POLICY ... FOR SELECT` outside query ownership while giving nested CTE,
-view, derived, INSERT-source, scalar, and predicate queries the same typed
-relation-source capabilities as top-level queries.
+`QuerySpec` retains the already-validated `SelectSpec`, the owning top-level
+statement index, and a parser source anchor when PostgreSQL exposes one. Layout
+uses those records to seed lexical `QueryBlock` binding; it never treats every
+scanner `SELECT` token as a query. PostgreSQL permits an empty SELECT target
+list, whose `SelectStmt` may expose no useful source anchor. Those unanchored
+records therefore keep their parser cardinality and are bound only within their
+owning statement: an identical capability group is accepted only when its count
+exactly matches the remaining lexical queries with that shape. Contextual
+grammar such as `GRANT SELECT` and `CREATE POLICY ... FOR SELECT` consequently
+cannot be borrowed from another statement to satisfy query ownership.
 
 `pg_query`'s convenience node traversal does not visit every expression-bearing
-protobuf field. The validation adapter therefore follows the known omitted
-parser-owned fields for SELECT suffixes/windows, DML `RETURNING`,
-`ON CONFLICT`, MERGE branches, and rule actions before layout binding. Each
-discovered SELECT still passes the existing `validate_select` capability check;
-this is traversal completion, not a second SQL parser.
+protobuf field. One validation adapter completes the reviewed traversal for
+SELECT suffixes/windows, DML `RETURNING`, `ON CONFLICT`, MERGE branches, and
+rule actions. Both nested unsupported-syntax validation and `QuerySpec`
+collection use that same completed walk, so a field cannot contribute layout
+ownership while bypassing the support boundary. Each discovered SELECT still
+passes the existing `validate_select` capability check; this is traversal
+completion, not a second SQL parser.
 
 `SupportedDocument` is produced by `validation::parse_supported_postgresql`. It
 proves that every top-level statement and every checked nested construct belongs

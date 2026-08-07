@@ -19,11 +19,13 @@ pub(super) struct SelectSpec {
 
 /// Parser-proven ownership for one lexical SELECT query.
 ///
+/// `statement_index` scopes ownership to the top-level parser statement.
 /// `anchor` is the byte location of the first target expression when the AST
-/// exposes one. Layout maps that source-owned location back to the nearest
-/// preceding SELECT token, avoiding shape-only matching between nested queries.
+/// exposes one. Empty target lists have no anchor; layout preserves their AST
+/// cardinality and binds them only within that owning statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct QuerySpec {
+    pub statement_index: usize,
     pub anchor: Option<usize>,
     pub select: SelectSpec,
 }

@@ -23,3 +23,11 @@ fn preserves_language_identifiers_in_sql_standard_routine_signatures() {
         "CREATE FUNCTION echo_language(language language)\nRETURNS language\nLANGUAGE SQL\nBEGIN ATOMIC\n    SELECT language;\nEND;",
     );
 }
+
+#[test]
+fn scopes_returns_casing_to_the_sql_routine_clause() {
+    assert_sql_layout_only(
+        "CREATE FUNCTION echo_returns(returns returns)\nreturns returns\nLANGUAGE SQL\nBEGIN ATOMIC\n    SELECT returns;\nEND;",
+        "CREATE FUNCTION echo_returns(returns returns)\nRETURNS returns\nLANGUAGE SQL\nBEGIN ATOMIC\n    SELECT returns;\nEND;",
+    );
+}

@@ -131,3 +131,34 @@ fn qualified_suffix_words_remain_branch_identifiers() {
         ),
     ]);
 }
+
+#[test]
+fn binds_identical_unanchored_select_owners_without_collapsing_them() {
+    assert_cases(&[
+        SqlCase::new(
+            "empty target lists with FROM",
+            "select from a union all select from b;",
+            "SELECT FROM a\n\nUNION ALL\n\nSELECT FROM b;",
+        ),
+        SqlCase::new(
+            "empty set-operation branches",
+            "select union all select;",
+            "SELECT\n\nUNION ALL\n\nSELECT;",
+        ),
+        SqlCase::new(
+            "empty branches with root suffix",
+            "select union select order by 1;",
+            "SELECT\n\nUNION\n\nSELECT\nORDER BY 1;",
+        ),
+        SqlCase::new(
+            "empty target lists in sibling predicate subqueries",
+            "select exists(select from a), exists(select from b);",
+            "SELECT\n    EXISTS (SELECT FROM a),\n    EXISTS (SELECT FROM b);",
+        ),
+        SqlCase::new(
+            "unanchored query stays scoped to its statement",
+            "grant select on t to reader; select;",
+            "GRANT SELECT ON t TO reader; SELECT;",
+        ),
+    ]);
+}
