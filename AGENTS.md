@@ -80,6 +80,18 @@ current specifications or architecture documents.
   - dependency necessity;
   - dead code.
 - Keep public behavior and exit codes documented.
+- Keep user-facing documentation synchronized with behavior changes:
+  - review `README.md` and update it when onboarding, headline features, or its
+    formatter examples materially change; keep the README concise and move
+    detailed reference material into `docs/`;
+  - update `docs/user-guide.md` when CLI workflows, discovery, Git selection,
+    configuration, directives, Go integration, diagnostics, or safety behavior
+    changes;
+  - update `docs/sql-coverage.md` whenever PostgreSQL syntax moves between
+    supported, partially supported, or unsupported status; do not claim support
+    there without fixture-backed coverage;
+  - keep `docs/implementation-checklist.md` aligned with the implementation
+    status and remaining work.
 - Remove dead code before completing a batch.
 - Preserve all third-party notices required by forked, copied, or vendored code.
 
