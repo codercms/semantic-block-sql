@@ -15,7 +15,7 @@ It understands PostgreSQL structure instead of formatting by keyword heuristics,
 
 ## What does it look like?
 
-<!-- GitHub tables size <pre> cells from unbreakable content. Keep <wbr> opportunities in long one-line examples so the 50/50 layout holds. -->
+<!-- Transparent intrinsic-width spacers keep GitHub's auto-layout from sizing Before/After columns from code-line length. -->
 
 ### Queries and joins
 
@@ -26,6 +26,7 @@ It understands PostgreSQL structure instead of formatting by keyword heuristics,
 </tr>
 <tr>
 <td width="50%" valign="top">
+<img src="docs/assets/readme-column-spacer.png" width="480" height="1" alt="">
 
 <pre><code class="language-sql">select * from a join b on
     a.id=b.a_id
@@ -33,6 +34,7 @@ It understands PostgreSQL structure instead of formatting by keyword heuristics,
 
 </td>
 <td width="50%" valign="top">
+<img src="docs/assets/readme-column-spacer.png" width="480" height="1" alt="">
 
 <pre><code class="language-sql">SELECT *
 FROM a
@@ -55,11 +57,16 @@ Authored grouping is intentional: if you split a predicate into logical branches
 </tr>
 <tr>
 <td width="50%" valign="top">
+<img src="docs/assets/readme-column-spacer.png" width="480" height="1" alt="">
 
-<pre><code class="language-sql">with combined_ids as(<wbr>select 1 as id <wbr>union all <wbr>select 2) <wbr>select id from combined_ids;</code></pre>
+<pre><code class="language-sql">with combined_ids as(
+    select 1 as id union all select 2
+)
+select id from combined_ids;</code></pre>
 
 </td>
 <td width="50%" valign="top">
+<img src="docs/assets/readme-column-spacer.png" width="480" height="1" alt="">
 
 <pre><code class="language-sql">WITH combined_ids AS (
     SELECT 1 AS id
@@ -86,11 +93,16 @@ The formatter uses indentation, blank lines, and clause boundaries to make query
 </tr>
 <tr>
 <td width="50%" valign="top">
+<img src="docs/assets/readme-column-spacer.png" width="480" height="1" alt="">
 
-<pre><code class="language-sql">update target <wbr>set value=source.value <wbr>from source <wbr>natural left outer join tenant <wbr>where target.id=source.id;</code></pre>
+<pre><code class="language-sql">update target set value=source.value
+from source
+natural left outer join tenant
+where target.id=source.id;</code></pre>
 
 </td>
 <td width="50%" valign="top">
+<img src="docs/assets/readme-column-spacer.png" width="480" height="1" alt="">
 
 <pre><code class="language-sql">UPDATE target
 SET value = source.value
@@ -221,13 +233,17 @@ For example:
 </tr>
 <tr>
 <td width="50%" valign="top">
+<img src="docs/assets/readme-column-spacer.png" width="480" height="1" alt="">
 
-<pre><code class="language-go">const query = `select id,name <wbr>from users <wbr>where active=true;`</code></pre>
+<pre><code class="language-go">const query = `select id,name
+from users
+where active=true;`</code></pre>
 
 </td>
 <td width="50%" valign="top">
+<img src="docs/assets/readme-column-spacer.png" width="480" height="1" alt="">
 
-<pre><code class="language-go">const query = `SELECT id, name <wbr>FROM users <wbr>WHERE active = TRUE;`</code></pre>
+<pre><code class="language-go">const query = `SELECT id, name FROM users WHERE active = TRUE;`</code></pre>
 
 </td>
 </tr>
