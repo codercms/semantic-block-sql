@@ -17,20 +17,20 @@ It understands PostgreSQL structure instead of formatting by keyword heuristics,
 
 ### Queries and joins
 
-<table>
+<table width="100%">
 <tr>
-<th>Before</th>
-<th>After</th>
+<th width="50%">Before</th>
+<th width="50%">After</th>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 
 <pre><code class="language-sql">select * from a join b on
     a.id=b.a_id
     and a.tenant_id=b.tenant_id;</code></pre>
 
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 
 <pre><code class="language-sql">SELECT *
 FROM a
@@ -46,18 +46,18 @@ Authored grouping is intentional: if you split a predicate into logical branches
 
 ### Semantic blocks
 
-<table>
+<table width="100%">
 <tr>
-<th>Before</th>
-<th>After</th>
+<th width="50%">Before</th>
+<th width="50%">After</th>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 
 <pre><code class="language-sql">with combined_ids as(select 1 as id union all select 2) select id from combined_ids;</code></pre>
 
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 
 <pre><code class="language-sql">WITH combined_ids AS (
     SELECT 1 AS id
@@ -74,6 +74,33 @@ FROM combined_ids;</code></pre>
 </table>
 
 The formatter uses indentation, blank lines, and clause boundaries to make query structure visible rather than merely normalizing whitespace.
+
+### PostgreSQL DML
+
+<table width="100%">
+<tr>
+<th width="50%">Before</th>
+<th width="50%">After</th>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+<pre><code class="language-sql">update target set value=source.value from source natural left outer join tenant where target.id=source.id;</code></pre>
+
+</td>
+<td width="50%" valign="top">
+
+<pre><code class="language-sql">UPDATE target
+SET value = source.value
+FROM source
+NATURAL LEFT OUTER JOIN tenant
+WHERE target.id = source.id;</code></pre>
+
+</td>
+</tr>
+</table>
+
+PostgreSQL-specific DML such as `UPDATE ... FROM`, `DELETE ... USING`, and joined relation sources use the same structural layout rules.
 
 ## Install
 
@@ -185,18 +212,18 @@ Go files are discovered alongside SQL files by default. Semblock understands com
 
 For example:
 
-<table>
+<table width="100%">
 <tr>
-<th>Before</th>
-<th>After</th>
+<th width="50%">Before</th>
+<th width="50%">After</th>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 
 <pre><code class="language-go">const query = `select id,name from users where active=true;`</code></pre>
 
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 
 <pre><code class="language-go">const query = `SELECT id, name FROM users WHERE active = TRUE;`</code></pre>
 
