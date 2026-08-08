@@ -15,6 +15,8 @@ It understands PostgreSQL structure instead of formatting by keyword heuristics,
 
 ## What does it look like?
 
+<!-- GitHub tables size <pre> cells from unbreakable content. Keep <wbr> opportunities in long one-line examples so the 50/50 layout holds. -->
+
 ### Queries and joins
 
 <table width="100%">
@@ -54,7 +56,7 @@ Authored grouping is intentional: if you split a predicate into logical branches
 <tr>
 <td width="50%" valign="top">
 
-<pre><code class="language-sql">with combined_ids as(select 1 as id union all select 2) select id from combined_ids;</code></pre>
+<pre><code class="language-sql">with combined_ids as(<wbr>select 1 as id <wbr>union all <wbr>select 2) <wbr>select id from combined_ids;</code></pre>
 
 </td>
 <td width="50%" valign="top">
@@ -85,7 +87,7 @@ The formatter uses indentation, blank lines, and clause boundaries to make query
 <tr>
 <td width="50%" valign="top">
 
-<pre><code class="language-sql">update target set value=source.value from source natural left outer join tenant where target.id=source.id;</code></pre>
+<pre><code class="language-sql">update target <wbr>set value=source.value <wbr>from source <wbr>natural left outer join tenant <wbr>where target.id=source.id;</code></pre>
 
 </td>
 <td width="50%" valign="top">
@@ -220,12 +222,12 @@ For example:
 <tr>
 <td width="50%" valign="top">
 
-<pre><code class="language-go">const query = `select id,name from users where active=true;`</code></pre>
+<pre><code class="language-go">const query = `select id,name <wbr>from users <wbr>where active=true;`</code></pre>
 
 </td>
 <td width="50%" valign="top">
 
-<pre><code class="language-go">const query = `SELECT id, name FROM users WHERE active = TRUE;`</code></pre>
+<pre><code class="language-go">const query = `SELECT id, name <wbr>FROM users <wbr>WHERE active = TRUE;`</code></pre>
 
 </td>
 </tr>
