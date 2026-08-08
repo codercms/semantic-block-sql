@@ -1,12 +1,17 @@
 # Project documentation
 
-This index separates current user and contributor documentation from historical implementation records.
+This index separates user documentation, current contributor documentation, and historical implementation records.
+
+## User documentation
+
+- [User guide](user-guide.md) — CLI workflows, Git selection, Go source, directives, configuration, diagnostics, and exit codes.
+- [PostgreSQL coverage](sql-coverage.md) — fixture-backed statement/expression coverage and known unsupported boundaries.
+- [Release builds](release-builds.md) — supported release targets, runtime baselines, and artifact workflow.
 
 ## Product and formatting contract
 
 - [Core `fmt` / `check` specification](semantic-block-sql-fmt-check-core-spec.md) — authoritative machine behavior.
 - [Semantic Block SQL style guide](semantic-block-sql-style-guide-ru.md) — human-oriented Russian guide.
-- [Release builds](release-builds.md) — supported release targets and artifact workflow.
 
 ## Architecture and development
 
