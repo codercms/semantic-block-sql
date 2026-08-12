@@ -123,6 +123,35 @@ fn bind_query(
         )));
     }
     query.from = bind_query_relation_source(tokens, structure, &query, spec)?;
+    let list_end = query
+        .clauses
+        .ordered_boundaries(query.end)
+        .into_iter()
+        .next()
+        .unwrap_or(query.end);
+    query.identifier_tokens = super::statement::bind_result_aliases(
+        tokens,
+        structure.depths(),
+        Some(query.list_start),
+        list_end,
+        query.base_depth,
+        &spec.target_aliases,
+        "SELECT target list",
+    )?;
+    query
+        .identifier_tokens
+        .extend(super::statement::bind_named_windows(
+            tokens,
+            structure.depths(),
+            query.clauses.window,
+            query
+                .clauses
+                .window
+                .map(|window| query.clauses.next_after(window, query.end))
+                .unwrap_or(query.end),
+            query.base_depth,
+            &spec.window_names,
+        )?);
     Ok(query)
 }
 
@@ -196,6 +225,7 @@ fn lexical_query_block(
         wrapper,
         clauses: bind_query_clauses(tokens, depths, select, end, base_depth),
         from: None,
+        identifier_tokens: Vec::new(),
     }
 }
 

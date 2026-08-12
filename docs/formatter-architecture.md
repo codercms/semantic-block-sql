@@ -293,12 +293,23 @@ pub(super) struct SqlToken<'a> {
     pub start: usize,
     pub end: usize,
     pub line_breaks_before: usize,
+    pub role: TokenRole,
 }
 ```
 
 The AST supplies semantic ownership; scanner tokens supply exact source text.
 The formatter does not deparse the protobuf AST because deparsing would discard
 comments, authored groups, and original token spelling.
+
+`TokenRole::Identifier` is an AST-proven casing override. Alias-bearing
+capability records retain the exact parser name, and the bounded token binders
+resolve each name to one token index. Relation identifiers use one ordered
+typed sequence so a same-spelled alias cannot be confused with a later
+relation name; function column definitions are bound through their owned
+definition lists. Unresolved or contradictory names fail with
+`FormatDiagnostic::Ownership` before rendering. `render_token` preserves an
+identifier-role token before applying scanner-based grammar or built-in casing,
+so final output and every width calculation use the same spelling.
 
 ## Layout planning
 
@@ -407,8 +418,9 @@ A formatting result is accepted only when all gates pass:
 5. canonical ASTs are equal after source locations are removed;
 6. literals, quoted identifiers, comments, and other protected tokens are
    byte-identical and ordered identically;
-7. a second formatting pass is byte-identical;
-8. every breakable line respects the hard-width policy.
+7. parser-bound identifier tokens are byte-identical and ordered identically;
+8. a second formatting pass is byte-identical;
+9. every breakable line respects the hard-width policy.
 
 No file is partially rewritten. The CLI plans every project rewrite before the
 first atomic replacement.

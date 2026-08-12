@@ -2,6 +2,13 @@ use pg_query::protobuf::{KeywordKind, Token};
 
 use super::FormatDiagnostic;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum TokenRole {
+    #[default]
+    Unowned,
+    Identifier,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SqlToken<'a> {
     pub kind: Token,
@@ -13,6 +20,7 @@ pub(super) struct SqlToken<'a> {
     /// token. Two or more line boundaries represent a hard blank-line
     /// boundary.
     pub line_breaks_before: usize,
+    pub role: TokenRole,
 }
 
 impl SqlToken<'_> {
@@ -147,6 +155,7 @@ pub(super) fn tokenize(source: &str) -> Result<Vec<SqlToken<'_>>, FormatDiagnost
             start,
             end,
             line_breaks_before: gap.bytes().filter(|byte| *byte == b'\n').count(),
+            role: TokenRole::Unowned,
         });
         previous_end = end;
     }

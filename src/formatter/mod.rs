@@ -702,6 +702,13 @@ fn format_supported_statement(
     };
     let output_document = validation::parse_supported_postgresql(&output)?;
     validation::validate_equivalent(source, &output)?;
+    let source_identifiers = semantic_block::identifier_spellings(source, &document)?;
+    let output_identifiers = semantic_block::identifier_spellings(&output, &output_document)?;
+    if source_identifiers != output_identifiers {
+        return Err(FormatDiagnostic::ProtectedTokenChanged(
+            "parser-owned identifier spelling changed".into(),
+        ));
+    }
     let second_pass = match options.style {
         Style::SemanticBlock => semantic_block::format(&output, options, &output_document)?,
     };

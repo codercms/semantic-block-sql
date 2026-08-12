@@ -125,6 +125,7 @@ pub(super) struct QueryBlock {
     pub wrapper: Option<(usize, usize)>,
     pub clauses: QueryClauses,
     pub from: Option<RelationSourceBlock>,
+    pub identifier_tokens: Vec<usize>,
 }
 
 /// One branch owned by a bounded UNION / INTERSECT / EXCEPT expression.
@@ -166,6 +167,7 @@ pub(super) struct WithBlock {
     pub definitions: Vec<(usize, usize)>,
     pub body_start: usize,
     pub base_depth: usize,
+    pub identifier_tokens: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,6 +213,7 @@ pub(super) struct RelationSourceBlock {
     pub joins: Vec<RelationJoinBlock>,
     pub wrappers: Vec<(usize, usize, usize)>,
     pub base_depth: usize,
+    pub identifier_tokens: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,6 +253,7 @@ pub(super) struct InsertBlock {
     pub rows: Vec<(usize, usize)>,
     pub on_conflict: Option<OnConflictBlock>,
     pub returning: Option<usize>,
+    pub identifier_tokens: Vec<usize>,
 }
 
 impl InsertBlock {
@@ -270,6 +274,7 @@ pub(super) struct UpdateBlock {
     pub from: Option<RelationSourceBlock>,
     pub where_clause: Option<usize>,
     pub returning: Option<usize>,
+    pub identifier_tokens: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -279,6 +284,7 @@ pub(super) struct DeleteBlock {
     pub using: Option<RelationSourceBlock>,
     pub where_clause: Option<usize>,
     pub returning: Option<usize>,
+    pub identifier_tokens: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -313,6 +319,7 @@ pub(super) struct MergeBlock {
     pub on: usize,
     pub branches: Vec<MergeBranch>,
     pub returning: Option<usize>,
+    pub identifier_tokens: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -432,6 +439,7 @@ pub(super) struct LayoutDocument {
     predicates: Vec<PredicateBlock>,
     set_operations: Vec<SetOperationBlock>,
     window_blocks: Vec<WindowBlock>,
+    identifier_tokens: Vec<usize>,
 }
 
 impl LayoutDocument {
@@ -462,7 +470,8 @@ impl LayoutDocument {
                 )));
             }
             if authored_with {
-                let with_block = bind_with_block(tokens, structure, &statement, body_start)?;
+                let with_block =
+                    bind_with_block(tokens, structure, &statement, body_start, &statement.ctes)?;
                 if with_block.definitions.len() != statement.ctes.len() {
                     return Err(FormatDiagnostic::Ownership(format!(
                         "{} CTE ownership disagrees with the validated AST shape: expected {}, found {}",
@@ -540,6 +549,30 @@ impl LayoutDocument {
             bind_set_operations(tokens, structure, &top_level_statements, document.queries())?;
         let window_blocks = bind_window_blocks(tokens, structure, &queries);
 
+        let mut identifier_tokens = queries
+            .iter()
+            .flat_map(|query| {
+                query.identifier_tokens.iter().copied().chain(
+                    query
+                        .from
+                        .iter()
+                        .flat_map(|source| source.identifier_tokens.iter().copied()),
+                )
+            })
+            .chain(
+                with_blocks
+                    .iter()
+                    .flat_map(|block| block.identifier_tokens.iter().copied()),
+            )
+            .chain(
+                statements
+                    .iter()
+                    .flat_map(|statement| statement_identifier_tokens(statement, tokens)),
+            )
+            .collect::<Vec<_>>();
+        identifier_tokens.sort_unstable();
+        identifier_tokens.dedup();
+
         Ok(Self {
             statements,
             queries,
@@ -547,6 +580,7 @@ impl LayoutDocument {
             predicates,
             set_operations,
             window_blocks,
+            identifier_tokens,
         })
     }
 
@@ -577,6 +611,10 @@ impl LayoutDocument {
 
     pub fn window_blocks(&self) -> &[WindowBlock] {
         &self.window_blocks
+    }
+
+    pub fn identifier_tokens(&self) -> &[usize] {
+        &self.identifier_tokens
     }
 
     pub fn statement_spans(&self) -> impl Iterator<Item = TokenSpan> + '_ {
@@ -696,6 +734,48 @@ impl LayoutDocument {
     }
 }
 
+fn statement_identifier_tokens<'a>(
+    statement: &'a StatementLayout,
+    tokens: &'a [SqlToken<'_>],
+) -> Box<dyn Iterator<Item = usize> + 'a> {
+    let owned_list = |range: Option<(usize, usize)>| {
+        range.into_iter().flat_map(move |(open, close)| {
+            (open + 1..close).filter(|index| {
+                !tokens[*index].is_comment() && tokens[*index].kind != Token::Ascii44
+            })
+        })
+    };
+    match statement {
+        StatementLayout::Insert(block) => Box::new(block.identifier_tokens.iter().copied()),
+        StatementLayout::Update(block) => Box::new(
+            block.identifier_tokens.iter().copied().chain(
+                block
+                    .from
+                    .iter()
+                    .flat_map(|source| source.identifier_tokens.iter().copied()),
+            ),
+        ),
+        StatementLayout::Delete(block) => Box::new(
+            block.identifier_tokens.iter().copied().chain(
+                block
+                    .using
+                    .iter()
+                    .flat_map(|source| source.identifier_tokens.iter().copied()),
+            ),
+        ),
+        StatementLayout::Merge(block) => Box::new(
+            block
+                .identifier_tokens
+                .iter()
+                .copied()
+                .chain(block.source.identifier_tokens.iter().copied()),
+        ),
+        StatementLayout::View(block) => Box::new(owned_list(block.aliases)),
+        StatementLayout::MaterializedView(block) => Box::new(owned_list(block.aliases)),
+        _ => Box::new(std::iter::empty()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -721,6 +801,8 @@ mod tests {
                 conflict: None,
                 // Deliberately contradict the source tokens.
                 returning_items: 0,
+                target_alias: None,
+                returning_aliases: Vec::new(),
             }),
             ctes: Vec::new(),
             range: SourceRange::new(0, source.len()),
@@ -762,5 +844,49 @@ mod tests {
             .expect("the relation FROM remains owned");
         assert_eq!(tokens[actual_from].text.to_ascii_uppercase(), "FROM");
         assert_eq!(tokens[actual_from + 1].text, "items");
+    }
+
+    #[test]
+    fn rejects_parser_owned_alias_that_cannot_bind_to_its_relation_owner() {
+        use crate::formatter::SourceRange;
+        use crate::formatter::ownership::{
+            AliasSpec, RelationIdentifierSpec, RelationListSpec, SelectSpec, SourceStatement,
+        };
+
+        let source = "SELECT 1 FROM items no;";
+        let tokens = tokenize(source).expect("scan succeeds");
+        let structure = TokenStructure::new(&tokens);
+        let document = SupportedDocument::new(vec![SourceStatement {
+            spec: StatementSpec::Select(SelectSpec {
+                has_with: false,
+                has_into: false,
+                set_operations: 0,
+                named_windows: 0,
+                has_order_by: false,
+                has_limit_offset: false,
+                has_limit_count: false,
+                locking_clauses: 0,
+                from: RelationListSpec {
+                    items: vec![RelationItemSpec::Relation],
+                    joins: Vec::new(),
+                    identifiers: vec![
+                        RelationIdentifierSpec::Name("items".into()),
+                        RelationIdentifierSpec::Alias(AliasSpec {
+                            name: "different_alias".into(),
+                            columns: Vec::new(),
+                        }),
+                    ],
+                },
+                target_aliases: vec![None],
+                window_names: Vec::new(),
+            }),
+            ctes: Vec::new(),
+            range: SourceRange::new(0, source.len()),
+        }]);
+
+        let error = LayoutDocument::bind(&document, &tokens, &structure)
+            .expect_err("alias disagreement must fail closed");
+        assert!(matches!(error, FormatDiagnostic::Ownership(_)));
+        assert!(error.to_string().contains("different_alias"));
     }
 }

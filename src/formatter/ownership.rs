@@ -15,6 +15,8 @@ pub(super) struct SelectSpec {
     pub has_limit_count: bool,
     pub locking_clauses: usize,
     pub from: RelationListSpec,
+    pub target_aliases: Vec<Option<String>>,
+    pub window_names: Vec<String>,
 }
 
 /// Parser-proven ownership for one lexical SELECT query.
@@ -68,7 +70,7 @@ pub(super) struct ConflictSpec {
 }
 
 /// Exact top-level INSERT capabilities proven by PostgreSQL AST validation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct InsertSpec {
     pub has_with: bool,
     pub target_columns: usize,
@@ -76,6 +78,21 @@ pub(super) struct InsertSpec {
     pub source: InsertSourceSpec,
     pub conflict: Option<ConflictSpec>,
     pub returning_items: usize,
+    pub target_alias: Option<String>,
+    pub returning_aliases: Vec<Option<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AliasSpec {
+    pub name: String,
+    pub columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum RelationIdentifierSpec {
+    Name(String),
+    Alias(AliasSpec),
+    ColumnDefinitions(Vec<String>),
 }
 
 /// One top-level relation-source item accepted in FROM, USING, or MERGE USING.
@@ -120,6 +137,7 @@ pub(super) struct RelationJoinSpec {
 pub(super) struct RelationListSpec {
     pub items: Vec<RelationItemSpec>,
     pub joins: Vec<RelationJoinSpec>,
+    pub identifiers: Vec<RelationIdentifierSpec>,
 }
 
 /// Exact top-level UPDATE capabilities proven by PostgreSQL AST validation.
@@ -130,6 +148,8 @@ pub(super) struct UpdateSpec {
     pub from: RelationListSpec,
     pub has_where: bool,
     pub returning_items: usize,
+    pub target_alias: Option<String>,
+    pub returning_aliases: Vec<Option<String>>,
 }
 
 /// Exact top-level DELETE capabilities proven by PostgreSQL AST validation.
@@ -139,6 +159,8 @@ pub(super) struct DeleteSpec {
     pub using: RelationListSpec,
     pub has_where: bool,
     pub returning_items: usize,
+    pub target_alias: Option<String>,
+    pub returning_aliases: Vec<Option<String>>,
 }
 
 /// MERGE branch action shape accepted by the validator.
@@ -170,6 +192,8 @@ pub(super) struct MergeSpec {
     pub source: RelationListSpec,
     pub branches: Vec<MergeBranchSpec>,
     pub returning_items: usize,
+    pub target_alias: Option<String>,
+    pub returning_aliases: Vec<Option<String>>,
 }
 
 /// CREATE VIEW check-option mode accepted by the validator.
@@ -481,6 +505,8 @@ pub(super) struct SourceStatement {
 /// AST-validated statement body owned by one common table expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CteStatementSpec {
+    pub name: String,
+    pub columns: Vec<String>,
     pub spec: StatementSpec,
     pub ctes: Vec<CteStatementSpec>,
 }
@@ -658,6 +684,8 @@ mod tests {
                     has_limit_count: false,
                     locking_clauses: 0,
                     from: RelationListSpec::default(),
+                    target_aliases: Vec::new(),
+                    window_names: Vec::new(),
                 }),
                 ctes: Vec::new(),
                 range: SourceRange::new(0, 9),
@@ -669,6 +697,8 @@ mod tests {
                     from: RelationListSpec::default(),
                     has_where: false,
                     returning_items: 0,
+                    target_alias: None,
+                    returning_aliases: Vec::new(),
                 }),
                 ctes: Vec::new(),
                 range: SourceRange::new(10, source.len()),
@@ -700,6 +730,8 @@ mod tests {
                 has_limit_count: false,
                 locking_clauses: 0,
                 from: RelationListSpec::default(),
+                target_aliases: Vec::new(),
+                window_names: Vec::new(),
             }),
             ctes: Vec::new(),
             range: SourceRange::new(0, source.len()),

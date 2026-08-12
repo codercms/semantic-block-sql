@@ -82,6 +82,13 @@ Reviewed relation-source support includes:
 - reviewed alias column and column-definition lists;
 - derived queries containing `WITH`.
 
+Alias spelling is preserved from parser ownership even when PostgreSQL scans
+the unquoted alias as a keyword. Fixture-backed coverage includes the complete
+PostgreSQL 17 keyword table, every keyword legal as an unquoted relation alias,
+all keywords as explicit output aliases, all bare labels as implicit output
+aliases, every supported DML alias owner, join forms, CTEs, named windows,
+views, relation alias columns, and function column definitions.
+
 The same typed relation ownership is used in nested queries, CTEs, views, `INSERT ... SELECT`, DML `RETURNING`, `ON CONFLICT`, MERGE expressions, windows, and other reviewed query containers.
 
 ## Data modification

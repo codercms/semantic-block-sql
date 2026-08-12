@@ -16,13 +16,13 @@ mod equivalence;
 pub use equivalence::validate_equivalent;
 
 use super::ownership::{
-    AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec, ConflictActionSpec, ConflictSpec,
-    CreateIndexSpec, CreateTableElementSpec, CreateTableSpec, CteStatementSpec, DeleteSpec,
-    InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeBranchSpec,
-    MergeSpec, OverrideSpec, QuerySpec, RelationItemSpec, RelationJoinConstraintSpec,
-    RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec, SelectSpec, StatementSpec,
-    SupportedDocument, UpdateSpec, UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec,
-    source_statement,
+    AliasSpec, AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec, ConflictActionSpec,
+    ConflictSpec, CreateIndexSpec, CreateTableElementSpec, CreateTableSpec, CteStatementSpec,
+    DeleteSpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec,
+    MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec, RelationItemSpec,
+    RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec,
+    SelectSpec, StatementSpec, SupportedDocument, UpdateSpec, UtilityStatementKind, ValuesSpec,
+    ViewCheckSpec, ViewSpec, source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -272,6 +272,8 @@ fn validated_nested_cte_specs(node: &NodeEnum) -> Result<Vec<CteStatementSpec>, 
             _ => return Err("unreviewed common table expression body"),
         };
         result.push(CteStatementSpec {
+            name: cte.ctename.clone(),
+            columns: string_nodes(&cte.aliascolnames, "CTE column alias")?,
             spec,
             ctes: validated_nested_cte_specs(query)?,
         });
@@ -1579,6 +1581,8 @@ fn validate_merge(merge: &MergeStmt) -> Result<MergeSpec, &'static str> {
         source,
         branches,
         returning_items: merge.returning_list.len(),
+        target_alias: relation.alias.as_ref().map(|alias| alias.aliasname.clone()),
+        returning_aliases: result_aliases(&merge.returning_list)?,
     })
 }
 
@@ -1640,6 +1644,12 @@ fn validate_insert(insert: &InsertStmt) -> Result<InsertSpec, &'static str> {
         source,
         conflict,
         returning_items: insert.returning_list.len(),
+        target_alias: insert
+            .relation
+            .as_ref()
+            .and_then(|relation| relation.alias.as_ref())
+            .map(|alias| alias.aliasname.clone()),
+        returning_aliases: result_aliases(&insert.returning_list)?,
     })
 }
 
@@ -1699,6 +1709,8 @@ fn validate_update(update: &UpdateStmt) -> Result<UpdateSpec, &'static str> {
         from,
         has_where: update.where_clause.is_some(),
         returning_items: update.returning_list.len(),
+        target_alias: relation.alias.as_ref().map(|alias| alias.aliasname.clone()),
+        returning_aliases: result_aliases(&update.returning_list)?,
     })
 }
 
@@ -1733,6 +1745,8 @@ fn validate_delete(delete: &DeleteStmt) -> Result<DeleteSpec, &'static str> {
         using,
         has_where: delete.where_clause.is_some(),
         returning_items: delete.returning_list.len(),
+        target_alias: relation.alias.as_ref().map(|alias| alias.aliasname.clone()),
+        returning_aliases: result_aliases(&delete.returning_list)?,
     })
 }
 
@@ -1757,6 +1771,15 @@ fn validate_relation_source(
     match source.node.as_ref() {
         Some(NodeEnum::RangeVar(range)) if range.inh => {
             validate_alias_columns(range.alias.as_ref(), "relation alias column list")?;
+            for name in [&range.catalogname, &range.schemaname, &range.relname]
+                .into_iter()
+                .filter(|name| !name.is_empty())
+            {
+                result
+                    .identifiers
+                    .push(RelationIdentifierSpec::Name(name.clone()));
+            }
+            push_alias(&mut result.identifiers, range.alias.as_ref())?;
             Ok(RelationItemSpec::Relation)
         }
         Some(NodeEnum::RangeVar(_)) => Err("ONLY relation source"),
@@ -1771,6 +1794,7 @@ fn validate_relation_source(
                 _ => return Err(feature),
             };
             let _ = validate_select(query, false)?;
+            push_alias(&mut result.identifiers, source.alias.as_ref())?;
             Ok(RelationItemSpec::Subquery)
         }
         Some(NodeEnum::RangeFunction(source)) => {
@@ -1783,15 +1807,29 @@ fn validate_relation_source(
                     return Err("ROWS FROM with outer column definition list");
                 }
                 for function in &source.functions {
-                    validate_range_function_entry(function, true)?;
+                    let columns = validate_range_function_entry(function, true)?;
+                    if !columns.is_empty() {
+                        result
+                            .identifiers
+                            .push(RelationIdentifierSpec::ColumnDefinitions(columns));
+                    }
                 }
+                push_alias(&mut result.identifiers, source.alias.as_ref())?;
                 Ok(RelationItemSpec::RowsFrom)
             } else {
                 if source.functions.len() != 1 {
                     return Err("multiple relation functions without ROWS FROM");
                 }
-                validate_range_function_entry(&source.functions[0], false)?;
+                let _ = validate_range_function_entry(&source.functions[0], false)?;
                 validate_column_definition_list(&source.coldeflist)?;
+                push_alias(&mut result.identifiers, source.alias.as_ref())?;
+                if !source.coldeflist.is_empty() {
+                    result
+                        .identifiers
+                        .push(RelationIdentifierSpec::ColumnDefinitions(
+                            column_definition_names(&source.coldeflist)?,
+                        ));
+                }
                 Ok(RelationItemSpec::Function)
             }
         }
@@ -1824,6 +1862,7 @@ fn validate_relation_source(
         }
         Some(NodeEnum::JoinExpr(join)) => {
             validate_join_source(join, result, feature)?;
+            push_alias(&mut result.identifiers, join.alias.as_ref())?;
             Ok(RelationItemSpec::Join)
         }
         Some(NodeEnum::JsonTable(_)) => Err("JSON_TABLE expression"),
@@ -1851,7 +1890,46 @@ fn validate_alias_columns(
     Ok(())
 }
 
-fn validate_range_function_entry(entry: &Node, rows_from: bool) -> Result<(), &'static str> {
+fn push_alias(
+    identifiers: &mut Vec<RelationIdentifierSpec>,
+    alias: Option<&pg_query::protobuf::Alias>,
+) -> Result<(), &'static str> {
+    let Some(alias) = alias else {
+        return Ok(());
+    };
+    identifiers.push(RelationIdentifierSpec::Alias(AliasSpec {
+        name: alias.aliasname.clone(),
+        columns: string_nodes(&alias.colnames, "relation alias column")?,
+    }));
+    Ok(())
+}
+
+fn string_nodes(nodes: &[Node], feature: &'static str) -> Result<Vec<String>, &'static str> {
+    nodes
+        .iter()
+        .map(|node| match node.node.as_ref() {
+            Some(NodeEnum::String(value)) => Ok(value.sval.clone()),
+            _ => Err(feature),
+        })
+        .collect()
+}
+
+fn result_aliases(results: &[Node]) -> Result<Vec<Option<String>>, &'static str> {
+    results
+        .iter()
+        .map(|result| match result.node.as_ref() {
+            Some(NodeEnum::ResTarget(target)) => {
+                Ok((!target.name.is_empty()).then(|| target.name.clone()))
+            }
+            _ => Err("unrecognized result expression"),
+        })
+        .collect()
+}
+
+fn validate_range_function_entry(
+    entry: &Node,
+    rows_from: bool,
+) -> Result<Vec<String>, &'static str> {
     let list = match entry.node.as_ref() {
         Some(NodeEnum::List(list)) if list.items.len() == 2 => list,
         _ => return Err("unrecognized relation function source"),
@@ -1865,7 +1943,18 @@ fn validate_range_function_entry(entry: &Node, rows_from: bool) -> Result<(), &'
     if !rows_from && !definitions.is_empty() {
         return Err("inline function column definitions outside ROWS FROM");
     }
-    validate_column_definition_list(definitions)
+    validate_column_definition_list(definitions)?;
+    column_definition_names(definitions)
+}
+
+fn column_definition_names(definitions: &[Node]) -> Result<Vec<String>, &'static str> {
+    definitions
+        .iter()
+        .map(|definition| match definition.node.as_ref() {
+            Some(NodeEnum::ColumnDef(column)) => Ok(column.colname.clone()),
+            _ => Err("unrecognized relation column definition"),
+        })
+        .collect()
 }
 
 fn validate_column_definition_list(definitions: &[Node]) -> Result<(), &'static str> {
@@ -1890,6 +1979,7 @@ fn validate_join_source(
     if join.join_using_alias.is_some() {
         return Err("JOIN USING alias");
     }
+    validate_alias_columns(join.alias.as_ref(), "join alias column list")?;
     if join
         .alias
         .as_ref()
@@ -2085,6 +2175,17 @@ fn validate_select(
         has_limit_count: select.limit_count.is_some(),
         locking_clauses: select.locking_clause.len(),
         from,
+        target_aliases: result_aliases(&select.target_list)?,
+        window_names: select
+            .window_clause
+            .iter()
+            .map(|window| match window.node.as_ref() {
+                Some(NodeEnum::WindowDef(window)) if !window.name.is_empty() => {
+                    Ok(window.name.clone())
+                }
+                _ => Err("unrecognized named window"),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
     })
 }
 
