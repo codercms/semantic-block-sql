@@ -382,7 +382,7 @@ pub(super) fn plan_select_lists(
     for query in queries {
         let select = query.select;
         let base_depth = query.base_depth;
-        let base_indent = query.indent;
+        let base_indent = query_indent(query, plan);
         let end = query
             .clauses
             .ordered_boundaries(query.end)

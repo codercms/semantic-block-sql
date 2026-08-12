@@ -87,6 +87,12 @@ impl LayoutPlan {
         }
     }
 
+    fn set_fallback_indent(&mut self, range: std::ops::Range<usize>, indent: usize) {
+        for slot in &mut self.token_indents[range] {
+            slot.get_or_insert(indent);
+        }
+    }
+
     fn indent_for(&self, index: usize, fallback: usize) -> usize {
         self.token_indents[index].unwrap_or(fallback)
     }
@@ -421,6 +427,12 @@ pub(super) fn format(
     Ok(writer.finish(source.ends_with('\n')))
 }
 
+fn query_indent(query: &QueryBlock, plan: &LayoutPlan) -> usize {
+    query.wrapper.map_or(query.indent, |(open, _close)| {
+        plan.indent_for(open, query.indent.saturating_sub(1)) + 1
+    })
+}
+
 pub(super) fn identifier_spellings(
     source: &str,
     document: &SupportedDocument,
@@ -663,7 +675,7 @@ fn plan_query_clauses(
     for query in queries {
         let select = query.select;
         let base_depth = query.base_depth;
-        let indent = query.indent;
+        let indent = query_indent(query, plan);
         let end = query.end;
         let has_join = query
             .from
@@ -708,7 +720,7 @@ fn plan_query_clauses(
 
         if let Some((_open, close)) = query.wrapper {
             plan.break_before(select, 1, indent);
-            plan.set_indent(select..close, indent);
+            plan.set_fallback_indent(select..close, indent);
             plan.break_before(close, 1, indent.saturating_sub(1));
         }
 
