@@ -2,12 +2,15 @@ use pg_query::protobuf::Token;
 
 use super::*;
 use crate::formatter::ownership::{
-    AlterTableSpec, ConflictActionSpec, CreateIndexSpec, CreateTableSpec, DeleteSpec,
-    InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeSpec, OverrideSpec,
-    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
-    RelationListSpec, SelectSpec, StatementTokens, UpdateSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
+    AliasSpec, AlterTableSpec, ConflictActionSpec, CreateIndexSpec, CreateTableSpec,
+    CteStatementSpec, DeleteSpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec,
+    MergeActionSpec, MergeSpec, OverrideSpec, RelationIdentifierSpec, RelationItemSpec,
+    RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec,
+    SelectSpec, StatementTokens, UpdateSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
 };
-use crate::formatter::tokens::{is_join_start, is_query_clause_start};
+use crate::formatter::tokens::{
+    is_join_start, is_query_clause_start, next_non_comment, previous_non_comment,
+};
 
 pub(super) fn bind_body_start(
     tokens: &[SqlToken<'_>],
@@ -978,6 +981,7 @@ pub(super) fn bind_with_block(
     structure: &TokenStructure,
     statement: &StatementTokens,
     body_start: usize,
+    specs: &[CteStatementSpec],
 ) -> Result<WithBlock, FormatDiagnostic> {
     let base_depth = statement.base_depth;
     let mut definitions = Vec::new();
@@ -1005,11 +1009,52 @@ pub(super) fn bind_with_block(
             "supported WITH clause has no CTE definitions".into(),
         ));
     }
+    require_count(
+        "WITH",
+        "CTE definition count",
+        definitions.len(),
+        specs.len(),
+    )?;
+    let mut identifier_tokens = Vec::new();
+    let mut header_start = statement.range.start + 1;
+    for (spec, &(open, close)) in specs.iter().zip(&definitions) {
+        let as_index = (header_start..open)
+            .rev()
+            .find(|index| structure.depth(*index) == base_depth && tokens[*index].kind == Token::As)
+            .ok_or_else(|| {
+                FormatDiagnostic::Ownership("WITH definition has no bound AS keyword".into())
+            })?;
+        identifier_tokens.push(bind_expected_name(
+            tokens,
+            header_start,
+            as_index,
+            &spec.name,
+            "CTE name",
+        )?);
+        if !spec.columns.is_empty() {
+            let columns_open = (header_start..as_index)
+                .find(|index| tokens[*index].kind == Token::Ascii40)
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership(
+                        "CTE column aliases have no opening parenthesis".into(),
+                    )
+                })?;
+            identifier_tokens.extend(bind_parenthesized_names(
+                tokens,
+                structure,
+                columns_open,
+                &spec.columns,
+                "CTE column aliases",
+            )?);
+        }
+        header_start = close + 1;
+    }
     Ok(WithBlock {
         with_index: statement.range.start,
         definitions,
         body_start,
         base_depth,
+        identifier_tokens,
     })
 }
 
@@ -1210,6 +1255,22 @@ pub(super) fn bind_insert(
         returning_items,
         spec.returning_items,
     )?;
+    let mut identifier_tokens = bind_optional_alias(
+        tokens,
+        body_start + 1,
+        target_open.unwrap_or(source_start),
+        spec.target_alias.as_deref(),
+        "INSERT target alias",
+    )?;
+    identifier_tokens.extend(bind_result_aliases(
+        tokens,
+        depths,
+        returning.map(|index| index + 1),
+        end,
+        base_depth,
+        &spec.returning_aliases,
+        "INSERT RETURNING",
+    )?);
 
     Ok(InsertBlock {
         span: TokenSpan {
@@ -1224,6 +1285,7 @@ pub(super) fn bind_insert(
         rows,
         on_conflict,
         returning,
+        identifier_tokens,
     })
 }
 
@@ -1363,6 +1425,22 @@ pub(super) fn bind_update(
             .unwrap_or(0),
         spec.returning_items,
     )?;
+    let mut identifier_tokens = bind_optional_alias(
+        tokens,
+        body_start + 1,
+        set,
+        spec.target_alias.as_deref(),
+        "UPDATE target alias",
+    )?;
+    identifier_tokens.extend(bind_result_aliases(
+        tokens,
+        depths,
+        returning.map(|index| index + 1),
+        end,
+        base_depth,
+        &spec.returning_aliases,
+        "UPDATE RETURNING",
+    )?);
 
     Ok(UpdateBlock {
         span: TokenSpan {
@@ -1375,6 +1453,7 @@ pub(super) fn bind_update(
         from,
         where_clause,
         returning,
+        identifier_tokens,
     })
 }
 
@@ -1444,6 +1523,27 @@ pub(super) fn bind_delete(
             .unwrap_or(0),
         spec.returning_items,
     )?;
+    let target_end = [using_index, where_clause, returning]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(end);
+    let mut identifier_tokens = bind_optional_alias(
+        tokens,
+        body_start + 1,
+        target_end,
+        spec.target_alias.as_deref(),
+        "DELETE target alias",
+    )?;
+    identifier_tokens.extend(bind_result_aliases(
+        tokens,
+        depths,
+        returning.map(|index| index + 1),
+        end,
+        base_depth,
+        &spec.returning_aliases,
+        "DELETE RETURNING",
+    )?);
 
     Ok(DeleteBlock {
         span: TokenSpan {
@@ -1455,6 +1555,7 @@ pub(super) fn bind_delete(
         using,
         where_clause,
         returning,
+        identifier_tokens,
     })
 }
 
@@ -1668,6 +1769,22 @@ pub(super) fn bind_merge(
             .unwrap_or(0),
         spec.returning_items,
     )?;
+    let mut identifier_tokens = bind_optional_alias(
+        tokens,
+        body_start + 1,
+        using,
+        spec.target_alias.as_deref(),
+        "MERGE target alias",
+    )?;
+    identifier_tokens.extend(bind_result_aliases(
+        tokens,
+        depths,
+        returning.map(|index| index + 1),
+        end,
+        base_depth,
+        &spec.returning_aliases,
+        "MERGE RETURNING",
+    )?);
 
     Ok(MergeBlock {
         span: TokenSpan {
@@ -1680,6 +1797,7 @@ pub(super) fn bind_merge(
         on,
         branches,
         returning,
+        identifier_tokens,
     })
 }
 
@@ -1842,6 +1960,9 @@ pub(super) fn bind_relation_source(
         })
         .collect();
 
+    let identifier_tokens =
+        bind_relation_identifiers(tokens, structure, range, &spec.identifiers, owner)?;
+
     Ok(RelationSourceBlock {
         introducer,
         range,
@@ -1850,7 +1971,243 @@ pub(super) fn bind_relation_source(
         joins,
         wrappers,
         base_depth,
+        identifier_tokens,
     })
+}
+
+fn bind_relation_identifiers(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    range: TokenRange,
+    expected: &[RelationIdentifierSpec],
+    owner: &str,
+) -> Result<Vec<usize>, FormatDiagnostic> {
+    let mut result = Vec::new();
+    let mut cursor = range.start;
+    for identifier in expected {
+        match identifier {
+            RelationIdentifierSpec::Name(name) => {
+                let index = bind_expected_name(tokens, cursor, range.end, name, owner)?;
+                result.push(index);
+                cursor = index + 1;
+            }
+            RelationIdentifierSpec::Alias(alias) => {
+                let index = (cursor..range.end)
+                    .find(|index| {
+                        token_matches_identifier(&tokens[*index], &alias.name)
+                            && is_relation_alias_boundary(tokens, *index, range.end, alias)
+                    })
+                    .ok_or_else(|| {
+                        FormatDiagnostic::Ownership(format!(
+                            "{owner} cannot bind relation alias {:?}",
+                            alias.name
+                        ))
+                    })?;
+                result.push(index);
+                cursor = index + 1;
+                if !alias.columns.is_empty() {
+                    let open = next_non_comment(tokens, index)
+                        .filter(|next| *next < range.end && tokens[*next].kind == Token::Ascii40)
+                        .ok_or_else(|| {
+                            FormatDiagnostic::Ownership(format!(
+                                "{owner} alias {:?} has no column list",
+                                alias.name
+                            ))
+                        })?;
+                    result.extend(bind_parenthesized_names(
+                        tokens,
+                        structure,
+                        open,
+                        &alias.columns,
+                        owner,
+                    )?);
+                    cursor = structure.matching_parenthesis(open).unwrap_or(open) + 1;
+                }
+            }
+            RelationIdentifierSpec::ColumnDefinitions(columns) => {
+                let open = (cursor..range.end)
+                    .filter(|index| tokens[*index].kind == Token::Ascii40)
+                    .find(|open| {
+                        previous_non_comment(tokens, *open)
+                            .is_some_and(|previous| tokens[previous].kind == Token::As)
+                            || (cursor..*open).all(|index| tokens[index].is_comment())
+                    })
+                    .ok_or_else(|| {
+                        FormatDiagnostic::Ownership(format!(
+                            "{owner} cannot bind function column definitions"
+                        ))
+                    })?;
+                result.extend(bind_parenthesized_names(
+                    tokens, structure, open, columns, owner,
+                )?);
+                cursor = structure.matching_parenthesis(open).unwrap_or(open) + 1;
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn is_relation_alias_boundary(
+    tokens: &[SqlToken<'_>],
+    index: usize,
+    end: usize,
+    alias: &AliasSpec,
+) -> bool {
+    if previous_non_comment(tokens, index)
+        .is_some_and(|previous| tokens[previous].kind == Token::Ascii46)
+    {
+        return false;
+    }
+    if previous_non_comment(tokens, index)
+        .is_some_and(|previous| tokens[previous].kind == Token::As)
+    {
+        return true;
+    }
+    let Some(next) = next_non_comment(tokens, index).filter(|next| *next < end) else {
+        return true;
+    };
+    (tokens[next].kind == Token::Ascii40 && !alias.columns.is_empty())
+        || tokens[next].kind == Token::Ascii44
+        || tokens[next].kind == Token::Ascii59
+        || tokens[next].kind == Token::On
+        || tokens[next].kind == Token::Using
+        || tokens[next].kind == Token::Tablesample
+        || is_join_start(tokens, next)
+        || is_query_clause_start(tokens, next)
+}
+
+fn bind_optional_alias(
+    tokens: &[SqlToken<'_>],
+    start: usize,
+    end: usize,
+    expected: Option<&str>,
+    owner: &str,
+) -> Result<Vec<usize>, FormatDiagnostic> {
+    expected
+        .map(|name| {
+            (start..end)
+                .rev()
+                .find(|index| token_matches_identifier(&tokens[*index], name))
+                .map(|index| vec![index])
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership(format!("{owner} cannot bind alias {name:?}"))
+                })
+        })
+        .unwrap_or_else(|| Ok(Vec::new()))
+}
+
+pub(super) fn bind_result_aliases(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    start: Option<usize>,
+    end: usize,
+    base_depth: usize,
+    expected: &[Option<String>],
+    owner: &str,
+) -> Result<Vec<usize>, FormatDiagnostic> {
+    let Some(start) = start else {
+        return if expected.is_empty() {
+            Ok(Vec::new())
+        } else {
+            Err(FormatDiagnostic::Ownership(format!(
+                "{owner} has aliases but no output list"
+            )))
+        };
+    };
+    let items = split_item_ranges(tokens, depths, start, end, base_depth)?;
+    require_count(owner, "output item count", items.len(), expected.len())?;
+    items
+        .iter()
+        .zip(expected)
+        .filter_map(|(item, alias)| alias.as_ref().map(|alias| (item, alias)))
+        .map(|(item, alias)| {
+            (item.start..item.end)
+                .rev()
+                .find(|index| token_matches_identifier(&tokens[*index], alias))
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership(format!(
+                        "{owner} cannot bind output alias {alias:?}"
+                    ))
+                })
+        })
+        .collect()
+}
+
+pub(super) fn bind_named_windows(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    start: Option<usize>,
+    end: usize,
+    base_depth: usize,
+    expected: &[String],
+) -> Result<Vec<usize>, FormatDiagnostic> {
+    let Some(window) = start else {
+        return if expected.is_empty() {
+            Ok(Vec::new())
+        } else {
+            Err(FormatDiagnostic::Ownership(
+                "named windows have no WINDOW clause".into(),
+            ))
+        };
+    };
+    let items = split_item_ranges(tokens, depths, window + 1, end, base_depth)?;
+    require_count("WINDOW", "definition count", items.len(), expected.len())?;
+    items
+        .iter()
+        .zip(expected)
+        .map(|(item, name)| bind_expected_name(tokens, item.start, item.end, name, "WINDOW name"))
+        .collect()
+}
+
+fn bind_parenthesized_names(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    open: usize,
+    expected: &[String],
+    owner: &str,
+) -> Result<Vec<usize>, FormatDiagnostic> {
+    let close = structure.matching_parenthesis(open).ok_or_else(|| {
+        FormatDiagnostic::Ownership(format!("{owner} has an unclosed identifier list"))
+    })?;
+    let items = split_item_ranges(
+        tokens,
+        structure.depths(),
+        open + 1,
+        close,
+        structure.depth(open) + 1,
+    )?;
+    require_count(owner, "identifier count", items.len(), expected.len())?;
+    items
+        .iter()
+        .zip(expected)
+        .map(|(item, name)| bind_expected_name(tokens, item.start, item.end, name, owner))
+        .collect()
+}
+
+fn bind_expected_name(
+    tokens: &[SqlToken<'_>],
+    start: usize,
+    end: usize,
+    expected: &str,
+    owner: &str,
+) -> Result<usize, FormatDiagnostic> {
+    (start..end)
+        .find(|index| token_matches_identifier(&tokens[*index], expected))
+        .ok_or_else(|| {
+            FormatDiagnostic::Ownership(format!("{owner} cannot bind identifier {expected:?}"))
+        })
+}
+
+fn token_matches_identifier(token: &SqlToken<'_>, expected: &str) -> bool {
+    if let Some(quoted) = token
+        .text
+        .strip_prefix('"')
+        .and_then(|text| text.strip_suffix('"'))
+    {
+        quoted.replace("\"\"", "\"") == expected
+    } else {
+        token.text.eq_ignore_ascii_case(expected)
+    }
 }
 fn set_operation_count(
     tokens: &[SqlToken<'_>],

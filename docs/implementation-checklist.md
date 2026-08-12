@@ -884,6 +884,19 @@ The earlier MVP checkbox that kept interpreted strings disabled records the hist
 - [x] Complete formatting, Clippy, full tests, Rustdoc, and `git diff --check`.
 - [ ] Require remote CI before merge.
 
+## Parser-owned token roles and identifier preservation
+
+The architecture plan and executable checklist are maintained in
+[`identifier-token-role-architecture-plan.md`](identifier-token-role-architecture-plan.md).
+
+- [x] Replace scanner-only alias casing with parser-owned identifier roles.
+- [x] Preserve parser-owned aliases exactly across every supported alias
+  position.
+- [x] Add PostgreSQL 17 keyword-category brute-force regression matrices.
+- [x] Add the post-format exact-identifier safety gate.
+- [x] Complete the coherent batch commit; the local quality gate, self-review,
+  and documentation are complete.
+
 ## Cross-cutting SQL coverage pass
 
 - [x] Replace duplicated SQL success assertions with one shared test contract.

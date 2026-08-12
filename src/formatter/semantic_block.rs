@@ -8,7 +8,7 @@ use super::layout_ir::{
 };
 use super::ownership::SupportedDocument;
 use super::structure::TokenStructure;
-use super::tokens::{SqlToken, is_join_start, tokenize};
+use super::tokens::{SqlToken, TokenRole, is_join_start, tokenize};
 use super::{
     FormatDiagnostic, FormatOptions, FormatWarning, INDENT_WIDTH, NotEqualPolicy, SemicolonPolicy,
     SourceRange,
@@ -193,7 +193,7 @@ pub(super) fn format(
     options: &FormatOptions,
     document: &SupportedDocument,
 ) -> Result<String, FormatDiagnostic> {
-    let tokens = tokenize(source)?;
+    let mut tokens = tokenize(source)?;
     if tokens.is_empty() {
         return Ok(String::new());
     }
@@ -202,6 +202,9 @@ pub(super) fn format(
     let depths = structure.depths();
     let parens = structure.parenthesis_pairs();
     let layout = LayoutDocument::bind(document, &tokens, &structure)?;
+    for &index in layout.identifier_tokens() {
+        tokens[index].role = TokenRole::Identifier;
+    }
     let cases = case_ranges(&tokens, options);
     let selects = layout.selects().cloned().collect::<Vec<_>>();
     let inserts = layout.inserts().cloned().collect::<Vec<_>>();
@@ -416,6 +419,20 @@ pub(super) fn format(
     }
 
     Ok(writer.finish(source.ends_with('\n')))
+}
+
+pub(super) fn identifier_spellings(
+    source: &str,
+    document: &SupportedDocument,
+) -> Result<Vec<String>, FormatDiagnostic> {
+    let tokens = tokenize(source)?;
+    let structure = TokenStructure::new(&tokens);
+    let layout = LayoutDocument::bind(document, &tokens, &structure)?;
+    Ok(layout
+        .identifier_tokens()
+        .iter()
+        .map(|index| tokens[*index].text.to_owned())
+        .collect())
 }
 
 fn extend_relation_query_starts(

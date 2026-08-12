@@ -75,6 +75,10 @@ pub(super) enum InsertSourceSpec {
 A field belongs in the capability record when the token binder can verify it.
 Avoid documentary fields that are never consumed.
 
+If the PostgreSQL AST exposes an alias, output label, named window, CTE name,
+or alias-column name, retain its spelling in the capability record. Scanner
+keyword classification is not proof that such a token is grammar.
+
 ### 3. Extend AST validation
 
 Update the family validator in `validation.rs` and return the new capability.
@@ -94,9 +98,13 @@ The binder must:
 - respect `base_depth`;
 - locate presentation boundaries;
 - compare clause presence, modes, and cardinalities with the `*Spec`;
+- bind every retained alias or alias-column name to its exact token index and
+  identifier role;
 - return `FormatDiagnostic::Ownership` on disagreement.
 
-Do not add a document-wide keyword scan.
+Do not add a document-wide keyword scan or a production keyword exception
+list. When an alias has no parser location, bind it structurally inside its
+typed owner and fail closed if the parser-owned sequence cannot be reproduced.
 
 ### 5. Reuse or extend layout IR
 

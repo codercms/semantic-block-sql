@@ -116,6 +116,24 @@ same top-level source kinds and join predicate cardinalities. `CREATE VIEW` and
 `CREATE MATERIALIZED VIEW` use separate capability records so view suffixes and
 materialized-view population clauses cannot leak into SELECT ownership.
 
+### Parser-owned alias casing
+
+PostgreSQL scanner keyword categories are not semantic roles. For example,
+`no` is grammar in `FOR NO KEY UPDATE` but an alias in
+`FROM numbered_offers no`. The formatter therefore retains parser-owned alias
+names in the typed capability IR and binds them, in source order, to exact
+token indices inside their existing statement, query, CTE, output-list,
+window, view, or relation-source owner. Those tokens receive an identifier
+role and preserve their authored spelling; the same role-aware token stream is
+used for layout widths, rendering, and diagnostics.
+
+This resolves the earlier scanner-only behavior in favor of typed ownership.
+Production code has no PostgreSQL keyword exception list and does not infer
+aliases with a document-wide scan. A missing, out-of-order, or
+contradictory binding is an ownership failure, and the post-format safety gate
+also requires the complete bound identifier sequence to retain exact spelling.
+The pinned keyword tables are test data only.
+
 ## Non-negotiable invariants
 
 ### Semantic safety

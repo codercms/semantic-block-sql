@@ -20,7 +20,7 @@ fn formats_rows_from_tablesample_and_relation_column_lists() {
     );
     assert_format(
         "merge into items target using lateral jsonb_each_text(target.payload) as source(key,value) on true when matched then delete;",
-        "MERGE INTO items target\nUSING LATERAL jsonb_each_text(target.payload) AS source (KEY, value)\nON TRUE\n\nWHEN MATCHED THEN DELETE;",
+        "MERGE INTO items target\nUSING LATERAL jsonb_each_text(target.payload) AS source (key, value)\nON TRUE\n\nWHEN MATCHED THEN DELETE;",
     );
 }
 

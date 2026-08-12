@@ -2,7 +2,7 @@ use pg_query::protobuf::Token;
 
 use super::semantic_block::{
     is_compact_grammar_parenthesis, is_function_call_name, is_function_call_syntax,
-    is_type_keyword, is_type_modifier_syntax, is_uppercase_builtin, render_token,
+    is_type_keyword, is_type_modifier_syntax, is_uppercase_builtin,
 };
 use super::tokens::{SqlToken, tokenize};
 use super::{
@@ -37,15 +37,15 @@ pub(super) fn style_diagnostics(
         diagnostics.push(diagnostic);
     }
 
-    for &(source_index, _) in &pairs {
-        let expected = render_token(&source_tokens, source_index, options);
+    for &(source_index, output_index) in &pairs {
+        let expected = output_tokens[output_index].text;
         let actual = source_tokens[source_index].text;
         if actual != expected {
             diagnostics.push(token_diagnostic(
                 &source_tokens,
                 source_index,
                 actual,
-                &expected,
+                expected,
             ));
         }
     }
