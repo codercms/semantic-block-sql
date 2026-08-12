@@ -224,6 +224,36 @@ pub enum FormatDiagnostic {
     },
 }
 
+struct StatementFormatError {
+    diagnostic: FormatDiagnostic,
+    source_range: Option<SourceRange>,
+}
+
+impl StatementFormatError {
+    fn shifted(mut self, offset: usize) -> Self {
+        self.source_range = self.source_range.map(|range| range.shifted(offset));
+        self
+    }
+}
+
+impl From<FormatDiagnostic> for StatementFormatError {
+    fn from(diagnostic: FormatDiagnostic) -> Self {
+        Self {
+            diagnostic,
+            source_range: None,
+        }
+    }
+}
+
+impl From<validation::equivalence::EquivalenceError> for StatementFormatError {
+    fn from(error: validation::equivalence::EquivalenceError) -> Self {
+        Self {
+            diagnostic: error.diagnostic,
+            source_range: error.source_range,
+        }
+    }
+}
+
 /// Formats one or more complete PostgreSQL statements without touching files.
 pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql, FormatDiagnostic> {
     options.validate()?;
@@ -264,16 +294,7 @@ fn format_document_once(
         options,
         &content.opaque_output_ranges,
     )?;
-    let opaque_source_ranges = diagnostics
-        .iter()
-        .filter(|diagnostic| {
-            matches!(
-                diagnostic.rule_id.as_str(),
-                "syntax.unsupported" | "format.statement_skipped"
-            )
-        })
-        .map(|diagnostic| diagnostic.source_range)
-        .collect::<Vec<_>>();
+    let opaque_source_ranges = content.opaque_source_ranges;
     let mut style_diagnostics = diagnostics::style_diagnostics(source, &output, options)?;
     style_diagnostics.retain(|diagnostic| {
         !opaque_source_ranges.iter().any(|range| {
@@ -296,6 +317,7 @@ fn format_document_once(
 struct DocumentContent {
     output: String,
     diagnostics: Vec<Diagnostic>,
+    opaque_source_ranges: Vec<SourceRange>,
     opaque_output_ranges: Vec<SourceRange>,
 }
 
@@ -360,6 +382,19 @@ fn format_document_content_at(
             .into_iter()
             .map(|range| range.shifted(header_output_offset)),
     );
+    let mut opaque_source_ranges = prefix.opaque_source_ranges;
+    opaque_source_ranges.extend(
+        header
+            .opaque_source_ranges
+            .into_iter()
+            .map(|range| range.shifted(region.header_start)),
+    );
+    opaque_source_ranges.extend(
+        suffix
+            .opaque_source_ranges
+            .into_iter()
+            .map(|range| range.shifted(region.payload_end)),
+    );
     opaque_output_ranges.extend(
         suffix
             .opaque_output_ranges
@@ -375,6 +410,7 @@ fn format_document_content_at(
     Ok(DocumentContent {
         output,
         diagnostics,
+        opaque_source_ranges,
         opaque_output_ranges,
     })
 }
@@ -389,10 +425,12 @@ fn format_regular_document_content(
     let split = pg_query::split_with_parser(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
     if parsed.protobuf.stmts.is_empty() {
-        let formatted = format_supported_statement(source, options)?;
+        let formatted =
+            format_supported_statement(source, options).map_err(|error| error.diagnostic)?;
         return Ok(DocumentContent {
             output: formatted.output,
             diagnostics: Vec::new(),
+            opaque_source_ranges: Vec::new(),
             opaque_output_ranges: Vec::new(),
         });
     }
@@ -404,6 +442,7 @@ fn format_regular_document_content(
     let mut output = String::with_capacity(source.len());
     let mut cursor = 0usize;
     let mut diagnostics = Vec::new();
+    let mut opaque_source_ranges = Vec::new();
     let mut opaque_output_ranges = Vec::new();
 
     for raw in &parsed.protobuf.stmts {
@@ -429,13 +468,16 @@ fn format_regular_document_content(
                     );
                 }
             }
-            Err(error @ FormatDiagnostic::UnsupportedSyntax { .. }) => {
+            Err(error)
+                if matches!(error.diagnostic, FormatDiagnostic::UnsupportedSyntax { .. }) =>
+            {
                 output.push_str(statement);
+                opaque_source_ranges.push(SourceRange::new(start, end));
                 opaque_output_ranges.push(SourceRange::new(statement_output_start, output.len()));
                 diagnostics.push(
                     diagnostics::unsupported_diagnostic(
                         statement,
-                        &error,
+                        &error.diagnostic,
                         options.unsupported_policy,
                     )
                     .shifted(start),
@@ -443,15 +485,17 @@ fn format_regular_document_content(
             }
             Err(error) => {
                 output.push_str(statement);
+                opaque_source_ranges.push(SourceRange::new(start, end));
                 opaque_output_ranges.push(SourceRange::new(statement_output_start, output.len()));
                 let statement_line =
                     source_line_offset + completed_line_count(&source[..start]) + 1;
                 diagnostics.push(
                     diagnostics::statement_skipped_diagnostic(
                         statement,
-                        &error,
+                        &error.diagnostic,
                         options.unsupported_policy,
                         statement_line,
+                        error.source_range,
                     )
                     .shifted(start),
                 );
@@ -463,6 +507,7 @@ fn format_regular_document_content(
     Ok(DocumentContent {
         output,
         diagnostics,
+        opaque_source_ranges,
         opaque_output_ranges,
     })
 }
@@ -679,7 +724,7 @@ fn format_statement_once(
     source: &str,
     raw: &pg_query::protobuf::RawStmt,
     options: &FormatOptions,
-) -> Result<FormattedSql, FormatDiagnostic> {
+) -> Result<FormattedSql, StatementFormatError> {
     if is_routine_statement(raw) {
         if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(statement)) =
             raw.stmt.as_deref().and_then(|node| node.node.as_ref())
@@ -687,7 +732,7 @@ fn format_statement_once(
         {
             return sql_standard_routine::format_single_routine(source, statement, options);
         }
-        return procedural::format_single_routine(source, options);
+        return procedural::format_single_routine(source, options).map_err(Into::into);
     }
     format_supported_statement(source, options)
 }
@@ -695,25 +740,26 @@ fn format_statement_once(
 fn format_supported_statement(
     source: &str,
     options: &FormatOptions,
-) -> Result<FormattedSql, FormatDiagnostic> {
+) -> Result<FormattedSql, StatementFormatError> {
     let document = validation::parse_supported_postgresql(source)?;
     let output = match options.style {
         Style::SemanticBlock => semantic_block::format(source, options, &document)?,
     };
     let output_document = validation::parse_supported_postgresql(&output)?;
-    validation::validate_equivalent(source, &output)?;
+    validation::equivalence::validate_equivalent_located(source, &output)?;
     let source_identifiers = semantic_block::identifier_spellings(source, &document)?;
     let output_identifiers = semantic_block::identifier_spellings(&output, &output_document)?;
     if source_identifiers != output_identifiers {
         return Err(FormatDiagnostic::ProtectedTokenChanged(
             "parser-owned identifier spelling changed".into(),
-        ));
+        )
+        .into());
     }
     let second_pass = match options.style {
         Style::SemanticBlock => semantic_block::format(&output, options, &output_document)?,
     };
     if output != second_pass {
-        return Err(FormatDiagnostic::NotIdempotent);
+        return Err(FormatDiagnostic::NotIdempotent.into());
     }
     let warnings = semantic_block::validate_hard_width(&output, options)?;
     let mut result_diagnostics = diagnostics::style_diagnostics(source, &output, options)?;
@@ -732,10 +778,11 @@ fn normalize_document_gap(source: &str, final_gap: bool) -> String {
     let mut output = String::with_capacity(source.len());
     for segment in source.split_inclusive('\n') {
         if let Some(line) = segment.strip_suffix('\n') {
-            output.push_str(line.trim_end_matches([' ', '\t', '\r']));
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            output.push_str(line.trim_end_matches(tokens::is_removable_trailing_whitespace));
             output.push('\n');
         } else if final_gap {
-            output.push_str(segment.trim_end_matches([' ', '\t', '\r']));
+            output.push_str(segment.trim_end_matches(tokens::is_removable_trailing_whitespace));
         } else {
             output.push_str(segment);
         }

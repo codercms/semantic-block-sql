@@ -17,7 +17,8 @@ The formatter is designed around five constraints:
 1. PostgreSQL syntax ownership comes from PostgreSQL's parser, not handwritten
    SQL parsing.
 2. Exact authored tokens, comments, literals, and line boundaries remain
-   available to the renderer.
+   available to the renderer; terminal Unicode whitespace on comment lines is
+   the sole documented normalization within protected comment tokens.
 3. Unsupported or newly introduced PostgreSQL syntax is preserved unchanged.
 4. A statement family can be added without rewriting existing planners.
 5. `fmt` and `check` share one canonical formatting result and safety gates.
@@ -327,6 +328,13 @@ struct LayoutPlan {
 Planning functions request line breaks and indentation. The writer later emits
 tokens in their original order.
 
+The writer keeps pending layout whitespace separate from emitted token bytes.
+`space`, `newline`, and finalization may discard only that pending layout state;
+they never trim the output buffer. Comment rendering explicitly normalizes
+terminal Unicode whitespace first, and protected-token equivalence applies the
+same canonicalization. Style diagnostics map every removed run back to its
+exact UTF-8 source range.
+
 Indentation follows ownership precedence. A containing query wrapper may seed
 fallback indentation only for tokens that no child planner has claimed; it
 must not overwrite SELECT-item, expression, window, CASE, or list indentation.
@@ -424,8 +432,9 @@ A formatting result is accepted only when all gates pass:
 3. every supported statement binds to its token span;
 4. output parses and passes the same support classifier;
 5. canonical ASTs are equal after source locations are removed;
-6. literals, quoted identifiers, comments, and other protected tokens are
-   byte-identical and ordered identically;
+6. literals, quoted identifiers, and other protected tokens are byte-identical
+   and ordered identically; comments are identical after the documented
+   terminal-whitespace normalization;
 7. parser-bound identifier tokens are byte-identical and ordered identically;
 8. a second formatting pass is byte-identical;
 9. every breakable line respects the hard-width policy.

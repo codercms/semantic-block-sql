@@ -11,7 +11,7 @@ use pg_query::protobuf::{
     ViewCheckOption, ViewStmt,
 };
 use pg_query::{Context, NodeRef};
-mod equivalence;
+pub(super) mod equivalence;
 
 pub use equivalence::validate_equivalent;
 
