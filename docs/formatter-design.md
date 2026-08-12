@@ -153,7 +153,8 @@ Formatting must not:
   set-operation branches;
 - rename identifiers or aliases;
 - add casts or predicates;
-- change string, quoted identifier, comment, or dollar-quoted contents;
+- change string, quoted identifier, dollar-quoted contents, or comment bytes
+  other than terminal Unicode whitespace at a physical comment line end;
 - remove potentially meaningful parentheses;
 - optimize or refactor a query.
 
@@ -267,6 +268,16 @@ Comments remain in the scanner token order. Line comments always retain a
 physical line ending so they cannot consume a following token. Blank lines and
 standalone comments remain hard list boundaries when their preservation option
 is enabled.
+
+The core specification's comment-preservation and no-trailing-whitespace rules
+are resolved as follows: characters accepted by Rust `char::is_whitespace()`,
+excluding CR and LF terminators, are layout whitespace when they occur at the
+end of any physical line inside `--` or `/* ... */` comments. Rendering,
+protected-token equivalence, and diagnostics share this exact normalization.
+All other comment bytes and the authored line-ending convention remain
+protected. Consequently, cleanup of comment-end whitespace is a normal fixable
+`spacing.trailing_whitespace` change and never a `format.statement_skipped`
+safety failure.
 
 ### Hard-width result
 
@@ -889,7 +900,7 @@ indentation owner.
 
 ## Statement-granular opaque policy
 
-The formatter classifies every parser-proven top-level statement independently. A supported statement is formatted through the normal validation, ownership, equivalence, protected-token, hard-width, and idempotence gates. A valid but unsupported statement is copied byte-for-byte and receives `syntax.unsupported`. A statement that enters the supported pipeline but cannot pass one of those formatter gates is also copied byte-for-byte and receives `format.statement_skipped`, including its source line in the message.
+The formatter classifies every parser-proven top-level statement independently. A supported statement is formatted through the normal validation, ownership, equivalence, protected-token, hard-width, and idempotence gates. A valid but unsupported statement is copied byte-for-byte and receives `syntax.unsupported`. A statement that enters the supported pipeline but cannot pass one of those formatter gates is also copied byte-for-byte and receives `format.statement_skipped`, including its source line in the message. When the failing gate supplies a trusted source range, the diagnostic points to that cause; otherwise it falls back to the complete statement range. Opaque source ranges are tracked separately so a precise diagnostic never exposes style findings from a statement preserved wholesale.
 
 The default `UnsupportedPolicy::Skip` reports both opaque outcomes as warnings and continues with supported siblings. `UnsupportedPolicy::Error` elevates both to errors and returns the complete original document unchanged. A PostgreSQL parse or split failure remains document-fatal because statement boundaries are not trustworthy. This explicit project requirement supersedes the earlier file-wide formatter-safety rule while retaining statement atomicity and atomic filesystem replacement.
 

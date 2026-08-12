@@ -959,3 +959,26 @@ The architecture plan and executable checklist are maintained in
 - [x] Run formatting, Clippy, all tests, Rustdoc, and diff-hygiene gates.
 - [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
   diagnostics, dependency, and dead-code self-review.
+
+## Comment trailing-whitespace safety hardening
+
+- [x] Save and index a durable, decision-complete implementation plan.
+- [x] Add the smallest synthetic failing regression for the reported behavior
+  before changing formatter behavior; do not copy production SQL text.
+- [x] Cover ASCII and Unicode trailing whitespace in line and block comments
+  across LF, CRLF, bare CR, EOF, CTE, nested-query, inline, and standalone
+  contexts.
+- [x] Separate pending layout whitespace from emitted token bytes in the writer.
+- [x] Share one comment trailing-whitespace normalization rule between rendering,
+  protected-token equivalence, and diagnostics.
+- [x] Emit exact fixable byte ranges for normalized comment whitespace.
+- [x] Localize protected-token statement-skip diagnostics when a trusted token
+  range exists; retain the whole-statement fallback otherwise.
+- [x] Resolve the comment-preservation versus trailing-whitespace policy in the
+  core specification, design, and architecture documents.
+- [x] Run focused regressions and the complete formatting, Clippy, test, Rustdoc,
+  and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Bump the package version from `0.1.14` to `0.1.15`.
+- [x] Commit the coherent batch without unrelated workspace files.

@@ -1,18 +1,21 @@
 use pg_query::protobuf::{CreateFunctionStmt, node::Node};
 
-use super::{FormatDiagnostic, FormatOptions, FormattedSql, SemicolonPolicy};
+use super::{FormatDiagnostic, FormatOptions, FormattedSql, SemicolonPolicy, StatementFormatError};
 
 pub(super) fn format_single_routine(
     source: &str,
     statement: &CreateFunctionStmt,
     options: &FormatOptions,
-) -> Result<FormattedSql, FormatDiagnostic> {
+) -> Result<FormattedSql, StatementFormatError> {
     validate(statement, source)?;
     let (header_end, footer_start) = body_span(source)?;
-    let body = source[header_end..footer_start].trim();
+    let raw_body = &source[header_end..footer_start];
+    let body = raw_body.trim();
+    let body_offset = header_end + raw_body.len() - raw_body.trim_start().len();
     let mut body_options = options.clone();
     body_options.semicolon_policy = SemicolonPolicy::Preserve;
-    let formatted_body = super::format_supported_statement(body, &body_options)?;
+    let formatted_body = super::format_supported_statement(body, &body_options)
+        .map_err(|error| error.shifted(body_offset))?;
 
     let outer_tokens = super::procedural::OuterTokenOwnership {
         language_location: routine_language_location(statement),
@@ -53,10 +56,10 @@ pub(super) fn format_single_routine(
         .and_then(|raw| raw.stmt.as_deref())
         .and_then(|node| node.node.as_ref());
     let Some(Node::CreateFunctionStmt(reparsed_statement)) = reparsed_statement else {
-        return Err(FormatDiagnostic::SemanticMismatch);
+        return Err(FormatDiagnostic::SemanticMismatch.into());
     };
     validate(reparsed_statement, &output)?;
-    super::validation::validate_equivalent(source, &output)?;
+    super::validation::equivalence::validate_equivalent_located(source, &output)?;
 
     Ok(FormattedSql {
         changed: output != source,

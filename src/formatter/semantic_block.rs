@@ -1198,55 +1198,70 @@ fn compact_width(
 
 struct Writer {
     output: String,
+    pending_layout: String,
 }
 
 impl Writer {
     fn new() -> Self {
         Self {
             output: String::new(),
+            pending_layout: String::new(),
         }
     }
 
     fn at_line_start(&self) -> bool {
-        self.output.is_empty() || self.output.ends_with('\n') || self.output.ends_with(' ')
+        self.output.is_empty()
+            || self.output.ends_with('\n')
+            || self.pending_layout.contains('\n')
+            || self.pending_layout.ends_with(' ')
     }
 
     fn write(&mut self, text: &str) {
+        self.output.push_str(&self.pending_layout);
+        self.pending_layout.clear();
         self.output.push_str(text);
     }
 
     fn space(&mut self) {
-        if !self.at_line_start() && !self.output.ends_with(' ') {
-            self.output.push(' ');
+        if !self.at_line_start() && !self.pending_layout.ends_with(' ') {
+            self.pending_layout.push(' ');
         }
     }
 
     fn newline(&mut self, lines: usize, indent: usize) {
-        while self.output.ends_with(' ') {
-            self.output.pop();
+        while self.pending_layout.ends_with(' ') {
+            self.pending_layout.pop();
         }
         if self.output.is_empty() {
             return;
         }
 
-        let existing = self
-            .output
+        let pending_newlines = self
+            .pending_layout
             .as_bytes()
             .iter()
             .rev()
             .take_while(|byte| **byte == b'\n')
             .count();
-        self.output
+        let existing = if pending_newlines == 0 {
+            self.output
+                .as_bytes()
+                .iter()
+                .rev()
+                .take_while(|byte| **byte == b'\n')
+                .count()
+        } else {
+            pending_newlines
+        };
+        self.pending_layout
             .extend(std::iter::repeat_n('\n', lines.saturating_sub(existing)));
-        self.output
+        self.pending_layout
             .extend(std::iter::repeat_n(' ', indent * INDENT_WIDTH));
     }
 
     fn finish(mut self, trailing_newline: bool) -> String {
-        while self.output.ends_with([' ', '\n']) {
-            self.output.pop();
-        }
-        if trailing_newline && !self.output.is_empty() {
+        self.pending_layout.clear();
+        if trailing_newline && !self.output.is_empty() && !self.output.ends_with('\n') {
             self.output.push('\n');
         }
         self.output
@@ -1270,5 +1285,34 @@ mod hard_width_tests {
             validate_hard_width(output, &options),
             Err(FormatDiagnostic::HardLineExceeded { line: 1, .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod writer_tests {
+    use super::Writer;
+
+    #[test]
+    fn layout_operations_never_trim_emitted_token_bytes() {
+        let mut writer = Writer::new();
+        writer.write("token ");
+        writer.newline(1, 0);
+        writer.write("next");
+        assert_eq!(writer.finish(false), "token \nnext");
+
+        let mut writer = Writer::new();
+        writer.write("token");
+        writer.space();
+        writer.newline(1, 0);
+        writer.write("next");
+        assert_eq!(writer.finish(false), "token\nnext");
+
+        let mut writer = Writer::new();
+        writer.write("token ");
+        assert_eq!(writer.finish(false), "token ");
+
+        let mut writer = Writer::new();
+        writer.write("token\n");
+        assert_eq!(writer.finish(false), "token\n");
     }
 }

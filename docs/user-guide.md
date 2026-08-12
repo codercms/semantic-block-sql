@@ -85,6 +85,14 @@ By default:
 - either case preserves that statement byte-for-byte;
 - supported sibling statements continue formatting.
 
+When a skipped-statement failure has a trusted token location, its diagnostic
+points to that exact cause while the complete statement is still preserved.
+Failures without a reliable location use the complete statement range.
+
+Trailing Unicode whitespace on any physical comment line is ordinary fixable
+`spacing.trailing_whitespace`; it is removed without changing comment
+attachment or causing a statement skip.
+
 Make either condition fatal with:
 
 ```bash

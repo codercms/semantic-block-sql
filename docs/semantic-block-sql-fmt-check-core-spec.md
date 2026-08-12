@@ -31,7 +31,8 @@ The core must not:
 - rename identifiers or aliases;
 - change join types;
 - rewrite subqueries as joins;
-- change literals, quoted identifiers, comments, or template syntax;
+- change literals, quoted identifiers, comment text other than terminal
+  whitespace defined in section 11, or template syntax;
 - enforce SQL design, performance, or security practices.
 
 ## 3. Public behavior
@@ -145,7 +146,7 @@ Formatting must preserve:
 - literals;
 - quoted identifiers;
 - placeholders;
-- comments and their attachment;
+- comments and their attachment, except terminal comment-line whitespace;
 - precedence-significant parentheses;
 - template and host-language regions supplied as protected ranges.
 
@@ -164,7 +165,8 @@ top-level statement spans, return the complete original source and a diagnostic.
 After those spans are established, safety is statement-granular:
 
 - preserve an unformattable statement byte-for-byte;
-- emit `format.statement_skipped` for its complete source range;
+- emit `format.statement_skipped` at the exact trusted failure range when one is
+  available, otherwise for the complete statement source range;
 - under the default skip policy, continue formatting independent sibling
   statements;
 - under the strict policy, elevate skipped statements to errors and return the
@@ -242,7 +244,9 @@ Preserve quoted names and all literal contents exactly.
 - Function calls: `name(...)`.
 - SQL grammar parentheses: `IN (...)`, `ANY (...)`, `ALL (...)`, `EXISTS (...)`, `FILTER (...)`, `OVER (...)`, `WITHIN GROUP (...)`.
 - Trailing commas, never leading commas.
-- No trailing whitespace.
+- No trailing Unicode whitespace. Any character for which Rust
+  `char::is_whitespace()` is true, other than CR/LF line terminators, is removed
+  at a physical line end.
 
 ## 9. Compact and expanded layout
 
@@ -294,7 +298,9 @@ Rules:
 
 ## 11. Comments
 
-- Preserve text and comment syntax.
+- Preserve text and comment syntax except trailing Unicode whitespace at each
+  physical comment line end. That whitespace is layout, including inside
+  multiline block comments, and its removal must never trigger a safety skip.
 - A standalone comment belongs to the following syntax element.
 - An inline comment belongs to the current expression.
 - Do not move comments across expressions or groups.

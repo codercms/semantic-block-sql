@@ -1,7 +1,9 @@
 use pg_query::protobuf::{KeywordKind, Token};
 
 use super::*;
-use crate::formatter::tokens::{TokenRole, next_non_comment, previous_non_comment};
+use crate::formatter::tokens::{
+    TokenRole, next_non_comment, normalize_comment_trailing_whitespace, previous_non_comment,
+};
 
 pub(in crate::formatter) fn render_token(
     tokens: &[SqlToken<'_>],
@@ -11,6 +13,10 @@ pub(in crate::formatter) fn render_token(
     let token = &tokens[index];
     let previous = index.checked_sub(1).map(|previous| &tokens[previous]);
     let next = tokens.get(index + 1);
+
+    if token.is_comment() {
+        return normalize_comment_trailing_whitespace(token.text).into_owned();
+    }
 
     if token.role == TokenRole::Identifier {
         return token.text.to_owned();

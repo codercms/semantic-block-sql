@@ -52,3 +52,23 @@ fn strict_policy_preserves_the_complete_document_after_a_statement_failure() {
         diagnostic.rule_id == "format.statement_skipped" && diagnostic.severity == Severity::Error
     }));
 }
+
+#[test]
+fn skipped_statement_preserves_comment_whitespace_byte_for_byte() {
+    let source = "ALTER TABLE public.long_table_name ALTER COLUMN long_column_name SET DEFAULT 123 /* note\u{2003}\n*/;";
+
+    let result = format_sql(source, &options(UnsupportedPolicy::Skip))
+        .expect("failed statement remains a formatter result");
+
+    assert_eq!(result.output, source);
+    assert!(result.diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule_id == "format.statement_skipped"
+            && diagnostic.source_range == semblock::SourceRange::new(0, source.len())
+    }));
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule_id == "spacing.trailing_whitespace")
+    );
+}

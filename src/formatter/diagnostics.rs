@@ -4,7 +4,9 @@ use super::semantic_block::{
     is_compact_grammar_parenthesis, is_function_call_name, is_function_call_syntax,
     is_type_keyword, is_type_modifier_syntax, is_uppercase_builtin,
 };
-use super::tokens::{SqlToken, tokenize};
+use super::tokens::{
+    SqlToken, comment_trailing_whitespace_ranges, normalize_comment_trailing_whitespace, tokenize,
+};
 use super::{
     Diagnostic, FormatDiagnostic, FormatOptions, FormatWarning, SemicolonPolicy, Severity,
     SourceRange,
@@ -41,12 +43,30 @@ pub(super) fn style_diagnostics(
         let expected = output_tokens[output_index].text;
         let actual = source_tokens[source_index].text;
         if actual != expected {
-            diagnostics.push(token_diagnostic(
-                &source_tokens,
-                source_index,
-                actual,
-                expected,
-            ));
+            let token = &source_tokens[source_index];
+            if token.is_comment()
+                && normalize_comment_trailing_whitespace(actual).as_ref() == expected
+            {
+                diagnostics.extend(comment_trailing_whitespace_ranges(actual).into_iter().map(
+                    |range| Diagnostic {
+                        rule_id: "spacing.trailing_whitespace".into(),
+                        severity: Severity::Error,
+                        message: "trailing whitespace must be removed".into(),
+                        source_range: SourceRange::new(
+                            token.start + range.start,
+                            token.start + range.end,
+                        ),
+                        fix_available: true,
+                    },
+                ));
+            } else {
+                diagnostics.push(token_diagnostic(
+                    &source_tokens,
+                    source_index,
+                    actual,
+                    expected,
+                ));
+            }
         }
     }
 
@@ -237,6 +257,7 @@ pub(super) fn statement_skipped_diagnostic(
     error: &FormatDiagnostic,
     policy: super::UnsupportedPolicy,
     statement_line: usize,
+    cause_range: Option<SourceRange>,
 ) -> Diagnostic {
     Diagnostic {
         rule_id: "format.statement_skipped".into(),
@@ -245,7 +266,7 @@ pub(super) fn statement_skipped_diagnostic(
             super::UnsupportedPolicy::Error => Severity::Error,
         },
         message: format!("statement formatting skipped at line {statement_line}: {error}"),
-        source_range: SourceRange::new(0, source.len()),
+        source_range: cause_range.unwrap_or_else(|| SourceRange::new(0, source.len())),
         fix_available: false,
     }
 }
@@ -564,8 +585,8 @@ fn is_binary_operator(kind: Token) -> bool {
 fn contains_trailing_whitespace(gap: &str) -> bool {
     gap.strip_suffix('\n')
         .unwrap_or(gap)
-        .bytes()
-        .any(|byte| matches!(byte, b' ' | b'\t' | b'\r'))
+        .chars()
+        .any(super::tokens::is_removable_trailing_whitespace)
 }
 
 fn line_breaks(gap: &str) -> usize {
@@ -578,4 +599,25 @@ fn skipped_between(previous: usize, current: usize, skipped: Option<usize>) -> b
 
 fn skip_after(last: usize, skipped: Option<usize>) -> bool {
     skipped.is_some_and(|index| index > last)
+}
+
+#[cfg(test)]
+mod statement_skip_tests {
+    use super::*;
+
+    #[test]
+    fn statement_skip_uses_a_trusted_cause_range() {
+        let source = "SELECT 1; -- changed";
+        let cause = SourceRange::new(10, source.len());
+        let diagnostic = statement_skipped_diagnostic(
+            source,
+            &FormatDiagnostic::ProtectedTokenChanged("comment changed".into()),
+            super::super::UnsupportedPolicy::Skip,
+            1,
+            Some(cause),
+        );
+
+        assert_eq!(diagnostic.source_range, cause);
+        assert!(!diagnostic.fix_available);
+    }
 }
