@@ -1,7 +1,7 @@
 mod support;
 
 use semblock::FormatOptions;
-use support::assert_sql_with as assert_format;
+use support::{SqlCase, assert_cases, assert_sql_with as assert_format};
 
 #[test]
 fn formats_top_level_values_as_owned_rows() {
@@ -24,6 +24,32 @@ fn formats_filtered_ordered_and_window_aggregates() {
     let expected = "SELECT\n    department_id,\n    SUM(amount ORDER BY created_at) FILTER (WHERE status = 'paid') OVER (\n        PARTITION BY department_id\n        ORDER BY created_at\n        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW EXCLUDE TIES\n    ) AS running_total\nFROM payments\nWINDOW recent AS (\n    PARTITION BY department_id\n    ORDER BY created_at\n);";
 
     assert_format(source, expected, &FormatOptions::default());
+}
+
+#[test]
+fn preserves_nested_query_and_window_indentation() {
+    assert_cases(&[
+        SqlCase::new(
+            "CTE query",
+            "WITH numbered_offers AS (\n    SELECT\n        ROW_NUMBER() OVER (PARTITION BY o.seller_id ORDER BY o.dt)::VARCHAR AS id,\n        o.doc_dt\n    FROM offers o\n)\nSELECT * FROM numbered_offers;",
+            "WITH numbered_offers AS (\n    SELECT\n        row_number() OVER (\n            PARTITION BY o.seller_id\n            ORDER BY o.dt\n        )::varchar AS id,\n        o.doc_dt\n    FROM offers o\n)\nSELECT *\nFROM numbered_offers;",
+        ),
+        SqlCase::new(
+            "derived relation query",
+            "SELECT *\nFROM (\n    SELECT\n        ROW_NUMBER() OVER (PARTITION BY o.seller_id ORDER BY o.dt)::VARCHAR AS id,\n        o.doc_dt\n    FROM offers o\n) numbered_offers;",
+            "SELECT *\nFROM (\n    SELECT\n        row_number() OVER (\n            PARTITION BY o.seller_id\n            ORDER BY o.dt\n        )::varchar AS id,\n        o.doc_dt\n    FROM offers o\n) numbered_offers;",
+        ),
+        SqlCase::new(
+            "scalar subquery",
+            "SELECT\n    (\n        SELECT\n            ROW_NUMBER() OVER (PARTITION BY o.seller_id ORDER BY o.dt)::VARCHAR\n        FROM offers o\n        LIMIT 1\n    ) AS id,\n    CURRENT_DATE;",
+            "SELECT\n    (\n        SELECT\n            row_number() OVER (\n                PARTITION BY o.seller_id\n                ORDER BY o.dt\n            )::varchar\n        FROM offers o\n        LIMIT 1\n    ) AS id,\n    CURRENT_DATE;",
+        ),
+        SqlCase::new(
+            "nested derived relation in CTE",
+            "WITH numbered_offers AS (\n    SELECT *\n    FROM (\n        SELECT\n            ROW_NUMBER() OVER (PARTITION BY o.seller_id ORDER BY o.dt)::VARCHAR AS id,\n            o.doc_dt\n        FROM offers o\n    ) ranked\n)\nSELECT * FROM numbered_offers;",
+            "WITH numbered_offers AS (\n    SELECT *\n    FROM (\n        SELECT\n            row_number() OVER (\n                PARTITION BY o.seller_id\n                ORDER BY o.dt\n            )::varchar AS id,\n            o.doc_dt\n        FROM offers o\n    ) ranked\n)\nSELECT *\nFROM numbered_offers;",
+        ),
+    ]);
 }
 
 #[test]

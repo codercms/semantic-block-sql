@@ -327,6 +327,14 @@ struct LayoutPlan {
 Planning functions request line breaks and indentation. The writer later emits
 tokens in their original order.
 
+Indentation follows ownership precedence. A containing query wrapper may seed
+fallback indentation only for tokens that no child planner has claimed; it
+must not overwrite SELECT-item, expression, window, CASE, or list indentation.
+A wrapped query's visual indent is one level below the planned indent of its
+opening parenthesis, with its typed `QueryBlock` indent as the fallback before
+the parent has been planned. This keeps CTE, derived-relation, scalar-subquery,
+and deeper nested wrappers on the same rule without inferring syntax globally.
+
 Every statement, query, and keyword-list planner receives one immutable
 `PlanningContext` containing the token slice, depth index, CASE analysis,
 parenthesized-list analysis, and formatting options for that pass. This avoids

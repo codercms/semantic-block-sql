@@ -946,3 +946,16 @@ The architecture plan and executable checklist are maintained in
 - [x] Run every library, binary, and integration test target with the locked
   offline toolchain, plus formatting, Clippy, Rustdoc, and diff hygiene.
 - [x] Require remote CI before merge.
+
+## Nested query/window indentation hardening
+
+- [x] Add a red regression matrix before changing layout behavior.
+- [x] Cover expanded window expressions in CTE, derived-relation, scalar-subquery,
+  and deeper nested query wrappers.
+- [x] Derive wrapped-query visual indentation from the owned opening parenthesis.
+- [x] Make wrapper-wide indentation a fallback that cannot overwrite child-owned
+  SELECT-item or window indentation.
+- [x] Run focused window and nested-query/DML tests.
+- [x] Run formatting, Clippy, all tests, Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
