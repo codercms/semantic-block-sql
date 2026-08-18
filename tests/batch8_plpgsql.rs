@@ -78,6 +78,14 @@ $$;"#;
 }
 
 #[test]
+fn formats_unicode_inside_dollar_quoted_bodies_without_panicking() {
+    assert_fixture(
+        "CREATE FUNCTION synthetic_unicode() RETURNS text LANGUAGE plpgsql AS $$ BEGIN RETURN 'Пример'; END; $$;",
+        "CREATE FUNCTION synthetic_unicode() RETURNS text LANGUAGE plpgsql AS $$\nBEGIN\n    RETURN 'Пример';\nEND;\n$$;",
+    );
+}
+
+#[test]
 fn rejects_non_plpgsql_bodies() {
     let source = "CREATE FUNCTION f() RETURNS int LANGUAGE SQL AS $$ SELECT 1 $$;";
     let result = format_sql_result(source, &FormatOptions::default());
