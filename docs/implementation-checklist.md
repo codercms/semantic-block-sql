@@ -1001,3 +1001,4 @@ The architecture plan and executable checklist are maintained in
 - [x] Complete semantic-preservation, host ownership, idempotence, diagnostics,
   dependency, and dead-code self-review.
 - [x] Commit the coherent batch without unrelated workspace files.
+- [x] Bump the package version from `0.1.15` to `0.1.16` in a separate commit.
