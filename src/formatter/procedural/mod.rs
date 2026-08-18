@@ -238,6 +238,9 @@ fn format_body_statement(
         return Ok(comment.to_owned());
     }
     let upper = code.to_ascii_uppercase();
+    if let Some(rendered) = format_return_expression(kind, code, options)? {
+        return Ok(attach_line_comment(rendered, comment));
+    }
     if kind == ir::BodyNodeKind::ReturnQuery {
         return format_return_query(code, &upper, options)
             .map(|rendered| attach_line_comment(rendered, comment));
@@ -285,6 +288,44 @@ fn normalize_procedural_code(
         previous = Some(index);
     }
     Ok(output)
+}
+
+fn format_return_expression(
+    kind: ir::BodyNodeKind,
+    code: &str,
+    options: &FormatOptions,
+) -> Result<Option<String>, FormatDiagnostic> {
+    if kind != ir::BodyNodeKind::Return {
+        return Ok(None);
+    }
+    let prefix = "RETURN";
+    let expression = code[prefix.len()..].trim().trim_end_matches(';').trim();
+    if expression.is_empty() {
+        return Ok(None);
+    }
+    let formatted = super::format_sql(&format!("SELECT {expression};"), options)?.output;
+    let body = formatted.strip_prefix("SELECT").ok_or_else(|| {
+        FormatDiagnostic::Ownership("formatted RETURN expression lost SELECT".into())
+    })?;
+    if let Some(inline) = body.strip_prefix(' ') {
+        return Ok(Some(format!("{prefix} {inline}")));
+    }
+    let mut lines = body
+        .strip_prefix('\n')
+        .ok_or_else(|| {
+            FormatDiagnostic::Ownership("formatted RETURN expression has no body".into())
+        })?
+        .lines()
+        .map(|line| line.strip_prefix("    ").unwrap_or(line));
+    let first = lines.next().ok_or_else(|| {
+        FormatDiagnostic::Ownership("formatted RETURN expression is empty".into())
+    })?;
+    Ok(Some(
+        std::iter::once(format!("{prefix} {first}"))
+            .chain(lines.map(str::to_owned))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    ))
 }
 
 fn procedural_needs_space(

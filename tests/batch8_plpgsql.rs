@@ -29,6 +29,55 @@ fn formats_assert_and_compact_bodies() {
 }
 
 #[test]
+fn formats_long_return_expressions_at_safe_sql_boundaries() {
+    let source = r#"CREATE FUNCTION synthetic_return_width()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN compare_record(
+        (SELECT snapshot FROM (
+            SELECT
+                1 AS alpha_attribute,
+                2 AS beta_attribute,
+                3 AS gamma_attribute,
+                4 AS delta_attribute,
+                5 AS epsilon_attribute,
+                6 AS zeta_attribute,
+                7 AS eta_attribute,
+                8 AS theta_attribute
+        ) snapshot)
+    );
+END;
+$$;"#;
+    let expected = r#"CREATE FUNCTION synthetic_return_width()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN compare_record(
+        (
+            SELECT snapshot
+            FROM (
+            SELECT
+            1 AS alpha_attribute,
+            2 AS beta_attribute,
+            3 AS gamma_attribute,
+            4 AS delta_attribute,
+            5 AS epsilon_attribute,
+            6 AS zeta_attribute,
+            7 AS eta_attribute,
+            8 AS theta_attribute
+        ) snapshot
+        )
+    );
+END;
+$$;"#;
+
+    assert_fixture(source, expected);
+}
+
+#[test]
 fn rejects_non_plpgsql_bodies() {
     let source = "CREATE FUNCTION f() RETURNS int LANGUAGE SQL AS $$ SELECT 1 $$;";
     let result = format_sql_result(source, &FormatOptions::default());

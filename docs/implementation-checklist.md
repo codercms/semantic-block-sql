@@ -1006,3 +1006,19 @@ The architecture plan and executable checklist are maintained in
   dependency, and dead-code self-review.
 - [x] Commit the coherent batch without unrelated workspace files.
 - [x] Bump the package version from `0.1.15` to `0.1.16` in a separate commit.
+
+## PL/pgSQL RETURN expression width batch
+
+- [x] Classify the failure as a localized procedural-leaf architecture gap
+  before changing code.
+- [x] Add a synthetic nested-query `RETURN` regression without copying
+  production SQL.
+- [x] Reuse the canonical SQL formatter through a removable `SELECT` wrapper.
+- [x] Preserve leaf-relative indentation inside the procedural body frame.
+- [x] Verify the reported production file through non-writing `semblock diff`.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review before committing.
+- [x] Commit the coherent batch without unrelated workspace files.

@@ -881,6 +881,13 @@ blocks, SQL statements, assignments, conditionals, loops, `FOREACH`, procedural
 and reviewed `RETURN QUERY` forms are covered. Transaction control remains opaque
 and follows the default/strict unsupported policy.
 
+Parser-owned `RETURN` expressions reuse the canonical SQL expression layout by
+formatting a synthetic `SELECT` wrapper and removing only that wrapper. The
+procedural layout retains the resulting relative indentation inside its body
+frame. This closes the local architecture gap where token-only leaf
+normalization collapsed nested queries and other safely breakable expressions
+onto one over-hard line; it does not broaden the PL/pgSQL node allowlist.
+
 ## SQL-standard routine bodies
 
 `LANGUAGE SQL` functions and procedures with `BEGIN ATOMIC` use a separate
