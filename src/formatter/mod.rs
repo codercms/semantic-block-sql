@@ -665,7 +665,7 @@ fn top_level_semicolons(source: &str) -> Vec<usize> {
                 }
             }
             State::Dollar(tag) => {
-                if source[index..].starts_with(tag) {
+                if bytes[index..].starts_with(tag.as_bytes()) {
                     state = State::Normal;
                     index += tag.len();
                 } else {
