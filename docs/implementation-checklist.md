@@ -1031,6 +1031,8 @@ The architecture plan and executable checklist are maintained in
   production SQL.
 - [x] Reuse the canonical SQL formatter through a removable `SELECT` wrapper.
 - [x] Preserve leaf-relative indentation inside the procedural body frame.
+- [x] Preserve structural depth when expanded SELECT and function-argument
+  lists contain nested queries.
 - [x] Verify the reported production file through non-writing `semblock diff`.
 - [x] Run focused regressions and the complete formatting, Clippy, test,
   Rustdoc, and diff-hygiene gates.

@@ -59,16 +59,16 @@ BEGIN
         (
             SELECT snapshot
             FROM (
-            SELECT
-            1 AS alpha_attribute,
-            2 AS beta_attribute,
-            3 AS gamma_attribute,
-            4 AS delta_attribute,
-            5 AS epsilon_attribute,
-            6 AS zeta_attribute,
-            7 AS eta_attribute,
-            8 AS theta_attribute
-        ) snapshot
+                SELECT
+                    1 AS alpha_attribute,
+                    2 AS beta_attribute,
+                    3 AS gamma_attribute,
+                    4 AS delta_attribute,
+                    5 AS epsilon_attribute,
+                    6 AS zeta_attribute,
+                    7 AS eta_attribute,
+                    8 AS theta_attribute
+            ) snapshot
         )
     );
 END;

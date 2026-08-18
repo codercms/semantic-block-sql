@@ -891,6 +891,9 @@ procedural layout retains the resulting relative indentation inside its body
 frame. This closes the local architecture gap where token-only leaf
 normalization collapsed nested queries and other safely breakable expressions
 onto one over-hard line; it does not broaden the PL/pgSQL node allowlist.
+Expanded SELECT targets and parenthesized argument lists apply their item
+indent as a structural-depth-aware floor; an outer list must not flatten layout
+already owned by a nested query.
 
 ## SQL-standard routine bodies
 

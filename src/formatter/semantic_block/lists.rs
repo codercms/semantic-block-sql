@@ -407,7 +407,7 @@ pub(super) fn plan_select_lists(
         }
         let indent = base_indent + 1;
         for item in &items {
-            plan.set_indent(item.start..item.end, indent);
+            set_contextual_indent(plan, depths, item.start..item.end, base_depth, indent);
             if let Some(comma) = item.comma {
                 plan.token_indents[comma] = Some(indent);
             }
@@ -613,7 +613,7 @@ pub(super) fn plan_parenthesized_lists(
             .unwrap_or_else(|| plan.indent_for(list.open, depths[list.open]));
         let indent = base_indent + 1;
         for item in &items {
-            plan.set_indent(item.start..item.end, indent);
+            set_contextual_indent(plan, depths, item.start..item.end, inner_depth, indent);
             if let Some(comma) = item.comma {
                 plan.token_indents[comma] = Some(indent);
             }
@@ -650,6 +650,23 @@ pub(super) fn plan_parenthesized_lists(
                 plan.set_indent(item.start..item.end, indent);
             }
         }
+    }
+}
+
+fn set_contextual_indent(
+    plan: &mut LayoutPlan,
+    depths: &[usize],
+    range: std::ops::Range<usize>,
+    base_depth: usize,
+    indent: usize,
+) {
+    for index in range {
+        let contextual = indent + depths[index].saturating_sub(base_depth);
+        plan.token_indents[index] = Some(
+            plan.token_indents[index]
+                .unwrap_or(contextual)
+                .max(contextual),
+        );
     }
 }
 

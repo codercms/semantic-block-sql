@@ -608,6 +608,9 @@ query, list, and function-argument breaks. Only the wrapper is removed. The
 procedural layout then adds its body-frame indentation without discarding the
 leaf formatter's relative indentation.
 
+Within the canonical layout pipeline, expanded list owners preserve relative
+token depth so their indentation frame cannot collapse nested query ownership.
+
 ## Go string-expression pipeline
 
 Go extraction operates on tree-sitter expression nodes rather than database API names or broad declaration-only ownership. Raw literals, interpreted literals, and literal-only static concatenations are decoded into a `GoStringExpression`; runtime-dependent concatenations are retained as dynamic opaque expressions. Eligible declaration, assignment, return, call-argument, `defer`, `go`, and composite-literal contexts pass through PostgreSQL formatting.
