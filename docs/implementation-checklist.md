@@ -991,6 +991,10 @@ The architecture plan and executable checklist are maintained in
   generated configuration.
 - [x] Preserve files with Go's canonical leading
   `// Code generated ... DO NOT EDIT.` marker byte-for-byte.
+- [x] Survey common Go generators, including high-performance template
+  compilers, and accept leading marker variations in capitalization,
+  punctuation, prefixes, and split comments.
+- [x] Cover Swag's prefixed marker and Hero's split marker with regressions.
 - [x] Keep canonical-looking comments after the package clause from ignoring a
   file.
 - [x] Treat invalid-UTF-8 auto-detected strings as non-candidates while keeping

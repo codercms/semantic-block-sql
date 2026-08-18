@@ -138,7 +138,7 @@ Every replacement is decoded again and compared with the intended formatted runt
 
 Expressions containing identifiers, calls, indexing, or other runtime values remain untouched. Import paths, struct tags, build directives, runes, comments, and incomplete fragments are excluded structurally.
 
-By default, semblock preserves a complete Go file byte-for-byte when its leading comments contain Go's standard `// Code generated ... DO NOT EDIT.` marker. The marker must appear before the package clause. Set `ignore_generated_files = false` under `[go]` to process generated files. Auto-detected string values that are not valid UTF-8 are never SQL candidates; an explicit SQL marker still reports them as invalid.
+By default, semblock preserves a complete Go file byte-for-byte when comments before the package clause contain both `generated` and `DO NOT EDIT`, matched case-insensitively. The phrases may be in one comment or split across the leading comments, covering Go's standard marker and variants emitted by generators such as Swag and Hero. Set `ignore_generated_files = false` under `[go]` to process generated files. Auto-detected string values that are not valid UTF-8 are never SQL candidates; an explicit SQL marker still reports them as invalid.
 
 Process Go explicitly with:
 

@@ -63,12 +63,14 @@ Current application-level decisions are:
   deltas and does not introduce another parse or formatting pass.
 - Go interpreted strings are enabled after a complete decode/format/re-encode
   round trip and runtime-value verification were implemented.
-- Go files whose leading CST comments contain the standard
-  `// Code generated ... DO NOT EDIT.` marker remain byte-identical by default;
-  `[go].ignore_generated_files = false` opts into processing them. Auto-detected
-  non-UTF-8 Go byte strings are non-candidates, while explicit SQL markers keep
-  their fail-safe diagnostic behavior. This host-language policy is outside the
-  core SQL contract.
+- Go files whose CST comments before the package clause contain both
+  `generated` and `DO NOT EDIT`, matched case-insensitively and possibly across
+  separate comments, remain byte-identical by default. This preserves Go's
+  standard marker while accepting common Swag and Hero variants without
+  scanning strings or body comments. `[go].ignore_generated_files = false`
+  opts into processing them. Auto-detected non-UTF-8 Go byte strings are
+  non-candidates, while explicit SQL markers keep their fail-safe diagnostic
+  behavior. This host-language policy is outside the core SQL contract.
 - Multiline interpreted SQL prefers a raw literal when lossless and otherwise
   uses deterministic interpreted escaping.
 - Default configuration is:

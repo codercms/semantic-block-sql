@@ -251,7 +251,7 @@ where active=true;`</code></pre>
 
 Runtime expressions and non-SQL strings remain untouched. Rewritten Go files must reparse successfully, and the decoded SQL value is verified after replacement.
 
-Go files with the standard leading `// Code generated ... DO NOT EDIT.` marker are ignored by default. Set `ignore_generated_files = false` under `[go]` to opt in to processing them.
+Go files whose leading comments identify generated code and say `DO NOT EDIT` are ignored by default. This includes the standard Go marker and common generator variants. Set `ignore_generated_files = false` under `[go]` to opt in to processing them.
 
 ```bash
 semblock fmt --language go ./internal/...
