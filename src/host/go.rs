@@ -194,6 +194,15 @@ pub fn format_go_source(
         .map(|node| node.start_byte())
         .unwrap_or(0);
 
+    if config.ignore_generated_files && has_generated_header(&comments, source, package_start) {
+        return Ok(FormattedGo {
+            output: source.into(),
+            warnings: Vec::new(),
+            diagnostics: Vec::new(),
+            stats,
+        });
+    }
+
     if directives.iter().any(|directive| {
         directive.kind == GoDirective::FileIgnore && directive.start < package_start
     }) {
@@ -304,7 +313,14 @@ pub fn format_go_source(
                 continue;
             }
 
-            let prepared = prepare_expression(*expression, source)?;
+            let prepared = match prepare_expression(*expression, source) {
+                Ok(prepared) => prepared,
+                Err(GoError::StringLiteral {
+                    source: GoStringError::InvalidUtf8,
+                    ..
+                }) if !explicit => continue,
+                Err(error) => return Err(error),
+            };
             if !explicit && !looks_like_complete_sql_prefix(&prepared.sql) {
                 continue;
             }
@@ -754,6 +770,20 @@ fn parse_comment_directive(node: Node<'_>, source: &str) -> Option<CommentDirect
         start: node.start_byte(),
         line: node.start_position().row + 1,
     })
+}
+
+fn has_generated_header(comments: &[Node<'_>], source: &str, package_start: usize) -> bool {
+    let mut generated = false;
+    let mut do_not_edit = false;
+    for comment in comments
+        .iter()
+        .filter(|comment| comment.start_byte() < package_start)
+    {
+        let text = source[comment.start_byte()..comment.end_byte()].to_ascii_lowercase();
+        generated |= text.contains("generated");
+        do_not_edit |= text.contains("do not edit");
+    }
+    generated && do_not_edit
 }
 
 fn attached_directives(owner: Node<'_>, comments: &[Node<'_>], source: &str) -> Vec<usize> {

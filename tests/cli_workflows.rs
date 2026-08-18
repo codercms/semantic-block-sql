@@ -107,6 +107,7 @@ fn config_commands_and_init_are_available() {
     let output = run(root.path(), &["config", "show"], None);
     assert!(output.status.success(), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stdout).contains("dialect = \"postgresql\""));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("ignore_generated_files = true"));
 }
 
 #[test]

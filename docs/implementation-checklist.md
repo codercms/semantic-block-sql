@@ -982,3 +982,27 @@ The architecture plan and executable checklist are maintained in
   diagnostics, dependency, and dead-code self-review.
 - [x] Bump the package version from `0.1.14` to `0.1.15`.
 - [x] Commit the coherent batch without unrelated workspace files.
+
+## Generated Go file safety batch
+
+- [x] Reproduce protobuf descriptor literals failing Go formatting because
+  their decoded byte strings are not valid UTF-8.
+- [x] Add `[go].ignore_generated_files`, enabled by default and emitted by
+  generated configuration.
+- [x] Preserve files with Go's canonical leading
+  `// Code generated ... DO NOT EDIT.` marker byte-for-byte.
+- [x] Survey common Go generators, including high-performance template
+  compilers, and accept leading marker variations in capitalization,
+  punctuation, prefixes, and split comments.
+- [x] Cover Swag's prefixed marker and Hero's split marker with regressions.
+- [x] Keep canonical-looking comments after the package clause from ignoring a
+  file.
+- [x] Treat invalid-UTF-8 auto-detected strings as non-candidates while keeping
+  explicitly marked SQL failures diagnostic.
+- [x] Cover opting generated files back in through strict TOML configuration.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, host ownership, idempotence, diagnostics,
+  dependency, and dead-code self-review.
+- [x] Commit the coherent batch without unrelated workspace files.
+- [x] Bump the package version from `0.1.15` to `0.1.16` in a separate commit.

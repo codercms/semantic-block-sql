@@ -49,6 +49,7 @@ pub enum GoMultilineStringStyle {
 pub struct GoConfig {
     pub enabled: bool,
     pub auto_detect: bool,
+    pub ignore_generated_files: bool,
     pub raw_strings: bool,
     pub interpreted_strings: bool,
     pub multiline_string_style: GoMultilineStringStyle,
@@ -59,6 +60,7 @@ impl Default for GoConfig {
         Self {
             enabled: true,
             auto_detect: true,
+            ignore_generated_files: true,
             raw_strings: true,
             interpreted_strings: true,
             multiline_string_style: GoMultilineStringStyle::PreferRaw,
@@ -123,6 +125,7 @@ struct FileDiscoveryConfig {
 struct FileGoConfig {
     enabled: Option<bool>,
     auto_detect: Option<bool>,
+    ignore_generated_files: Option<bool>,
     raw_strings: Option<bool>,
     interpreted_strings: Option<bool>,
     multiline_string_style: Option<GoMultilineStringStyle>,
@@ -161,7 +164,7 @@ impl Config {
 
     pub fn to_toml(&self) -> String {
         format!(
-            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\nunsupported_policy = \"{}\"\n\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nraw_strings = {}\ninterpreted_strings = {}\nmultiline_string_style = \"{}\"\n",
+            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\nunsupported_policy = \"{}\"\n\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nignore_generated_files = {}\nraw_strings = {}\ninterpreted_strings = {}\nmultiline_string_style = \"{}\"\n",
             semicolon_policy_name(self.format.semicolon_policy),
             not_equal_policy_name(self.format.not_equal_policy),
             unsupported_policy_name(self.format.unsupported_policy),
@@ -171,6 +174,7 @@ impl Config {
             toml_string(&self.discovery.ignore_file),
             self.go.enabled,
             self.go.auto_detect,
+            self.go.ignore_generated_files,
             self.go.raw_strings,
             self.go.interpreted_strings,
             go_multiline_string_style_name(self.go.multiline_string_style),
@@ -227,6 +231,9 @@ impl Config {
         }
         if let Some(value) = file.go.auto_detect {
             config.go.auto_detect = value;
+        }
+        if let Some(value) = file.go.ignore_generated_files {
+            config.go.ignore_generated_files = value;
         }
         if let Some(value) = file.go.raw_strings {
             config.go.raw_strings = value;
