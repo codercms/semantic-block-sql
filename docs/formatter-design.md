@@ -71,6 +71,10 @@ Current application-level decisions are:
   opts into processing them. Auto-detected non-UTF-8 Go byte strings are
   non-candidates, while explicit SQL markers keep their fail-safe diagnostic
   behavior. This host-language policy is outside the core SQL contract.
+- Document-level semicolon discovery remains a byte-offset scanner so its
+  ranges agree with PostgreSQL and `SourceRange`. Dollar-quote delimiter
+  comparisons are byte-based as well; the scanner must never construct an
+  `&str` at an arbitrary byte offset inside UTF-8 routine content.
 - Multiline interpreted SQL prefers a raw literal when lossless and otherwise
   uses deterministic interpreted escaping.
 - Default configuration is:

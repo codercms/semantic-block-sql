@@ -1006,3 +1006,18 @@ The architecture plan and executable checklist are maintained in
   dependency, and dead-code self-review.
 - [x] Commit the coherent batch without unrelated workspace files.
 - [x] Bump the package version from `0.1.15` to `0.1.16` in a separate commit.
+
+## UTF-8 dollar-quote scanner safety batch
+
+- [x] Reproduce the panic with a synthetic PL/pgSQL routine containing a
+  Cyrillic string inside a dollar-quoted body.
+- [x] Keep byte-offset scanning and compare dollar delimiters as bytes without
+  constructing `&str` slices at arbitrary offsets.
+- [x] Cover formatting, semantic equivalence, and idempotence through the
+  shared SQL fixture contract.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review before committing.
+- [x] Commit the coherent batch without unrelated workspace files.
