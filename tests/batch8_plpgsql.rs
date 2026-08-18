@@ -78,6 +78,28 @@ $$;"#;
 }
 
 #[test]
+fn preserves_authored_assignment_argument_splits() {
+    let source = r#"CREATE FUNCTION synthetic_assignment_layout()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    result_payload jsonb;
+    previous_item_ids bigint[];
+    current_item_ids bigint[];
+BEGIN
+    result_payload := combine_snapshots(
+        (SELECT array_agg(item_id ORDER BY item_id) FROM unnest(previous_item_ids) item_id),
+        (SELECT array_agg(item_id ORDER BY item_id) FROM unnest(current_item_ids) item_id)
+    );
+    RETURN result_payload;
+END;
+$$;"#;
+
+    assert_fixture(source, source);
+}
+
+#[test]
 fn formats_unicode_inside_dollar_quoted_bodies_without_panicking() {
     assert_fixture(
         "CREATE FUNCTION synthetic_unicode() RETURNS text LANGUAGE plpgsql AS $$ BEGIN RETURN 'Пример'; END; $$;",

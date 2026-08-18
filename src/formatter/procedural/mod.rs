@@ -241,6 +241,9 @@ fn format_body_statement(
     if let Some(rendered) = format_return_expression(kind, code, options)? {
         return Ok(attach_line_comment(rendered, comment));
     }
+    if let Some(rendered) = format_assignment_expression(kind, code, options)? {
+        return Ok(attach_line_comment(rendered, comment));
+    }
     if kind == ir::BodyNodeKind::ReturnQuery {
         return format_return_query(code, &upper, options)
             .map(|rendered| attach_line_comment(rendered, comment));
@@ -303,29 +306,61 @@ fn format_return_expression(
     if expression.is_empty() {
         return Ok(None);
     }
+    format_sql_expression(prefix, expression, options).map(Some)
+}
+
+fn format_assignment_expression(
+    kind: ir::BodyNodeKind,
+    code: &str,
+    options: &FormatOptions,
+) -> Result<Option<String>, FormatDiagnostic> {
+    if kind != ir::BodyNodeKind::Assignment {
+        return Ok(None);
+    }
+    let tokens = super::tokens::tokenize(code)?;
+    let assignment = tokens
+        .iter()
+        .find(|token| token.text == ":=")
+        .ok_or_else(|| FormatDiagnostic::Ownership("assignment has no := boundary".into()))?;
+    let prefix = uppercase_procedural_words(&normalize_procedural_code(
+        code[..assignment.end].trim(),
+        options,
+    )?);
+    let expression = code[assignment.end..].trim().trim_end_matches(';').trim();
+    if expression.is_empty() {
+        return Err(FormatDiagnostic::Ownership(
+            "assignment has no expression".into(),
+        ));
+    }
+    format_sql_expression(&prefix, expression, options).map(Some)
+}
+
+fn format_sql_expression(
+    prefix: &str,
+    expression: &str,
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
     let formatted = super::format_sql(&format!("SELECT {expression};"), options)?.output;
     let body = formatted.strip_prefix("SELECT").ok_or_else(|| {
-        FormatDiagnostic::Ownership("formatted RETURN expression lost SELECT".into())
+        FormatDiagnostic::Ownership("formatted procedural expression lost SELECT".into())
     })?;
     if let Some(inline) = body.strip_prefix(' ') {
-        return Ok(Some(format!("{prefix} {inline}")));
+        return Ok(format!("{prefix} {inline}"));
     }
     let mut lines = body
         .strip_prefix('\n')
         .ok_or_else(|| {
-            FormatDiagnostic::Ownership("formatted RETURN expression has no body".into())
+            FormatDiagnostic::Ownership("formatted procedural expression has no body".into())
         })?
         .lines()
         .map(|line| line.strip_prefix("    ").unwrap_or(line));
     let first = lines.next().ok_or_else(|| {
-        FormatDiagnostic::Ownership("formatted RETURN expression is empty".into())
+        FormatDiagnostic::Ownership("formatted procedural expression is empty".into())
     })?;
-    Ok(Some(
-        std::iter::once(format!("{prefix} {first}"))
-            .chain(lines.map(str::to_owned))
-            .collect::<Vec<_>>()
-            .join("\n"),
-    ))
+    Ok(std::iter::once(format!("{prefix} {first}"))
+        .chain(lines.map(str::to_owned))
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 fn procedural_needs_space(

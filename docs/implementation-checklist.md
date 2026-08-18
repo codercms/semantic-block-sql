@@ -1041,3 +1041,21 @@ The architecture plan and executable checklist are maintained in
 - [x] Run GitNexus change-scope review before committing.
 - [x] Commit the coherent batch without unrelated workspace files.
 - [x] Bump the package version from `0.1.17` to `0.1.18` in a separate commit.
+
+## PL/pgSQL assignment expression layout batch
+
+- [x] Classify authored assignment collapse as the sibling procedural-leaf
+  architecture gap, not a width-check workaround.
+- [x] Add a synthetic declared assignment regression that reproduces the
+  over-hard collapse without copying production SQL.
+- [x] Route the parser-owned assignment right-hand side through the shared
+  canonical SQL expression adapter.
+- [x] Preserve authored function-argument groups while allowing the canonical
+  planner to add safe breaks.
+- [x] Verify the reported production file through non-writing `semblock diff`.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review before committing.
+- [x] Commit the coherent batch without unrelated workspace files.

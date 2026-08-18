@@ -885,12 +885,15 @@ blocks, SQL statements, assignments, conditionals, loops, `FOREACH`, procedural
 and reviewed `RETURN QUERY` forms are covered. Transaction control remains opaque
 and follows the default/strict unsupported policy.
 
-Parser-owned `RETURN` expressions reuse the canonical SQL expression layout by
-formatting a synthetic `SELECT` wrapper and removing only that wrapper. The
-procedural layout retains the resulting relative indentation inside its body
-frame. This closes the local architecture gap where token-only leaf
-normalization collapsed nested queries and other safely breakable expressions
-onto one over-hard line; it does not broaden the PL/pgSQL node allowlist.
+Parser-owned `RETURN` expressions and assignment right-hand sides reuse the
+canonical SQL expression layout by formatting a synthetic `SELECT` wrapper and
+removing only that wrapper. Assignment boundaries come from scanner tokens
+inside the typed assignment leaf. The procedural layout retains the resulting
+relative indentation inside its body frame, including authored function-argument
+groups; formatting may add safe breaks but does not collapse those groups. This
+closes the local architecture gap where token-only leaf normalization collapsed
+nested queries and other safely breakable expressions onto one over-hard line;
+it does not broaden the PL/pgSQL node allowlist.
 Expanded SELECT targets and parenthesized argument lists apply their item
 indent as a structural-depth-aware floor; an outer list must not flatten layout
 already owned by a nested query.
