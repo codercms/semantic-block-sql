@@ -2,7 +2,7 @@
 
 Status: **Runnable CLI and raw-Go MVP complete**
 
-Last updated: **2026-07-29**
+Last updated: **2026-08-18**
 
 ## Purpose
 
@@ -63,6 +63,12 @@ Current application-level decisions are:
   deltas and does not introduce another parse or formatting pass.
 - Go interpreted strings are enabled after a complete decode/format/re-encode
   round trip and runtime-value verification were implemented.
+- Go files whose leading CST comments contain the standard
+  `// Code generated ... DO NOT EDIT.` marker remain byte-identical by default;
+  `[go].ignore_generated_files = false` opts into processing them. Auto-detected
+  non-UTF-8 Go byte strings are non-candidates, while explicit SQL markers keep
+  their fail-safe diagnostic behavior. This host-language policy is outside the
+  core SQL contract.
 - Multiline interpreted SQL prefers a raw literal when lossless and otherwise
   uses deterministic interpreted escaping.
 - Default configuration is:
@@ -71,6 +77,7 @@ Current application-level decisions are:
   [go]
   enabled = true
   auto_detect = true
+  ignore_generated_files = true
   raw_strings = true
   interpreted_strings = true
   multiline_string_style = "prefer_raw"
@@ -710,6 +717,7 @@ ignore_file = ".semblockignore"
 [go]
 enabled = true
 auto_detect = true
+ignore_generated_files = true
 raw_strings = true
 interpreted_strings = true
 multiline_string_style = "prefer_raw"
