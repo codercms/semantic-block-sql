@@ -894,6 +894,12 @@ groups; formatting may add safe breaks but does not collapse those groups. This
 closes the local architecture gap where token-only leaf normalization collapsed
 nested queries and other safely breakable expressions onto one over-hard line;
 it does not broaden the PL/pgSQL node allowlist.
+Typed dynamic `EXECUTE` leaves likewise bind top-level `INTO` and `USING`
+clauses from scanner tokens. The command expression, target list, and parameter
+expression list reuse the same canonical expression layout, while authored
+clause boundaries remain mandatory. Procedural layout supplies the leaf's
+remaining soft and hard width after body indentation, so nested control-flow
+depth cannot create a line that was only safe at column zero.
 Expanded SELECT targets and parenthesized argument lists apply their item
 indent as a structural-depth-aware floor; an outer list must not flatten layout
 already owned by a nested query.

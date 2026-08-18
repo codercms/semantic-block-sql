@@ -1059,3 +1059,24 @@ The architecture plan and executable checklist are maintained in
   diagnostics, dependency, and dead-code self-review.
 - [x] Run GitNexus change-scope review before committing.
 - [x] Commit the coherent batch without unrelated workspace files.
+
+## PL/pgSQL dynamic EXECUTE layout batch
+
+- [x] Classify the over-hard `EXECUTE ... USING` line as a typed procedural-leaf
+  architecture gap, not a hard-width workaround.
+- [x] Add a synthetic dynamic-execution regression without copying production
+  SQL; reproduce the former 200-column failure before changing layout.
+- [x] Bind top-level `INTO` and `USING` clauses only inside the typed
+  `DynamicExecute` leaf.
+- [x] Reuse canonical expression layout for command, target, and parameter
+  expressions while preserving authored clause boundaries.
+- [x] Pass indentation-adjusted width budgets from procedural layout to leaf
+  formatters.
+- [x] Verify the reported production migration through non-writing
+  `semblock diff`.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review before committing.
+- [x] Commit the coherent batch without unrelated workspace files.

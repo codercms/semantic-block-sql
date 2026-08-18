@@ -223,8 +223,16 @@ fn format_leaf(
     kind: ir::BodyNodeKind,
     text: &str,
     options: &FormatOptions,
+    indent: usize,
 ) -> Result<String, FormatDiagnostic> {
-    format_body_statement(kind, text, options)
+    let mut nested_options = options.clone();
+    let indent_width = indent * 4;
+    nested_options.soft_line_width = options.soft_line_width.saturating_sub(indent_width).max(1);
+    nested_options.hard_line_width = options
+        .hard_line_width
+        .saturating_sub(indent_width)
+        .max(nested_options.soft_line_width);
+    format_body_statement(kind, text, &nested_options)
 }
 
 fn format_body_statement(
@@ -242,6 +250,9 @@ fn format_body_statement(
         return Ok(attach_line_comment(rendered, comment));
     }
     if let Some(rendered) = format_assignment_expression(kind, code, options)? {
+        return Ok(attach_line_comment(rendered, comment));
+    }
+    if let Some(rendered) = format_dynamic_execute(kind, code, options)? {
         return Ok(attach_line_comment(rendered, comment));
     }
     if kind == ir::BodyNodeKind::ReturnQuery {
@@ -333,6 +344,111 @@ fn format_assignment_expression(
         ));
     }
     format_sql_expression(&prefix, expression, options).map(Some)
+}
+
+fn format_dynamic_execute(
+    kind: ir::BodyNodeKind,
+    code: &str,
+    options: &FormatOptions,
+) -> Result<Option<String>, FormatDiagnostic> {
+    if kind != ir::BodyNodeKind::DynamicExecute {
+        return Ok(None);
+    }
+    let tokens = super::tokens::tokenize(code)?;
+    let execute = tokens
+        .first()
+        .filter(|token| token.text.eq_ignore_ascii_case("EXECUTE"))
+        .ok_or_else(|| FormatDiagnostic::Ownership("dynamic EXECUTE has no owner".into()))?;
+    let statement_end = code
+        .trim_end()
+        .strip_suffix(';')
+        .map_or(code.len(), str::len);
+    let mut depth = 0usize;
+    let mut clauses = Vec::new();
+    for (index, token) in tokens.iter().enumerate().skip(1) {
+        match token.kind {
+            pg_query::protobuf::Token::Ascii41 | pg_query::protobuf::Token::Ascii93 => {
+                depth = depth.saturating_sub(1);
+            }
+            pg_query::protobuf::Token::Into | pg_query::protobuf::Token::Using if depth == 0 => {
+                clauses.push(index);
+            }
+            pg_query::protobuf::Token::Ascii40 | pg_query::protobuf::Token::Ascii91 => depth += 1,
+            _ => {}
+        }
+    }
+
+    let command_end = clauses
+        .first()
+        .map_or(statement_end, |index| tokens[*index].start);
+    let command = code[execute.end..command_end].trim();
+    if command.is_empty() {
+        return Err(FormatDiagnostic::Ownership(
+            "dynamic EXECUTE has no command expression".into(),
+        ));
+    }
+    let mut rendered = format_sql_expression("EXECUTE", command, options)?
+        .trim_end_matches(';')
+        .to_owned();
+
+    for (position, index) in clauses.iter().copied().enumerate() {
+        let token = &tokens[index];
+        let end = clauses
+            .get(position + 1)
+            .map_or(statement_end, |next| tokens[*next].start);
+        let clause = if token.kind == pg_query::protobuf::Token::Using {
+            let expressions = code[token.end..end].trim();
+            if expressions.is_empty() {
+                return Err(FormatDiagnostic::Ownership(
+                    "dynamic EXECUTE USING has no expressions".into(),
+                ));
+            }
+            format_sql_expression("USING", expressions, options)?
+                .trim_end_matches(';')
+                .to_owned()
+        } else {
+            let strict = tokens
+                .get(index + 1)
+                .filter(|next| next.start < end && next.text.eq_ignore_ascii_case("STRICT"));
+            let prefix = if strict.is_some() {
+                "INTO STRICT"
+            } else {
+                "INTO"
+            };
+            let targets_start = strict.map_or(token.end, |strict| strict.end);
+            let targets = code[targets_start..end].trim();
+            if targets.is_empty() {
+                return Err(FormatDiagnostic::Ownership(
+                    "dynamic EXECUTE INTO has no target".into(),
+                ));
+            }
+            format_sql_expression(prefix, targets, options)?
+                .trim_end_matches(';')
+                .to_owned()
+        };
+        let combined_width = rendered
+            .lines()
+            .next_back()
+            .map_or(0, |line| line.chars().count())
+            + 1
+            + clause.lines().next().map_or(0, |line| line.chars().count());
+        if token.line_breaks_before > 0
+            || rendered.contains('\n')
+            || clause.contains('\n')
+            || combined_width > options.hard_line_width
+        {
+            rendered.push_str(if token.line_breaks_before > 1 {
+                "\n\n"
+            } else {
+                "\n"
+            });
+        } else {
+            rendered.push(' ');
+        }
+        rendered.push_str(&clause);
+    }
+    rendered.push(';');
+    Ok(Some(rendered))
 }
 
 fn format_sql_expression(

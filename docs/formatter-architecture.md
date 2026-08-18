@@ -610,6 +610,12 @@ classified the leaf as an assignment. Only the wrapper is removed. The
 procedural layout then adds its body-frame indentation without discarding the
 leaf formatter's relative indentation or authored argument groups.
 
+Typed dynamic `EXECUTE` leaves bind their top-level `INTO` and `USING` clause
+tokens before formatting. Their command, target, and parameter expressions use
+the shared expression adapter, and clause breaks are preserved or added at the
+hard limit. The procedural layout passes an indentation-adjusted width budget
+to every leaf formatter before adding the body frame.
+
 Within the canonical layout pipeline, expanded list owners preserve relative
 token depth so their indentation frame cannot collapse nested query ownership.
 

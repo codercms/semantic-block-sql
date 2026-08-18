@@ -55,7 +55,7 @@ pub(super) fn format(
         } else if node.kind == BodyNodeKind::Comment {
             node.text.to_owned()
         } else {
-            format_leaf(node.kind, node.text, options)?
+            format_leaf(node.kind, node.text, options, indent)?
         };
         let mut rendered = text;
         if let Some(comment) = node.trailing_comment {
