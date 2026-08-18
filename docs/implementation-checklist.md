@@ -1021,3 +1021,4 @@ The architecture plan and executable checklist are maintained in
   diagnostics, dependency, and dead-code self-review.
 - [x] Run GitNexus change-scope review before committing.
 - [x] Commit the coherent batch without unrelated workspace files.
+- [x] Bump the package version from `0.1.16` to `0.1.17` in a separate commit.
