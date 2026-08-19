@@ -22,6 +22,7 @@ enum Frame {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LayoutLine {
     indent: usize,
+    relative_indent: usize,
     text: String,
     blank_before: bool,
 }
@@ -54,7 +55,7 @@ pub(super) fn format(
         } else if node.kind == BodyNodeKind::Comment {
             node.text.to_owned()
         } else {
-            format_leaf(node.kind, node.text, options)?
+            format_leaf(node.kind, node.text, options, indent)?
         };
         let mut rendered = text;
         if let Some(comment) = node.trailing_comment {
@@ -65,6 +66,10 @@ pub(super) fn format(
         for part in rendered.lines() {
             lines.push(LayoutLine {
                 indent,
+                relative_indent: part
+                    .chars()
+                    .take_while(|character| *character == ' ')
+                    .count(),
                 text: part.trim().to_owned(),
                 blank_before: first && (node.blank_before || separate_exception_handler),
             });
@@ -90,7 +95,11 @@ pub(super) fn format(
         {
             rendered.push(String::new());
         }
-        rendered.push(format!("{}{}", " ".repeat(line.indent * 4), line.text));
+        rendered.push(format!(
+            "{}{}",
+            " ".repeat(line.indent * 4 + line.relative_indent),
+            line.text
+        ));
     }
     while rendered.first().is_some_and(|line| line.is_empty()) {
         rendered.remove(0);

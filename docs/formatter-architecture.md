@@ -602,6 +602,23 @@ Operational utilities remain a closed `UtilityStatementKind` capability set. Nes
 
 The procedural formatter is split into `procedural::ir` and `procedural::layout`. The IR adapter validates parser node families, binds source spans independently from line boundaries, and cross-checks key parser-node counts against lexical nodes. The layout layer consumes only typed nodes and emits indentation frames; it does not discover syntax from source lines. Outer SQL, dollar-tag preservation, normalized parser equivalence, protected literals, and idempotence remain separate gates.
 
+`RETURN` expression leaves and typed assignment right-hand sides pass through a
+shared synthetic `SELECT` wrapper so the ordinary typed SQL ownership and layout
+pipeline supplies their safe nested query, list, and function-argument breaks.
+The assignment operator is located from scanner tokens only after the IR has
+classified the leaf as an assignment. Only the wrapper is removed. The
+procedural layout then adds its body-frame indentation without discarding the
+leaf formatter's relative indentation or authored argument groups.
+
+Typed dynamic `EXECUTE` leaves bind their top-level `INTO` and `USING` clause
+tokens before formatting. Their command, target, and parameter expressions use
+the shared expression adapter, and clause breaks are preserved or added at the
+hard limit. The procedural layout passes an indentation-adjusted width budget
+to every leaf formatter before adding the body frame.
+
+Within the canonical layout pipeline, expanded list owners preserve relative
+token depth so their indentation frame cannot collapse nested query ownership.
+
 ## Go string-expression pipeline
 
 Go extraction operates on tree-sitter expression nodes rather than database API names or broad declaration-only ownership. Raw literals, interpreted literals, and literal-only static concatenations are decoded into a `GoStringExpression`; runtime-dependent concatenations are retained as dynamic opaque expressions. Eligible declaration, assignment, return, call-argument, `defer`, `go`, and composite-literal contexts pass through PostgreSQL formatting.

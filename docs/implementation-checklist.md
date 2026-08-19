@@ -1022,3 +1022,61 @@ The architecture plan and executable checklist are maintained in
 - [x] Run GitNexus change-scope review before committing.
 - [x] Commit the coherent batch without unrelated workspace files.
 - [x] Bump the package version from `0.1.16` to `0.1.17` in a separate commit.
+
+## PL/pgSQL RETURN expression width batch
+
+- [x] Classify the failure as a localized procedural-leaf architecture gap
+  before changing code.
+- [x] Add a synthetic nested-query `RETURN` regression without copying
+  production SQL.
+- [x] Reuse the canonical SQL formatter through a removable `SELECT` wrapper.
+- [x] Preserve leaf-relative indentation inside the procedural body frame.
+- [x] Preserve structural depth when expanded SELECT and function-argument
+  lists contain nested queries.
+- [x] Verify the reported production file through non-writing `semblock diff`.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review before committing.
+- [x] Commit the coherent batch without unrelated workspace files.
+- [x] Bump the package version from `0.1.17` to `0.1.18` in a separate commit.
+
+## PL/pgSQL assignment expression layout batch
+
+- [x] Classify authored assignment collapse as the sibling procedural-leaf
+  architecture gap, not a width-check workaround.
+- [x] Add a synthetic declared assignment regression that reproduces the
+  over-hard collapse without copying production SQL.
+- [x] Route the parser-owned assignment right-hand side through the shared
+  canonical SQL expression adapter.
+- [x] Preserve authored function-argument groups while allowing the canonical
+  planner to add safe breaks.
+- [x] Verify the reported production file through non-writing `semblock diff`.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review before committing.
+- [x] Commit the coherent batch without unrelated workspace files.
+
+## PL/pgSQL dynamic EXECUTE layout batch
+
+- [x] Classify the over-hard `EXECUTE ... USING` line as a typed procedural-leaf
+  architecture gap, not a hard-width workaround.
+- [x] Add a synthetic dynamic-execution regression without copying production
+  SQL; reproduce the former 200-column failure before changing layout.
+- [x] Bind top-level `INTO` and `USING` clauses only inside the typed
+  `DynamicExecute` leaf.
+- [x] Reuse canonical expression layout for command, target, and parameter
+  expressions while preserving authored clause boundaries.
+- [x] Pass indentation-adjusted width budgets from procedural layout to leaf
+  formatters.
+- [x] Verify the reported production migration through non-writing
+  `semblock diff`.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review before committing.
+- [x] Commit the coherent batch without unrelated workspace files.

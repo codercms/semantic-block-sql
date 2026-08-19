@@ -29,6 +29,77 @@ fn formats_assert_and_compact_bodies() {
 }
 
 #[test]
+fn formats_long_return_expressions_at_safe_sql_boundaries() {
+    let source = r#"CREATE FUNCTION synthetic_return_width()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN compare_record(
+        (SELECT snapshot FROM (
+            SELECT
+                1 AS alpha_attribute,
+                2 AS beta_attribute,
+                3 AS gamma_attribute,
+                4 AS delta_attribute,
+                5 AS epsilon_attribute,
+                6 AS zeta_attribute,
+                7 AS eta_attribute,
+                8 AS theta_attribute
+        ) snapshot)
+    );
+END;
+$$;"#;
+    let expected = r#"CREATE FUNCTION synthetic_return_width()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN compare_record(
+        (
+            SELECT snapshot
+            FROM (
+                SELECT
+                    1 AS alpha_attribute,
+                    2 AS beta_attribute,
+                    3 AS gamma_attribute,
+                    4 AS delta_attribute,
+                    5 AS epsilon_attribute,
+                    6 AS zeta_attribute,
+                    7 AS eta_attribute,
+                    8 AS theta_attribute
+            ) snapshot
+        )
+    );
+END;
+$$;"#;
+
+    assert_fixture(source, expected);
+}
+
+#[test]
+fn preserves_authored_assignment_argument_splits() {
+    let source = r#"CREATE FUNCTION synthetic_assignment_layout()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    result_payload jsonb;
+    previous_item_ids bigint[];
+    current_item_ids bigint[];
+BEGIN
+    result_payload := combine_snapshots(
+        (SELECT array_agg(item_id ORDER BY item_id) FROM unnest(previous_item_ids) item_id),
+        (SELECT array_agg(item_id ORDER BY item_id) FROM unnest(current_item_ids) item_id)
+    );
+    RETURN result_payload;
+END;
+$$;"#;
+
+    assert_fixture(source, source);
+}
+
+#[test]
 fn formats_unicode_inside_dollar_quoted_bodies_without_panicking() {
     assert_fixture(
         "CREATE FUNCTION synthetic_unicode() RETURNS text LANGUAGE plpgsql AS $$ BEGIN RETURN 'Пример'; END; $$;",

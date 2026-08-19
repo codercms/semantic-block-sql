@@ -21,6 +21,35 @@ fn formats_procedural_case_and_dynamic_execute() {
 }
 
 #[test]
+fn breaks_long_dynamic_execute_at_owned_clause_boundaries() {
+    let source = r#"DO $$
+DECLARE
+    relation_name text := 'synthetic_items';
+    first_key bigint := 1;
+    second_key bigint := 2;
+    third_key bigint := 3;
+    fourth_key bigint := 4;
+BEGIN
+    EXECUTE 'UPDATE ' || relation_name || ' SET modified_at = NOW() WHERE first_key = $1 AND second_key = $2 AND third_key = $3 AND fourth_key = $4' USING first_key, second_key, third_key, fourth_key;
+END;
+$$;"#;
+    let expected = r#"DO $$
+DECLARE
+    relation_name text := 'synthetic_items';
+    first_key bigint := 1;
+    second_key bigint := 2;
+    third_key bigint := 3;
+    fourth_key bigint := 4;
+BEGIN
+    EXECUTE 'UPDATE ' || relation_name || ' SET modified_at = NOW() WHERE first_key = $1 AND second_key = $2 AND third_key = $3 AND fourth_key = $4'
+    USING first_key, second_key, third_key, fourth_key;
+END;
+$$;"#;
+
+    assert_fixture(source, expected);
+}
+
+#[test]
 fn formats_cursor_declaration_open_fetch_move_and_close() {
     assert_fixture(
         include_str!("fixtures/batch12/cursors.input.sql"),
