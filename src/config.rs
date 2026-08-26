@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -5,7 +6,10 @@ use std::path::{Component, Path, PathBuf};
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{FormatOptions, NotEqualPolicy, SemicolonPolicy, SyntaxDiagnostics, UnsupportedPolicy};
+use crate::{
+    FormatOptions, NotEqualPolicy, SemicolonPolicy, SyntaxDiagnostics, TypeAliasFamily,
+    UnsupportedPolicy,
+};
 
 const DEFAULT_IGNORE_FILE: &str = ".semblockignore";
 
@@ -104,6 +108,8 @@ struct FileFormatConfig {
     not_equal_policy: Option<NotEqualPolicy>,
     syntax_diagnostics: Option<SyntaxDiagnostics>,
     unsupported_policy: Option<UnsupportedPolicy>,
+    #[serde(default)]
+    type_aliases: BTreeMap<TypeAliasFamily, String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -163,11 +169,20 @@ impl Config {
     }
 
     pub fn to_toml(&self) -> String {
+        let aliases = self
+            .format
+            .type_aliases
+            .iter()
+            .map(|(family, spelling)| {
+                format!("{} = \"{}\"\n", family.config_name(), toml_string(spelling))
+            })
+            .collect::<String>();
         format!(
-            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\nunsupported_policy = \"{}\"\n\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nignore_generated_files = {}\nraw_strings = {}\ninterpreted_strings = {}\nmultiline_string_style = \"{}\"\n",
+            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\nunsupported_policy = \"{}\"\n\n[format.type_aliases]\n{}\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nignore_generated_files = {}\nraw_strings = {}\ninterpreted_strings = {}\nmultiline_string_style = \"{}\"\n",
             semicolon_policy_name(self.format.semicolon_policy),
             not_equal_policy_name(self.format.not_equal_policy),
             unsupported_policy_name(self.format.unsupported_policy),
+            aliases,
             self.format.soft_line_width,
             self.format.hard_line_width,
             self.discovery.respect_gitignore,
@@ -201,6 +216,7 @@ impl Config {
         if let Some(value) = file.format.unsupported_policy {
             config.format.unsupported_policy = value;
         }
+        config.format.type_aliases = file.format.type_aliases;
         if let Some(value) = file.layout.soft_line_width {
             config.format.soft_line_width = value;
         }
@@ -255,6 +271,10 @@ impl Config {
                 "layout.hard_line_width must be greater than or equal to soft_line_width".into(),
             ));
         }
+        config
+            .format
+            .validate()
+            .map_err(|error| ConfigError::Invalid(error.to_string()))?;
         Ok(config)
     }
 }

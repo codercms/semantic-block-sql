@@ -1080,3 +1080,20 @@ The architecture plan and executable checklist are maintained in
   diagnostics, dependency, and dead-code self-review.
 - [x] Run GitNexus change-scope review before committing.
 - [x] Commit the coherent batch without unrelated workspace files.
+
+## Configurable type-alias preferences batch
+
+- [x] Save the durable implementation plan before formatter edits.
+- [x] Add an empty-by-default strict `[format.type_aliases]` map.
+- [x] Normalize only closed, parser-owned PostgreSQL alias families.
+- [x] Preserve `varchar`/`text`, custom, quoted, qualified, and `float(p)` types.
+- [x] Cover SQL, serial columns, routine headers, PL/pgSQL declarations, Go
+  literals, diagnostics, invalid configuration, and the checked-in full example.
+- [x] Update the README, user guide, core contract, design resolution,
+  architecture, extension guide, and SQL coverage notes.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review before committing.
+- [x] Commit the coherent batch without unrelated workspace files.

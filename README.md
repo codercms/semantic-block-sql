@@ -273,6 +273,11 @@ Common settings:
 [format]
 unsupported_policy = "skip"
 
+[format.type_aliases]
+integer = "int"
+character_varying = "varchar"
+timestamp_with_time_zone = "timestamptz"
+
 [layout]
 soft_line_width = 120
 hard_line_width = 160
@@ -291,6 +296,11 @@ Inspect the effective configuration with:
 semblock config path
 semblock config show
 ```
+
+Type-alias preferences are optional and preserve authored spelling when omitted.
+See the [full enabled example](examples/semblock-all-type-aliases.toml) and the
+[user guide](docs/user-guide.md#type-alias-preferences) for the validated families.
+`varchar` and `text` are distinct PostgreSQL types and are never interchanged.
 
 The full configuration and directive reference is in the [user guide](docs/user-guide.md).
 
