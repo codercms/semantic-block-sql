@@ -602,6 +602,17 @@ Operational utilities remain a closed `UtilityStatementKind` capability set. Nes
 
 The procedural formatter is split into `procedural::ir` and `procedural::layout`. The IR adapter validates parser node families, binds source spans independently from line boundaries, and cross-checks key parser-node counts against lexical nodes. The layout layer consumes only typed nodes and emits indentation frames; it does not discover syntax from source lines. Outer SQL, dollar-tag preservation, normalized parser equivalence, protected literals, and idempotence remain separate gates.
 
+## Type-alias normalization boundary
+
+Optional type spelling normalization is a post-ownership rewrite over
+parser-owned `TypeName` locations. A closed enum defines families and accepted
+targets; configuration cannot introduce arbitrary token substitutions. The
+normalized statement is reparsed and passed through the canonical formatter a
+second time so a longer or shorter spelling participates in ordinary width
+layout. PL/pgSQL declarations use their existing typed `Declaration` leaf and
+the whole routine is reparsed and compared after rewriting. Opaque statement
+ranges and qualified, quoted, or otherwise unowned type names are preserved.
+
 `RETURN` expression leaves and typed assignment right-hand sides pass through a
 shared synthetic `SELECT` wrapper so the ordinary typed SQL ownership and layout
 pipeline supplies their safe nested query, list, and function-argument breaks.

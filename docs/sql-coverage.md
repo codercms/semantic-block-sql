@@ -192,6 +192,11 @@ PL/pgSQL coverage includes:
 
 Routine grammar such as `FUNCTION` / `PROCEDURE`, `RETURNS`, and `LANGUAGE` is bound to parser-owned locations so same-spelled identifiers and user-defined types remain identifiers.
 
+Optional built-in type-alias preferences apply within already-supported syntax
+at parser-owned type locations and typed PL/pgSQL declarations. They do not
+expand SQL syntax coverage: unsupported statements remain byte-identical, and
+qualified, quoted, custom, and `float(p)` type names remain outside the rewrite.
+
 ## Known unsupported boundaries
 
 The following valid PostgreSQL forms are deliberately preserved as unsupported today and have explicit boundary tests:

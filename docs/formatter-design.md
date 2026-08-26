@@ -712,6 +712,8 @@ not_equal_policy = "preserve"
 syntax_diagnostics = "parser_available"
 unsupported_policy = "skip"
 
+[format.type_aliases]
+
 [layout]
 soft_line_width = 120
 hard_line_width = 160
@@ -737,6 +739,23 @@ Configuration starts with built-in defaults, then applies the first
 `semblock.toml` found from the current directory upward. `--config` replaces
 that search with an explicit path. Unknown keys, invalid widths, unsupported dialects, path-like ignore filenames,
 and invalid policy values are configuration errors.
+
+### Configurable type-alias resolution
+
+The latest explicit project requirement adds an optional strict
+`[format.type_aliases]` table. The empty table preserves all authored type
+spellings. Each key selects one closed PostgreSQL built-in alias family and its
+value must be another spelling from that family. Normalization is bound to
+parser-owned `TypeName` locations (and typed PL/pgSQL declaration nodes), then
+reuses parse, protected-range, equivalence, and idempotence gates. Unsupported
+statement ranges remain byte-identical.
+
+This resolves the apparent request for `varchar`/`text` conversion by excluding
+it: PostgreSQL treats them as distinct types with different length/coercion
+behavior. Arbitrary user replacement pairs are likewise excluded because they
+cannot satisfy the formatter's schema-free semantic-preservation contract.
+Projects opting into unqualified shorthand aliases assume those built-in names
+are not shadowed through `search_path`.
 
 ## MVP non-goals
 

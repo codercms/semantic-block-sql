@@ -219,6 +219,15 @@ Before committing, confirm:
 - no existing statement planner was rewritten merely to add another family;
 - dead capability fields and duplicate helpers were removed.
 
+## Extending type-alias preferences
+
+Add a family only when PostgreSQL parsing proves the spellings are aliases.
+Extend the exhaustive `TypeAliasFamily` matches, add fixtures for every source
+and target spelling, and verify modifiers, arrays, routines, Go literals,
+diagnostic ranges, and an unsupported neighbor. Never add a global keyword scan
+or admit arbitrary replacement pairs. Types with merely similar use cases,
+such as `varchar` and `text`, are not alias families.
+
 
 ## Extension paths after the expanded coverage tranche
 

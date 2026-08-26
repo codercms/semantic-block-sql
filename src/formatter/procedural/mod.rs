@@ -274,7 +274,12 @@ fn format_body_statement(
     if let Some(rendered) = format_open_query(code, &upper, options)? {
         return Ok(attach_line_comment(rendered, comment));
     }
-    let normalized = if code.starts_with("<<") && code.ends_with(">>") {
+    let normalized = if kind == ir::BodyNodeKind::Declaration {
+        normalize_procedural_code(
+            &super::type_aliases::normalize_declaration(code, options)?,
+            options,
+        )?
+    } else if code.starts_with("<<") && code.ends_with(">>") {
         code.to_owned()
     } else {
         normalize_procedural_code(code, options)?
@@ -758,7 +763,7 @@ fn normalize_plpgsql(value: &mut Value) -> Result<(), FormatDiagnostic> {
         Value::Object(fields) => {
             fields.remove("lineno");
             if let Some(Value::String(type_name)) = fields.get_mut("typname") {
-                *type_name = type_name.trim().to_owned();
+                *type_name = canonical_type_name(type_name);
             }
             if let Some(Value::String(query)) = fields.get("query").cloned() {
                 let mode = fields.get("parseMode").and_then(Value::as_i64).unwrap_or(0);
@@ -795,6 +800,44 @@ fn normalize_plpgsql(value: &mut Value) -> Result<(), FormatDiagnostic> {
         _ => {}
     }
     Ok(())
+}
+
+fn canonical_type_name(type_name: &str) -> String {
+    let trimmed = type_name.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    for (aliases, canonical) in [
+        (&["smallint", "int2"][..], "int2"),
+        (&["integer", "int", "int4"][..], "int4"),
+        (&["bigint", "int8"][..], "int8"),
+        (&["boolean", "bool"][..], "bool"),
+        (&["character", "char"][..], "character"),
+        (&["character varying", "varchar"][..], "varchar"),
+        (&["bit varying", "varbit"][..], "varbit"),
+        (&["numeric", "decimal"][..], "numeric"),
+        (&["real", "float4"][..], "float4"),
+        (&["double precision", "float", "float8"][..], "float8"),
+        (&["time with time zone", "timetz"][..], "timetz"),
+        (
+            &["timestamp", "timestamp without time zone"][..],
+            "timestamp",
+        ),
+        (
+            &["timestamp with time zone", "timestamptz"][..],
+            "timestamptz",
+        ),
+    ] {
+        for alias in aliases {
+            if lower == *alias {
+                return canonical.to_owned();
+            }
+            if let Some(suffix) = lower.strip_prefix(alias)
+                && (suffix.starts_with('(') || suffix.starts_with('['))
+            {
+                return format!("{canonical}{}", &trimmed[alias.len()..]);
+            }
+        }
+    }
+    trimmed.to_owned()
 }
 
 fn canonical_postgresql(source: &str) -> Result<Value, FormatDiagnostic> {

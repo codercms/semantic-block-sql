@@ -70,6 +70,8 @@ hard_line_width = 160
 semicolon_policy = preserve
 not_equal_policy = preserve
 syntax_diagnostics = parser_available
+
+[type_aliases] = empty
 ```
 
 ### 4.1 Line widths
@@ -120,7 +122,19 @@ prefer_bang
 
 `<>` is valid PostgreSQL and must not be reported by default.
 
-### 4.4 Syntax diagnostics
+### 4.4 Type-alias preferences
+
+Type-alias preferences are disabled by default. Configuration is a strict map
+from a reviewed PostgreSQL built-in alias family to one allowed spelling in
+that same family. Omitted families preserve authored spelling. `check` reports
+a configured mismatch as fixable `type.alias`; `fmt` rewrites only the
+parser-owned type span and preserves modifiers.
+
+The reviewed families and values are defined in the user guide and executable
+fixtures. Arbitrary text replacement, `varchar`/`text` conversion, qualified or
+quoted names, custom types, and `float(p)` are outside this policy.
+
+### 4.5 Syntax diagnostics
 
 Syntax validation is not a style responsibility.
 
@@ -141,6 +155,7 @@ Formatting must preserve:
 
 - statement and expression order;
 - operators, except configured `<>` normalization;
+- built-in type spelling, except configured alias-family normalization;
 - aliases;
 - casts;
 - literals;
@@ -479,6 +494,7 @@ It must not report:
 - a line only for crossing the soft limit;
 - an existing valid authored grouping;
 - `<>` under the default `not_equal_policy = preserve`;
+- a type spelling whose alias family is omitted from configuration;
 - optional alignment differences.
 
 Suggested diagnostic classes:

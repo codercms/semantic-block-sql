@@ -6,11 +6,15 @@ mod semantic_block;
 mod sql_standard_routine;
 mod structure;
 mod tokens;
+mod type_aliases;
 mod validation;
+
+use std::collections::BTreeMap;
 
 use serde::Deserialize;
 use thiserror::Error;
 
+pub use type_aliases::TypeAliasFamily;
 pub use validation::validate_equivalent;
 
 pub(crate) const INDENT_WIDTH: usize = 4;
@@ -142,6 +146,7 @@ pub struct FormatOptions {
     pub not_equal_policy: NotEqualPolicy,
     pub syntax_diagnostics: SyntaxDiagnostics,
     pub unsupported_policy: UnsupportedPolicy,
+    pub type_aliases: BTreeMap<TypeAliasFamily, String>,
 }
 
 impl Default for FormatOptions {
@@ -154,12 +159,13 @@ impl Default for FormatOptions {
             not_equal_policy: NotEqualPolicy::Preserve,
             syntax_diagnostics: SyntaxDiagnostics::ParserAvailable,
             unsupported_policy: UnsupportedPolicy::Skip,
+            type_aliases: BTreeMap::new(),
         }
     }
 }
 
 impl FormatOptions {
-    fn validate(&self) -> Result<(), FormatDiagnostic> {
+    pub(crate) fn validate(&self) -> Result<(), FormatDiagnostic> {
         if self.soft_line_width == 0 {
             return Err(FormatDiagnostic::InvalidOptions(
                 "soft_line_width must be greater than zero".into(),
@@ -169,6 +175,14 @@ impl FormatOptions {
             return Err(FormatDiagnostic::InvalidOptions(
                 "hard_line_width must be greater than or equal to soft_line_width".into(),
             ));
+        }
+        for (&family, spelling) in &self.type_aliases {
+            if !family.accepts(spelling) {
+                return Err(FormatDiagnostic::InvalidOptions(format!(
+                    "format.type_aliases.{} has unsupported spelling `{spelling}`",
+                    family.config_name()
+                )));
+            }
         }
         Ok(())
     }
@@ -287,23 +301,37 @@ fn format_document_once(
     options: &FormatOptions,
 ) -> Result<FormattedSql, FormatDiagnostic> {
     let content = format_document_content(source, options)?;
-    let output = content.output;
+    let base_output = content.output;
+    let source_aliases = type_aliases::normalize(source, options, &content.opaque_source_ranges)?;
+    let output_aliases =
+        type_aliases::normalize(&base_output, options, &content.opaque_output_ranges)?;
+    let (output, final_opaque_output_ranges) = if output_aliases.output == base_output {
+        (base_output.clone(), content.opaque_output_ranges.clone())
+    } else {
+        let final_content = format_document_content(&output_aliases.output, options)?;
+        (final_content.output, final_content.opaque_output_ranges)
+    };
     let mut diagnostics = content.diagnostics;
-    let warnings = semantic_block::validate_hard_width_except(
-        &output,
-        options,
-        &content.opaque_output_ranges,
-    )?;
+    let warnings =
+        semantic_block::validate_hard_width_except(&output, options, &final_opaque_output_ranges)?;
     let opaque_source_ranges = content.opaque_source_ranges;
-    let mut style_diagnostics = diagnostics::style_diagnostics(source, &output, options)?;
+    let mut style_diagnostics = diagnostics::style_diagnostics(source, &base_output, options)?;
     style_diagnostics.retain(|diagnostic| {
         !opaque_source_ranges.iter().any(|range| {
             diagnostic.source_range.start >= range.start && diagnostic.source_range.end <= range.end
         })
     });
     diagnostics.extend(style_diagnostics);
+    diagnostics.extend(source_aliases.diagnostics);
     diagnostics.extend(diagnostics::warning_diagnostics(
-        source, &output, &warnings, options,
+        source,
+        &base_output,
+        &semantic_block::validate_hard_width_except(
+            &base_output,
+            options,
+            &content.opaque_output_ranges,
+        )?,
+        options,
     )?);
 
     Ok(FormattedSql {

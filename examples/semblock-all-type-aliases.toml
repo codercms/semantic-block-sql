@@ -1,0 +1,41 @@
+dialect = "postgresql"
+
+[format]
+semicolon_policy = "preserve"
+not_equal_policy = "prefer_bang"
+syntax_diagnostics = "parser_available"
+unsupported_policy = "skip"
+
+[format.type_aliases]
+smallint = "smallint"
+integer = "int"
+bigint = "bigint"
+smallserial = "smallserial"
+serial = "serial"
+bigserial = "bigserial"
+boolean = "boolean"
+character = "char"
+character_varying = "varchar"
+bit_varying = "varbit"
+numeric = "numeric"
+real = "real"
+double_precision = "double precision"
+time_with_time_zone = "timetz"
+timestamp_without_time_zone = "timestamp"
+timestamp_with_time_zone = "timestamptz"
+
+[layout]
+soft_line_width = 120
+hard_line_width = 160
+
+[discovery]
+respect_gitignore = true
+ignore_file = ".semblockignore"
+
+[go]
+enabled = true
+auto_detect = true
+ignore_generated_files = true
+raw_strings = true
+interpreted_strings = true
+multiline_string_style = "prefer_raw"

@@ -222,6 +222,8 @@ not_equal_policy = "preserve"
 syntax_diagnostics = "parser_available"
 unsupported_policy = "skip"
 
+[format.type_aliases]
+
 [layout]
 soft_line_width = 120
 hard_line_width = 160
@@ -240,6 +242,49 @@ multiline_string_style = "prefer_raw"
 ```
 
 Indentation is always four spaces. Authored list groups, blank lines, and comment boundaries are mandatory structural boundaries and are not configurable.
+
+### Type-alias preferences
+
+`[format.type_aliases]` is empty by default, so authored type spelling is
+preserved. Set only families the project wants to normalize. `check` reports a
+fixable `type.alias` diagnostic and `fmt` applies the preferred spelling.
+
+```toml
+[format.type_aliases]
+integer = "int"
+character_varying = "varchar"
+timestamp_with_time_zone = "timestamptz"
+```
+
+| Family key | Accepted preferences |
+| --- | --- |
+| `smallint` | `smallint`, `int2` |
+| `integer` | `integer`, `int`, `int4` |
+| `bigint` | `bigint`, `int8` |
+| `smallserial` | `smallserial`, `serial2` |
+| `serial` | `serial`, `serial4` |
+| `bigserial` | `bigserial`, `serial8` |
+| `boolean` | `boolean`, `bool` |
+| `character` | `character`, `char` |
+| `character_varying` | `character varying`, `varchar` |
+| `bit_varying` | `bit varying`, `varbit` |
+| `numeric` | `numeric`, `decimal` |
+| `real` | `real`, `float4` |
+| `double_precision` | `double precision`, bare `float`, `float8` |
+| `time_with_time_zone` | `time with time zone`, `timetz` |
+| `timestamp_without_time_zone` | `timestamp`, `timestamp without time zone` |
+| `timestamp_with_time_zone` | `timestamp with time zone`, `timestamptz` |
+
+Unknown keys and values are configuration errors. Modifiers and arrays are
+preserved, and `float(p)`, quoted, qualified, and custom type names are not
+rewritten. The checked-in
+[all-aliases example](../examples/semblock-all-type-aliases.toml) enables every
+family.
+
+`varchar` and `text` are separate PostgreSQL types, not aliases, so the
+formatter never converts between them. Opting into unqualified shorthand names
+also assumes the project does not shadow PostgreSQL built-in type names through
+`search_path`.
 
 ## Diagnostics
 
