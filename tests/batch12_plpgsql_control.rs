@@ -66,6 +66,14 @@ $$;"#;
 }
 
 #[test]
+fn formats_conditional_grant_inside_do_block() {
+    let source = "DO $$ BEGIN IF EXISTS (select from pg_roles where rolname='mdb') THEN grant execute on function imdb_new.ensure_collected_ids_partition(bigint) to mdb; END IF; END; $$;";
+    let expected = "DO $$\nBEGIN\n    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'mdb') THEN\n        GRANT EXECUTE ON FUNCTION imdb_new.ensure_collected_ids_partition(bigint) TO mdb;\n    END IF;\nEND;\n$$;";
+
+    assert_fixture(source, expected);
+}
+
+#[test]
 fn formats_cursor_declaration_open_fetch_move_and_close() {
     assert_fixture(
         include_str!("fixtures/batch12/cursors.input.sql"),

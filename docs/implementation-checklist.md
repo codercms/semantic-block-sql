@@ -1113,3 +1113,18 @@ The architecture plan and executable checklist are maintained in
   diagnostics, dependency, and dead-code self-review.
 - [x] Run GitNexus change-scope review before committing.
 - [x] Commit the coherent batch without unrelated workspace files.
+
+## PL/pgSQL conditional GRANT batch
+
+- [x] Reproduce the parser/lexical-IR alignment failure with a synthetic
+  conditional `GRANT` inside a `DO` block.
+- [x] Classify static `GRANT` through the existing typed SQL body-node path and
+  reuse the canonical SQL formatter.
+- [x] Verify the reported migration through non-writing `semblock diff`.
+- [x] Update the fixture-backed PostgreSQL coverage reference.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review before committing.
+- [x] Commit the coherent batch without unrelated workspace files.

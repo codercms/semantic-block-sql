@@ -177,7 +177,7 @@ Reviewed routine support includes SQL-standard `BEGIN ATOMIC` bodies within the 
 PL/pgSQL coverage includes:
 
 - declarations;
-- embedded SQL statements;
+- embedded SQL statements, including static `GRANT`;
 - `IF` / `ELSIF` / `ELSE`;
 - exception handlers;
 - loops;
