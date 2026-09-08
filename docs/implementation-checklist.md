@@ -1097,3 +1097,19 @@ The architecture plan and executable checklist are maintained in
   diagnostics, dependency, and dead-code self-review.
 - [x] Run GitNexus change-scope review before committing.
 - [x] Commit the coherent batch without unrelated workspace files.
+
+## FORMAT function-call layout regression batch
+
+- [x] Reproduce the dynamic `EXECUTE format(...)` hard-line/idempotence failure
+  with a synthetic PL/pgSQL regression.
+- [x] Recognize PostgreSQL `FORMAT(...)` through the shared typed function-call
+  predicate used by spacing and parenthesized-list planning.
+- [x] Keep parenthesized-list classification delegated to that shared predicate
+  to prevent built-in function coverage from diverging.
+- [x] Verify the reported migration through non-writing `semblock diff`.
+- [x] Run focused regressions and the complete formatting, Clippy, test,
+  Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic-preservation, ownership, idempotence, comments/groups,
+  diagnostics, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review before committing.
+- [x] Commit the coherent batch without unrelated workspace files.
