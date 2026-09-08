@@ -259,7 +259,7 @@ fn format_body_statement(
         return format_return_query(code, &upper, options)
             .map(|rendered| attach_line_comment(rendered, comment));
     }
-    for keyword in ["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE"] {
+    for keyword in ["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "GRANT"] {
         if upper.starts_with(keyword) && code.ends_with(';') {
             let formatted = super::format_sql(code, options)?.output;
             return Ok(attach_line_comment(formatted, comment));

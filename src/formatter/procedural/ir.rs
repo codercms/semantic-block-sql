@@ -300,7 +300,7 @@ fn classify_statement(
     let first = upper(&tokens[start]);
     let second = tokens.get(start + 1).map(upper);
     match first.as_str() {
-        "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH" => BodyNodeKind::Sql,
+        "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH" | "GRANT" => BodyNodeKind::Sql,
         "PERFORM" => BodyNodeKind::Perform,
         "RETURN" if second.as_deref() == Some("NEXT") => BodyNodeKind::ReturnNext,
         "RETURN" if second.as_deref() == Some("QUERY") => BodyNodeKind::ReturnQuery,
