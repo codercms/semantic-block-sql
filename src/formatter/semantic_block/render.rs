@@ -87,6 +87,7 @@ pub(in crate::formatter) fn is_function_call_syntax(tokens: &[SqlToken<'_>], ind
             Token::Ident
                 | Token::Coalesce
                 | Token::Extract
+                | Token::Format
                 | Token::Greatest
                 | Token::JsonArray
                 | Token::JsonArrayagg

@@ -50,6 +50,22 @@ $$;"#;
 }
 
 #[test]
+fn formats_long_format_call_inside_dynamic_execute() {
+    let source = r#"CREATE FUNCTION ensure_partition(version_id bigint) RETURNS void LANGUAGE plpgsql AS $$ BEGIN EXECUTE format('CREATE TABLE IF NOT EXISTS app_data.%I PARTITION OF app_data.collected_ratings FOR VALUES IN (%s) WITH (fillfactor = 80)', partition_name, version_id); END; $$;"#;
+    let expected = r#"CREATE FUNCTION ensure_partition(version_id bigint) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS app_data.%I PARTITION OF app_data.collected_ratings FOR VALUES IN (%s) WITH (fillfactor = 80)',
+        partition_name,
+        version_id
+    );
+END;
+$$;"#;
+
+    assert_fixture(source, expected);
+}
+
+#[test]
 fn formats_cursor_declaration_open_fetch_move_and_close() {
     assert_fixture(
         include_str!("fixtures/batch12/cursors.input.sql"),

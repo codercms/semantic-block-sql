@@ -159,13 +159,8 @@ fn contains_mixed_boolean_item(
 }
 
 pub(super) fn is_function_call_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
-    open.checked_sub(1).is_some_and(|previous| {
-        tokens[previous].kind == Token::Ident
-            || matches!(
-                tokens[previous].kind,
-                Token::Coalesce | Token::Nullif | Token::Greatest | Token::Least
-            )
-    })
+    open.checked_sub(1)
+        .is_some_and(|previous| is_function_call_syntax(tokens, previous))
 }
 
 pub(super) fn plan_keyword_list(
