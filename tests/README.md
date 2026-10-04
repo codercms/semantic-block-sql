@@ -34,6 +34,8 @@ those embedded languages byte-for-byte.
   and query containers.
 - `coverage_support_boundaries.rs`: reviewed syntax paired with adjacent valid but
   intentionally unsupported PostgreSQL forms.
+- `rust_host.rs` and `rust_cli.rs`: Rust literal/macro safety, runtime compilation,
+  diagnostic coordinates, discovery/configuration/Git selection, and atomicity.
 - fixture directories: only cases where comments, blank lines, protected payloads,
   host-language envelopes, or long procedural structures are themselves under test.
 

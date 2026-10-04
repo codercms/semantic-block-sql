@@ -52,7 +52,7 @@ The directories are implementation partitions, not plugin registries. Private
 module boundaries keep statement-specific code small while exhaustive enums
 remain the compiler-enforced dispatcher.
 
-Filesystem discovery, SQL directives, Go extraction, diff generation, and
+Filesystem discovery, SQL directives, Go/Rust extraction, diff generation, and
 atomic rewriting remain outside the formatter core.
 
 ## End-to-end flow
@@ -637,3 +637,28 @@ Go extraction operates on tree-sitter expression nodes rather than database API 
 Interpreted strings use a complete Go escape codec. Re-encoding prefers a raw literal for multiline SQL only when exact, otherwise deterministic interpreted escapes are used. The replacement is decoded again, compared with the expected runtime value, and accepted only when the complete Go file reparses. `GoFormatStats` exposes corpus-oriented counts without influencing formatting policy.
 
 The checked-in golden project remains offline. `examples/go_corpus.rs` consumes pinned external-project metadata only when explicitly invoked, records resolved commit SHAs, formats selected tracked Go files, requires `gofmt`, a byte-idempotent second pass, and selected project tests, and emits a JSON outcome report.
+
+
+## Rust string-expression pipeline
+
+`host::rust` owns CST extraction, directive attachment, Rust literal decoding,
+encoding, replacement spans, and full-source reparsing. Syn parses only the
+structurally located string literals and reviewed SQLx type argument; Tree-sitter
+parses the complete file and supplies byte ranges. Excluded host syntax never
+enters PostgreSQL layout. Go and Rust share the cheap SQL-prefix classifier in
+`host::mod`; it is only a candidate filter, never a SQL syntax authority.
+
+`format_source_with_rust` routes the adapter through the existing source
+idempotence and dual-coordinate diagnostic gates. The old `format_source` API
+uses default Rust configuration. Discovery similarly has explicit-Rust entry
+points without changing existing signatures. CLI stdin and file planning pass
+resolved Rust configuration into those entry points; Git filtering and atomic
+rewriting retain their existing modules.
+
+SQL layout, ownership, protected-token/AST equivalence, unsupported policy, and
+width enforcement remain in the canonical formatter. The Rust adapter never
+formats Rust itself, expands macros, runs the compiler, or writes files.
+`tests/rust_host.rs` covers extraction, macro positions, escapes, semantic
+preservation, whole-source idempotence, diagnostic ranges, and an actual
+compiled literal/runtime-value check. `tests/rust_cli.rs` covers discovery,
+configuration, stdin, Git selection, and project-wide no-write failures.

@@ -643,7 +643,7 @@ Required options:
 --config <path>
 --stdin
 --filename <name>
---language <auto|sql|go>
+--language <auto|sql|go|rust>
 --jobs <n>
 --verbose
 --quiet
@@ -971,3 +971,44 @@ The Go host layer classifies string expressions structurally. It owns raw litera
 Interpreted strings are decoded with the complete Go escape grammar. A multiline formatted value is emitted as a raw string only when no raw-string blocker exists; otherwise it is deterministically escaped. The emitted literal is decoded and compared with the intended runtime value before the complete Go source is reparsed. Auto-detected parse failures remain safe skips; explicit malformed SQL remains fatal.
 
 Real-project confidence has two layers: an offline, checked-in multi-package golden project compiled with `go test ./...`, and an opt-in external runner over immutable release refs. The runner reports discovered expressions, eligible candidates, formatted and unchanged SQL expressions, unsupported expressions, potential false-positive parse skips, dynamic expressions, diagnostics, `gofmt`, idempotence, and project-test results.
+
+
+## Rust embedded SQL host contract
+
+The explicit Rust-support requirement adds `.rs` extraction alongside Go, not a
+new SQL engine or SQL style policy. Automatic detection and explicit force/ignore
+markers mirror Go. Rust ordinary and raw literals in expression positions,
+including `const` / `static`, share the canonical PostgreSQL formatter.
+Dynamic concatenations, string method receivers, attributes, patterns, ABI and byte/C strings are excluded
+structurally. Rust macro token trees are not ordinary function arguments: only
+the direct SQL positions of the six documented `sqlx::query*` macros are
+reviewed; the typed forms validate their first argument with Syn. Macro expansion,
+`format!`, `concat!`, file macros, and renamed/custom macros remain opaque.
+
+Literal decoding uses Syn rather than a handwritten Rust escape grammar.
+Physical CRLF is normalized before decoding, as Rust does before tokenization;
+escaped carriage returns remain value bytes. SQL receives root indentation,
+while authored boundary newlines and closing host indentation are retained.
+Existing raw hashes are preserved when safe, multiline ordinary strings prefer
+raw output, and the emitted literal is decoded and compared before the whole
+Rust source is reparsed. The source dispatcher supplies input/output diagnostic
+coordinates and idempotence. Strict unsupported policy restores the whole source
+and prevents project writes. Existing four-argument source and discovery APIs
+remain available with default Rust settings; explicit Rust settings use the
+new `*_with_rust` APIs.
+
+Rust 1.88 / edition 2024 is the formatter's minimum build version, not a claim
+that Rust 1.88 is the latest release or a host-source version cap. The pinned
+CST grammar controls accepted host syntax; unrecognized syntax fails closed.
+No toolchain/MSRV bump is required for this adapter.
+
+Dependency review: `tree-sitter-rust = 0.24.2` is the upstream MIT grammar,
+crate source revision `e2bee853694a1d3e0f6ef308fe3674542fec95d7`, released
+through the actively maintained tree-sitter Rust project. It reuses the existing
+`tree-sitter = 0.26.11` runtime, language ABI, and `cc` dependency; its published
+manifest declares edition 2021 without an explicit MSRV. Building and testing
+on the pinned Rust 1.88 toolchain verifies our required baseline. Syn 2.0.119
+is already in the lockfile, is MIT OR Apache-2.0 licensed, declares Rust 1.71,
+and is directly enabled only for `derive` and `parsing` (string and type parsing).
+The MIT license texts are retained in third-party notices. No fork, vendored
+backend, new parser runtime, or database dependency is introduced.

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
 use semblock::config::Config;
-use semblock::source::{FormattedSource, Language, format_source, infer_language};
+use semblock::source::{FormattedSource, Language, format_source_with_rust, infer_language};
 
 use super::RunError;
 
@@ -73,8 +73,9 @@ fn plan_file(
     };
     let language = infer_language(&path, requested_language)
         .map_err(|error| RunError::source_with_path(&path, error))?;
-    let formatted = format_source(&source, language, &config.format, &config.go)
-        .map_err(|error| RunError::source_with_path(&path, error))?;
+    let formatted =
+        format_source_with_rust(&source, language, &config.format, &config.go, &config.rust)
+            .map_err(|error| RunError::source_with_path(&path, error))?;
 
     Ok(Plan {
         path,

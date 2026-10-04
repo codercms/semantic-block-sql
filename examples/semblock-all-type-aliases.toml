@@ -39,3 +39,10 @@ ignore_generated_files = true
 raw_strings = true
 interpreted_strings = true
 multiline_string_style = "prefer_raw"
+
+[rust]
+enabled = true
+auto_detect = true
+raw_strings = true
+interpreted_strings = true
+multiline_string_style = "prefer_raw"

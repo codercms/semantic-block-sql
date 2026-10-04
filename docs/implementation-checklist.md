@@ -1128,3 +1128,33 @@ The architecture plan and executable checklist are maintained in
   diagnostics, dependency, and dead-code self-review.
 - [x] Run GitNexus change-scope review before committing.
 - [x] Commit the coherent batch without unrelated workspace files.
+
+
+## Rust embedded SQL batch
+
+- [x] Establish a failing Rust CLI regression before implementation.
+- [x] Review dependency license, MSRV, activity, ABI, and architectural fit.
+- [x] Add Rust CST extraction for ordinary/raw strings in reviewed expression positions.
+- [x] Cover the publication `const` example with a golden fixture and SQL equivalence.
+- [x] Add direct SQL literals in the six reviewed SQLx query macros, preserving parameters.
+- [x] Exclude dynamic strings, fragments, patterns, attributes, ABI/byte/C strings, and other macros.
+- [x] Decode Rust escapes with Syn and verify emitted runtime values, including compilation.
+- [x] Preserve raw delimiters, CRLF, boundary newlines, SQL-root indentation, and closing host indentation.
+- [x] Add strict Rust configuration, source diagnostics, stdin, discovery, and Git selection.
+- [x] Cover directives, idempotence, strict unsupported policy, and whole-project no-write failures.
+- [x] Keep existing source/discovery API signatures and SQL formatter ownership boundaries.
+- [x] Synchronize README, user guide, design, architecture, coverage notes, and notices.
+- [x] Run all formatting, Clippy, test, Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic, architecture, comment/group, diagnostic, atomicity, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review and commit the coherent batch.
+
+
+Rust batch evidence: all 329 tests across 46 targets pass on the pinned Rust
+1.88 Windows/MSVC toolchain, including 23 new Rust host/CLI tests and an actual
+compiled runtime-value check. Formatting, locked Clippy with warnings denied,
+locked Rustdoc, and diff hygiene pass. The existing LLVM library at
+`D:/msys64/clang64/bin` supplies libclang for the PostgreSQL backend build.
+GitNexus aggregate scope is CRITICAL because shared entry points, new host
+symbols, tests, and documentation participate in many flows; manual staged-diff
+and flow review confirms the intended 25-file scope, with no PostgreSQL
+formatter-core source changes. Existing user workspace files are excluded.

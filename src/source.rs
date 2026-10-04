@@ -4,9 +4,10 @@ use std::path::Path;
 use clap::ValueEnum;
 use thiserror::Error;
 
-use crate::config::GoConfig;
+use crate::config::{GoConfig, RustConfig};
 use crate::directives::{DirectiveError, format_sql_document};
 use crate::host::go::{GoError, format_go_source};
+use crate::host::rust::{RustError, format_rust_source};
 use crate::{Diagnostic, FormatOptions, FormatWarning};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -14,6 +15,7 @@ pub enum Language {
     Auto,
     Sql,
     Go,
+    Rust,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +42,10 @@ pub enum SourceError {
     UnknownLanguage(String),
     #[error("Go formatting is disabled by configuration")]
     GoDisabled,
+    #[error("Rust formatting is disabled by configuration")]
+    RustDisabled,
+    #[error(transparent)]
+    Rust(#[from] RustError),
     #[error(transparent)]
     SqlDirective(#[from] DirectiveError),
     #[error(transparent)]
@@ -55,6 +61,7 @@ pub fn infer_language(path: &Path, requested: Language) -> Result<Language, Sour
     match path.extension().and_then(|extension| extension.to_str()) {
         Some(extension) if extension.eq_ignore_ascii_case("sql") => Ok(Language::Sql),
         Some(extension) if extension.eq_ignore_ascii_case("go") => Ok(Language::Go),
+        Some(extension) if extension.eq_ignore_ascii_case("rs") => Ok(Language::Rust),
         _ => Err(SourceError::UnknownLanguage(path.display().to_string())),
     }
 }
@@ -65,8 +72,19 @@ pub fn format_source(
     options: &FormatOptions,
     go: &GoConfig,
 ) -> Result<FormattedSource, SourceError> {
-    let first = format_source_once(source, language, options, go)?;
-    let second = format_source_once(&first.output, language, options, go)?;
+    format_source_with_rust(source, language, options, go, &RustConfig::default())
+}
+
+/// Format host source using explicit Go and Rust configuration.
+pub fn format_source_with_rust(
+    source: &str,
+    language: Language,
+    options: &FormatOptions,
+    go: &GoConfig,
+    rust: &RustConfig,
+) -> Result<FormattedSource, SourceError> {
+    let first = format_source_once(source, language, options, go, rust)?;
+    let second = format_source_once(&first.output, language, options, go, rust)?;
     if first.output != second.output {
         return Err(SourceError::NotIdempotent);
     }
@@ -84,6 +102,7 @@ fn format_source_once(
     language: Language,
     options: &FormatOptions,
     go: &GoConfig,
+    rust: &RustConfig,
 ) -> Result<SourcePass, SourceError> {
     match language {
         Language::Auto => Err(SourceError::UnknownLanguage("<source>".into())),
@@ -97,6 +116,15 @@ fn format_source_once(
                 output,
                 warnings: formatted.warnings,
                 diagnostics,
+            })
+        }
+        Language::Rust if !rust.enabled => Err(SourceError::RustDisabled),
+        Language::Rust => {
+            let formatted = format_rust_source(source, options, rust)?;
+            Ok(SourcePass {
+                output: formatted.output,
+                warnings: formatted.warnings,
+                diagnostics: formatted.diagnostics,
             })
         }
         Language::Go if !go.enabled => Err(SourceError::GoDisabled),

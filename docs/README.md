@@ -4,7 +4,7 @@ This index separates user documentation, current contributor documentation, and 
 
 ## User documentation
 
-- [User guide](user-guide.md) — CLI workflows, Git selection, Go source, directives, configuration, diagnostics, and exit codes.
+- [User guide](user-guide.md) — CLI workflows, Git selection, Go/Rust source, directives, configuration, diagnostics, and exit codes.
 - [PostgreSQL coverage](sql-coverage.md) — fixture-backed statement/expression coverage and known unsupported boundaries.
 - [Release builds](release-builds.md) — supported release targets, runtime baselines, and artifact workflow.
 
