@@ -1002,6 +1002,15 @@ that Rust 1.88 is the latest release or a host-source version cap. The pinned
 CST grammar controls accepted host syntax; unrecognized syntax fails closed.
 No toolchain/MSRV bump is required for this adapter.
 
+The subsequent explicit requirement is SQL coverage parity with Go, using the
+existing SQL rather than Rust-specific queries. The shared host regression
+matrix, equivalent permanent project goldens and opt-in SQLx compilation fixture
+are documented in `docs/host-sql-parity-tests.md`. Comparing the original Go
+migration exposed Rust's first-line-only host dedentation: multiline Rust SQL
+now removes the same authored host-indent prefix from every body line, keeping
+inner indentation and the closing envelope. This resolves the discrepancy in
+the host adapter without changing PostgreSQL formatting policy.
+
 Dependency review: `tree-sitter-rust = 0.24.2` is the upstream MIT grammar,
 crate source revision `e2bee853694a1d3e0f6ef308fe3674542fec95d7`, released
 through the actively maintained tree-sitter Rust project. It reuses the existing

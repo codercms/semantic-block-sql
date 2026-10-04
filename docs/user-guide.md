@@ -184,7 +184,9 @@ raw strings; delimiter hashes are added as needed to avoid closing the literal
 inside SQL. `multiline_string_style = "preserve"` keeps ordinary strings
 ordinary. Control values can require escaped output. SQL indentation starts at
 its own root, independently of Rust block indentation; authored outer newlines,
-closing indentation, and physical CRLF convention are retained. Every emitted
+closing indentation, and physical CRLF convention are retained. A common host
+indentation prefix is removed from every line of a multiline SQL body, as in
+Go, while deeper SQL indentation remains intact. Every emitted
 literal is decoded again and compared with the intended formatted runtime value.
 The complete Rust source must reparse and pass a second, byte-identical pass.
 Surrounding Rust code is preserved; semblock does not run rustfmt.
@@ -197,6 +199,12 @@ positions:
 | `sqlx::query!`, `sqlx::query_unchecked!` | First |
 | `sqlx::query_scalar!`, `sqlx::query_scalar_unchecked!` | First |
 | `sqlx::query_as!`, `sqlx::query_as_unchecked!` | Second, after a parsed Rust type |
+
+SQLx offline metadata is keyed by the exact query text. After formatting macro
+SQL, regenerate `.sqlx` metadata with `cargo sqlx prepare` against your schema
+before an offline SQLx build. semblock formats Rust source; it does not generate
+database descriptions. The [host parity tests](host-sql-parity-tests.md) include
+real offline compilation with metadata for both query spellings.
 
 Parameter arguments, `query_file!` paths, other macros, macro definitions,
 `format!`, `concat!`, runtime concatenations, string method receivers, byte/C strings, attributes,

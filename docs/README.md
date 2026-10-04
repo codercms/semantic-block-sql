@@ -19,6 +19,8 @@ This index separates user documentation, current contributor documentation, and 
 - [Formatter design decisions](formatter-design.md) — resolved policy and architecture decisions.
 - [PostgreSQL extension guide](formatter-extension-guide.md) — compiler-guided procedure for adding syntax.
 - [Implementation checklist](implementation-checklist.md) — current status, gates, and remaining work.
+- [Go/Rust SQL parity tests](host-sql-parity-tests.md) — shared SQL complexity,
+  permanent project goldens, offline Cargo validation and real SQLx compilation.
 - [Comment trailing-whitespace safety fix](comment-whitespace-safety-fix-plan.md) — active architecture plan and acceptance criteria.
 - [Repository instructions](../AGENTS.md) — mandatory working rules for contributors and agents.
 

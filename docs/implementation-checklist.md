@@ -1158,3 +1158,30 @@ GitNexus aggregate scope is CRITICAL because shared entry points, new host
 symbols, tests, and documentation participate in many flows; manual staged-diff
 and flow review confirms the intended 25-file scope, with no PostgreSQL
 formatter-core source changes. Existing user workspace files are excluded.
+
+## Go/Rust SQL coverage parity batch
+
+- [x] Reuse existing SQL fixtures and regression literals through both adapters.
+- [x] Reproduce and fix multiline Rust migration host-indentation divergence.
+- [x] Add equivalent permanent Go/Rust SQL input and expected-output corpus checks.
+- [x] Add a nine-file Rust Cargo fixture with CLI goldens, discovery/ignore,
+  serial/parallel determinism, no-write check/diff and idempotence.
+- [x] Compile and test the formatted Cargo fixture locked and offline.
+- [x] Pin real SQLx in an isolated opt-in fixture, reusing existing Go queries.
+- [x] Generate original/formatted SQLx metadata against isolated PostgreSQL 18
+  and compile all six real macros before/after formatting offline.
+- [x] Document SQL complexity, coverage scope, SQLx metadata and test commands.
+- [x] Run full formatting, locked Clippy/test/Rustdoc and diff-hygiene gates.
+- [x] Complete semantic, architecture, comments/groups, diagnostics, atomicity,
+  dependency and dead-code self-review.
+- [x] Run GitNexus change-scope review, commit the batch and update PR #47.
+
+Parity batch evidence: 337 tests pass across 48 targets on Rust 1.88, with the
+real SQLx compilation test explicitly run and passing separately (opt-in in the
+normal suite). Both Cargo fixtures additionally pass locked offline checks on
+Rust 1.98.1. The shared matrix covers 732 distinct valid SQL regression values,
+all 29 SQL input fixtures, and exact input/golden parity for 32 complete SQL
+expressions in the permanent projects. All formatter/Clippy/Rustdoc/diff gates
+pass. GitNexus staged review reports 45 symbols, 32 flows and CRITICAL aggregate
+risk across the intended 44 files; the sole production change is Rust host
+indentation. No PostgreSQL formatter-core source or existing user files change.

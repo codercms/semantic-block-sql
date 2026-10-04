@@ -1,5 +1,6 @@
 //! CST-based Rust string extraction. This adapter never expands macros or writes files.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use thiserror::Error;
@@ -117,10 +118,10 @@ pub fn format_rust_source(
         let line = literal.start_position().row + 1;
         let decoded = decode(text, line)?;
         let envelope = Envelope::new(&decoded);
-        if !explicit && !super::looks_like_complete_sql_prefix(envelope.sql) {
+        if !explicit && !super::looks_like_complete_sql_prefix(&envelope.sql) {
             continue;
         }
-        let formatted = match format_sql(envelope.sql, options) {
+        let formatted = match format_sql(&envelope.sql, options) {
             Ok(formatted) => formatted,
             Err(FormatDiagnostic::PostgreSqlParse(_) | FormatDiagnostic::PostgreSqlScan(_))
                 if !explicit =>
@@ -455,7 +456,7 @@ fn encode(value: &str, original: &str, prefer_raw: bool, crlf: bool) -> String {
 }
 
 struct Envelope<'a> {
-    sql: &'a str,
+    sql: Cow<'a, str>,
     leading_newline: bool,
     suffix: &'a str,
 }
@@ -468,8 +469,23 @@ impl<'a> Envelope<'a> {
             Some((sql, tail)) if tail.chars().all(char::is_whitespace) => (sql, &body[sql.len()..]),
             _ => (body, ""),
         };
+        let indent = sql
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .map(|line| &line[..line.len() - line.trim_start_matches([' ', '\t']).len()])
+            .unwrap_or_default();
+        let sql = if leading_newline && !indent.is_empty() {
+            Cow::Owned(
+                sql.split('\n')
+                    .map(|line| line.strip_prefix(indent).unwrap_or(line))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        } else {
+            Cow::Borrowed(sql.trim_start_matches([' ', '\t']))
+        };
         Self {
-            sql: sql.trim_start_matches([' ', '\t']),
+            sql,
             leading_newline,
             suffix,
         }

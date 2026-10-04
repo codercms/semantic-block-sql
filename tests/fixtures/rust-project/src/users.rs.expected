@@ -1,0 +1,51 @@
+const FIND_BY_ID: &str = r#"
+SELECT id, name, email FROM public.users WHERE id = $1;
+"#;
+pub const INSERT_USER: &str = r#"INSERT INTO public.users (name, email) VALUES ($1, $2) RETURNING id;"#;
+pub const DELETE_USER: &str = r#"DELETE FROM public.users WHERE id = $1 RETURNING id;"#;
+pub static LIST_ACTIVE: &str = r#"
+SELECT id, name, email FROM public.users WHERE active = TRUE ORDER BY name;
+"#;
+
+fn must_prepare(query: &str) -> &str { query }
+fn consume(query: &str, _: i64) -> &str { query }
+
+pub fn load(id: i64) -> &'static str {
+    const LOOKUP: &str = r#"
+SELECT id, name, email FROM public.users WHERE id = $1;
+	"#;
+    let prepared = must_prepare(r#"
+SELECT id, name FROM public.users WHERE active = TRUE;
+"#);
+    let mut query = r#"SELECT id, name FROM public.users ORDER BY id;"#;
+    std::hint::black_box(query);
+    query = r#"SELECT id, name FROM public.users WHERE active = TRUE ORDER BY id;"#;
+    std::hint::black_box((query, prepared, LOOKUP));
+    consume(r#"
+SELECT id, name, email FROM public.users WHERE active = TRUE AND id >= $1 ORDER BY id;
+	"#, id)
+}
+
+pub fn return_active(minimum_id: i64) -> &'static str {
+    consume(r#"
+SELECT id, name FROM public.users WHERE active = TRUE AND id >= $1;
+	"#, minimum_id)
+}
+
+pub fn deactivate(id: i64) {
+    consume(r#"
+UPDATE public.users SET active = FALSE WHERE id = $1;
+	"#, id);
+}
+
+pub fn find_by_id() -> &'static str { FIND_BY_ID }
+
+pub const NORMALIZE_USER_TITLE: &str = r#"
+CREATE OR REPLACE PROCEDURE public.normalize_user_title(user_id bigint)
+LANGUAGE plpgsql
+AS $function$
+BEGIN
+    UPDATE public.users SET title = trim(title) WHERE id = user_id;
+END;
+$function$;
+"#;

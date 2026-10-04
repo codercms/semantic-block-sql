@@ -241,3 +241,10 @@ new PostgreSQL syntax support. The publication-query fixture proves nested
 `NOT EXISTS`, joins, authored Boolean groups, and `$1` placeholders through the
 Rust path; unsupported XML-table neighbors retain their source spelling and
 diagnostics. See `tests/rust_host.rs` and `tests/fixtures/rust/` for evidence.
+
+The [Go/Rust parity suite](host-sql-parity-tests.md) additionally exercises every
+SQL input fixture and the existing valid SQL regression literals through both
+adapters, comparing canonical output, unsupported/skipped diagnostics, semantic
+equivalence where applicable, and idempotence. Permanent Go and Rust project
+goldens have the same decoded SQL corpus, including migrations and PL/pgSQL.
+This expands host integration evidence without adding PostgreSQL capabilities.

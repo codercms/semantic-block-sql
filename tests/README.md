@@ -36,6 +36,12 @@ those embedded languages byte-for-byte.
   intentionally unsupported PostgreSQL forms.
 - `rust_host.rs` and `rust_cli.rs`: Rust literal/macro safety, runtime compilation,
   diagnostic coordinates, discovery/configuration/Git selection, and atomicity.
+- `host_sql_parity.rs`: identical SQL through Go/Rust, reusing all SQL input
+  fixtures and valid SQL literals from existing regressions; permanent project
+  input/golden parity and real SQLx metadata provenance.
+- `rust_project_integration.rs`: multi-module Cargo project CLI/golden coverage
+  and locked offline compilation, plus opt-in real SQLx macro compilation.
+  See [host parity coverage](../docs/host-sql-parity-tests.md) for scope and commands.
 - fixture directories: only cases where comments, blank lines, protected payloads,
   host-language envelopes, or long procedural structures are themselves under test.
 

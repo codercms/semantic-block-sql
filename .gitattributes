@@ -9,4 +9,6 @@ tests/fixtures/**/*.expected text eol=lf
 tests/fixtures/**/go.mod text eol=lf
 tests/fixtures/**/*.md text eol=lf
 tests/fixtures/**/*.toml text eol=lf
+tests/fixtures/**/Cargo.lock text eol=lf
+tests/fixtures/**/*.json text eol=lf
 tests/fixtures/**/.semblockignore text eol=lf
