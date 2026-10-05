@@ -183,7 +183,8 @@ Reviewed routine support includes SQL-standard `BEGIN ATOMIC` bodies within the 
 PL/pgSQL coverage includes:
 
 - declarations;
-- embedded SQL statements, including static `GRANT`;
+- embedded SQL statements, including CTE-led SELECT/INSERT/UPDATE/DELETE and
+  static `GRANT`, `ANALYZE`/`ANALYSE`, and `TRUNCATE`;
 - `IF` / `ELSIF` / `ELSE`;
 - exception handlers;
 - loops;
@@ -193,8 +194,18 @@ PL/pgSQL coverage includes:
 - cursor operations;
 - `ASSERT`;
 - `RETURN QUERY`;
+- `RETURN NEXT`, reviewed `RAISE ... USING` options, and both `:=` and `=`
+  assignment expressions;
+- a parser-valid final `END` without a semicolon inside a dollar-quoted body;
 - reviewed `EXIT` and `CONTINUE`;
 - compact bodies.
+
+Procedural SQL leaves reuse the canonical SQL formatter, preserving authored
+groups and propagating unsupported/safety diagnostics. Routine width failures
+obey statement-level default/strict policy. An indivisible protected literal
+may exceed hard width with a warning; it does not excuse a breakable body line.
+Synthetic fixtures in `tests/procedural_sql_coverage.rs` and the two regression
+targets cover these reviewed shapes and still-unsupported parser neighbors.
 
 Routine grammar such as `FUNCTION` / `PROCEDURE`, `RETURNS`, and `LANGUAGE` is bound to parser-owned locations so same-spelled identifiers and user-defined types remain identifiers.
 

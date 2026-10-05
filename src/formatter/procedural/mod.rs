@@ -3,7 +3,7 @@ mod layout;
 
 use serde_json::Value;
 
-use super::{FormatDiagnostic, FormatOptions, FormattedSql};
+use super::{Diagnostic, FormatDiagnostic, FormatOptions, FormattedSql};
 
 pub(super) fn format_single_routine(
     source: &str,
@@ -19,6 +19,7 @@ pub(super) fn format_single_routine(
     let body_ir = ir::parse(body)?;
     ir::validate_parser_alignment(&body_ir, &parser_model)?;
     let formatted_body = layout::format(&body_ir, options)?;
+    let mut warnings = super::semantic_block::validate_hard_width(&formatted_body.output, options)?;
     let mut output = String::with_capacity(source.len() + formatted_body.output.len());
     output.push_str(&source[..open_start]);
     output.push_str(&source[open_start..open_end]);
@@ -27,6 +28,9 @@ pub(super) fn format_single_routine(
     output.push_str(&source[close_end..]);
     let outer_tokens = validate_outer(&output)?;
     let output = normalize_outer_tokens(&output, options, outer_tokens)?;
+    warnings.extend(super::semantic_block::validate_hard_width(
+        &output, options,
+    )?);
 
     validate_outer(&output)?;
     let reparsed = pg_query::parse_plpgsql(&output)
@@ -50,7 +54,7 @@ pub(super) fn format_single_routine(
     Ok(FormattedSql {
         changed: output != source,
         output,
-        warnings: Vec::new(),
+        warnings,
         diagnostics: formatted_body
             .diagnostics
             .into_iter()
@@ -224,7 +228,7 @@ fn format_leaf(
     text: &str,
     options: &FormatOptions,
     indent: usize,
-) -> Result<String, FormatDiagnostic> {
+) -> Result<(String, Vec<Diagnostic>), FormatDiagnostic> {
     let mut nested_options = options.clone();
     let indent_width = indent * 4;
     nested_options.soft_line_width = options.soft_line_width.saturating_sub(indent_width).max(1);
@@ -232,7 +236,22 @@ fn format_leaf(
         .hard_line_width
         .saturating_sub(indent_width)
         .max(nested_options.soft_line_width);
-    format_body_statement(kind, text, &nested_options)
+    nested_options.semicolon_policy = super::SemicolonPolicy::Preserve;
+    if kind == ir::BodyNodeKind::Sql {
+        let formatted = super::format_sql(text, &nested_options)?;
+        return Ok((
+            formatted.output,
+            formatted
+                .diagnostics
+                .into_iter()
+                .filter(|diagnostic| !diagnostic.fix_available)
+                .collect(),
+        ));
+    }
+    Ok((
+        format_body_statement(kind, text, &nested_options)?,
+        Vec::new(),
+    ))
 }
 
 fn format_body_statement(
@@ -258,12 +277,6 @@ fn format_body_statement(
     if kind == ir::BodyNodeKind::ReturnQuery {
         return format_return_query(code, &upper, options)
             .map(|rendered| attach_line_comment(rendered, comment));
-    }
-    for keyword in ["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "GRANT"] {
-        if upper.starts_with(keyword) && code.ends_with(';') {
-            let formatted = super::format_sql(code, options)?.output;
-            return Ok(attach_line_comment(formatted, comment));
-        }
     }
     if let Some(rendered) = format_for_query_header(code, &upper, options)? {
         return Ok(attach_line_comment(rendered, comment));
@@ -314,10 +327,17 @@ fn format_return_expression(
     code: &str,
     options: &FormatOptions,
 ) -> Result<Option<String>, FormatDiagnostic> {
-    if kind != ir::BodyNodeKind::Return {
+    if !matches!(
+        kind,
+        ir::BodyNodeKind::Return | ir::BodyNodeKind::ReturnNext
+    ) {
         return Ok(None);
     }
-    let prefix = "RETURN";
+    let prefix = if kind == ir::BodyNodeKind::ReturnNext {
+        "RETURN NEXT"
+    } else {
+        "RETURN"
+    };
     let expression = code[prefix.len()..].trim().trim_end_matches(';').trim();
     if expression.is_empty() {
         return Ok(None);
@@ -334,10 +354,9 @@ fn format_assignment_expression(
         return Ok(None);
     }
     let tokens = super::tokens::tokenize(code)?;
-    let assignment = tokens
-        .iter()
-        .find(|token| token.text == ":=")
-        .ok_or_else(|| FormatDiagnostic::Ownership("assignment has no := boundary".into()))?;
+    let assignment = ir::assignment_operator(&tokens)
+        .map(|index| &tokens[index])
+        .ok_or_else(|| FormatDiagnostic::Ownership("assignment has no owned operator".into()))?;
     let prefix = uppercase_procedural_words(&normalize_procedural_code(
         code[..assignment.end].trim(),
         options,
@@ -771,9 +790,14 @@ fn normalize_plpgsql(value: &mut Value) -> Result<(), FormatDiagnostic> {
                     0 => canonical_postgresql(&query)?,
                     2 => canonical_postgresql(&format!("SELECT {query}"))?,
                     3 => {
-                        let (target, expression) = query.split_once(":=").ok_or_else(|| {
-                            unsupported(&query, "unrecognized PL/pgSQL assignment expression")
-                        })?;
+                        let tokens = super::tokens::tokenize(&query)?;
+                        let operator = ir::assignment_operator(&tokens)
+                            .map(|index| &tokens[index])
+                            .ok_or_else(|| {
+                                unsupported(&query, "unrecognized PL/pgSQL assignment expression")
+                            })?;
+                        let target = &query[..operator.start];
+                        let expression = &query[operator.end..];
                         serde_json::json!({
                             "target": target.trim(),
                             "expression": canonical_postgresql(&format!("SELECT {}", expression.trim()))?,

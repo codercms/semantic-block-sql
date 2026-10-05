@@ -1312,3 +1312,26 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   all existing targets pass, with only the 33 remaining new red cases failing.
 - [x] Review shared SELECT/DML/MERGE call paths, dead code, and dependency scope;
   no new dependencies, keyword scans, or production examples are introduced.
+
+## Procedural SQL ownership and routine safety implementation
+
+- [x] Route typed SQL leaves, including WITH, through the canonical formatter;
+  preserve internal semicolons and propagate nested safety diagnostics.
+- [x] Compare styles against the framed body and keep optional alias changes
+  out of style token alignment; preserve blank lines without trailing spaces.
+- [x] Review parser categories for ELSIF, RAISE options, and RETURN NEXT.
+- [x] Share depth-bounded `:=`/`=` ownership with rendering and PL/pgSQL
+  equivalence normalization; accept the parser-valid optional final END semicolon.
+- [x] Route static ANALYZE/ANALYSE/TRUNCATE through the SQL owner and bind both
+  PostgreSQL ANALYZE scanner spellings.
+- [x] Validate routine width before document assembly and measure multiline
+  protected token fragments without excusing short multiline comments.
+- [x] Turn fourteen additional red cases green; seventeen of the original 36
+  cases now pass, with nineteen pending routine header/SQL/DDL cases.
+- [x] Add five synthetic controls for comments/blank groups, nested diagnostic
+  ranges/default/strict policies, quoted targets, indivisible literals, and
+  still-unsupported procedural parser nodes.
+- [x] Verify the local schema copy can produce a diff without a document-fatal
+  width error; keep its source and diagnostics outside the repository.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. All existing
+  tests and the five new controls pass; only the nineteen remaining red cases fail.

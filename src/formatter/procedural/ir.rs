@@ -153,16 +153,23 @@ fn classify_parser_node(name: &str) -> Result<ParserNodeKind, FormatDiagnostic> 
         | "PLpgSQL_exception_block"
         | "PLpgSQL_exception"
         | "PLpgSQL_condition"
-        | "PLpgSQL_case_when" => ParserNodeKind::Container,
+        | "PLpgSQL_case_when"
+        | "PLpgSQL_if_elsif" => ParserNodeKind::Container,
         "PLpgSQL_stmt_assert" => ParserNodeKind::Assert,
         "PLpgSQL_stmt_return_query" => ParserNodeKind::ReturnQuery,
         "PLpgSQL_stmt_commit" | "PLpgSQL_stmt_rollback" => ParserNodeKind::Opaque,
         "PLpgSQL_expr" => ParserNodeKind::Expression,
-        "PLpgSQL_var" | "PLpgSQL_type" | "PLpgSQL_rec" | "PLpgSQL_recfield" | "PLpgSQL_row"
-        | "PLpgSQL_diag_item" => ParserNodeKind::Datum,
+        "PLpgSQL_var"
+        | "PLpgSQL_type"
+        | "PLpgSQL_rec"
+        | "PLpgSQL_recfield"
+        | "PLpgSQL_row"
+        | "PLpgSQL_diag_item"
+        | "PLpgSQL_raise_option" => ParserNodeKind::Datum,
         "PLpgSQL_stmt_execsql"
         | "PLpgSQL_stmt_perform"
         | "PLpgSQL_stmt_return"
+        | "PLpgSQL_stmt_return_next"
         | "PLpgSQL_stmt_if"
         | "PLpgSQL_stmt_assign"
         | "PLpgSQL_stmt_raise"
@@ -240,7 +247,11 @@ pub(super) fn parse(source: &str) -> Result<RoutineBody<'_>, FormatDiagnostic> {
             }
             "WHEN" => (BodyNodeKind::When, find_keyword(&tokens, index, "THEN")?),
             "END" => {
-                let semi = find_semicolon(&tokens, index)?;
+                let semi = if tokens[index + 1..].iter().all(SqlToken::is_comment) {
+                    index
+                } else {
+                    find_semicolon(&tokens, index)?
+                };
                 let second = tokens.get(index + 1).map(upper);
                 let kind = match second.as_deref() {
                     Some("IF") => BodyNodeKind::EndIf,
@@ -300,7 +311,8 @@ fn classify_statement(
     let first = upper(&tokens[start]);
     let second = tokens.get(start + 1).map(upper);
     match first.as_str() {
-        "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH" | "GRANT" => BodyNodeKind::Sql,
+        "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH" | "GRANT" | "ANALYZE"
+        | "ANALYSE" | "TRUNCATE" => BodyNodeKind::Sql,
         "PERFORM" => BodyNodeKind::Perform,
         "RETURN" if second.as_deref() == Some("NEXT") => BodyNodeKind::ReturnNext,
         "RETURN" if second.as_deref() == Some("QUERY") => BodyNodeKind::ReturnQuery,
@@ -319,7 +331,14 @@ fn classify_statement(
 }
 
 fn contains_assignment(tokens: &[SqlToken<'_>], start: usize, end: usize) -> bool {
-    (start..=end).any(|index| tokens[index].text == ":=")
+    assignment_operator(&tokens[start..=end]).is_some()
+}
+
+pub(super) fn assignment_operator(tokens: &[SqlToken<'_>]) -> Option<usize> {
+    let structure = super::super::structure::TokenStructure::new(tokens);
+    tokens.iter().enumerate().find_map(|(index, token)| {
+        (structure.depth(index) == 0 && matches!(token.text, ":=" | "=")).then_some(index)
+    })
 }
 
 fn find_keyword(

@@ -55,7 +55,13 @@ pub(super) fn format(
         } else if node.kind == BodyNodeKind::Comment {
             node.text.to_owned()
         } else {
-            format_leaf(node.kind, node.text, options, indent)?
+            let (output, leaf_diagnostics) = format_leaf(node.kind, node.text, options, indent)?;
+            diagnostics.extend(
+                leaf_diagnostics
+                    .into_iter()
+                    .map(|diagnostic| diagnostic.shifted(node.range.start)),
+            );
+            output
         };
         let mut rendered = text;
         if let Some(comment) = node.trailing_comment {
@@ -95,11 +101,15 @@ pub(super) fn format(
         {
             rendered.push(String::new());
         }
-        rendered.push(format!(
-            "{}{}",
-            " ".repeat(line.indent * 4 + line.relative_indent),
-            line.text
-        ));
+        rendered.push(if line.text.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "{}{}",
+                " ".repeat(line.indent * 4 + line.relative_indent),
+                line.text
+            )
+        });
     }
     while rendered.first().is_some_and(|line| line.is_empty()) {
         rendered.remove(0);
@@ -107,13 +117,34 @@ pub(super) fn format(
     while rendered.last().is_some_and(|line| line.is_empty()) {
         rendered.pop();
     }
+    let output = format!(
+        "{}{}{}",
+        body.newline,
+        rendered.join(body.newline),
+        body.newline
+    );
+    let mut body_options = options.clone();
+    body_options.semicolon_policy = super::super::SemicolonPolicy::Preserve;
+    // Style diagnostics compare layout before optional alias changes, which can
+    // change scanner token kinds and cardinality (varchar -> character varying).
+    let style_output = if body_options.type_aliases.is_empty() {
+        output.clone()
+    } else {
+        body_options.type_aliases.clear();
+        format(body, &body_options)?.output
+    };
+    let mut style_diagnostics =
+        super::super::diagnostics::style_diagnostics(body.source, &style_output, &body_options)?;
+    style_diagnostics.retain(|diagnostic| {
+        !body.nodes.iter().any(|node| {
+            node.kind.is_opaque()
+                && node.range.start <= diagnostic.source_range.start
+                && diagnostic.source_range.end <= node.range.end
+        })
+    });
+    diagnostics.extend(style_diagnostics);
     Ok(FormattedBody {
-        output: format!(
-            "{}{}{}",
-            body.newline,
-            rendered.join(body.newline),
-            body.newline
-        ),
+        output,
         diagnostics,
     })
 }

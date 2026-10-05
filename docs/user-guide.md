@@ -101,6 +101,11 @@ When a skipped-statement failure has a trusted token location, its diagnostic
 points to that exact cause while the complete statement is still preserved.
 Failures without a reliable location use the complete statement range.
 
+The same policy applies to PL/pgSQL routines: a body or header width failure
+preserves the complete routine while independent SQL statements continue under
+the default policy. Embedded SQL warnings remain visible, and strict mode
+preserves the complete document on unsupported or skipped routine content.
+
 Trailing Unicode whitespace on any physical comment line is ordinary fixable
 `spacing.trailing_whitespace`; it is removed without changing comment
 attachment or causing a statement skip.

@@ -588,12 +588,17 @@ pub(super) fn validate_hard_width_except(
                 .take_while(|character| *character == ' ')
                 .count();
             let indivisible = tokens.iter().any(|token| {
-                token.start >= line_start
-                    && token.end <= line_end
-                    && (indent + token.text.chars().count() > options.hard_line_width
-                        || (token.is_comment()
-                            && output[line_start..token.end].chars().count()
-                                > options.hard_line_width))
+                let start = token.start.max(line_start);
+                let end = token.end.min(line_end);
+                if start >= end {
+                    return false;
+                }
+                let token_indent = if token.start < line_start { 0 } else { indent };
+                token_indent + output[start..end].chars().count() > options.hard_line_width
+                    || (token.is_comment()
+                        && token.start >= line_start
+                        && token.end <= line_end
+                        && output[line_start..end].chars().count() > options.hard_line_width)
             });
             if indivisible {
                 warnings.push(FormatWarning::IndivisibleTokenExceedsHardWidth {

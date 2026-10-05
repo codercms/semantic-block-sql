@@ -452,6 +452,17 @@ A formatting result is accepted only when all gates pass:
 No file is partially rewritten. The CLI plans every project rewrite before the
 first atomic replacement.
 
+PL/pgSQL SQL leaves dispatch through `BodyNodeKind::Sql` rather than a second
+keyword-prefix list. Leaf safety diagnostics retain their source spans; body
+style diagnostics compare the actual framed body layout before optional type
+alias changes. Alias-enabled style projection reuses the body formatter with
+alias preferences cleared, so changed token kinds/cardinality cannot corrupt
+style token alignment. Internal statement semicolons remain syntax-owned.
+Routine bodies and complete routine output pass width validation before the
+document accepts them. The document width gate measures protected multiline
+tokens by their physical-line fragments; a short multiline comment cannot
+exempt an otherwise breakable line solely because it occurs beyond the limit.
+
 ## Adding PostgreSQL syntax
 
 Use this sequence for each syntax extension.

@@ -24,7 +24,8 @@ pub(super) fn bind_body_start(
     );
     (statement.range.start..statement.range.end)
         .filter(|index| {
-            tokens[*index].kind == expected
+            (tokens[*index].kind == expected
+                || (expected == Token::Analyze && tokens[*index].kind == Token::Analyse))
                 && (depths[*index] == statement.base_depth || wrapped_set_operation)
         })
         .min_by_key(|index| depths[*index])
