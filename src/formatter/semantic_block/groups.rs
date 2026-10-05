@@ -1,4 +1,23 @@
-use super::{FormatOptions, SqlToken};
+use super::{FormatOptions, LayoutPlan, PlanningContext, SqlToken};
+
+/// Preserve gaps only at boundaries supplied by a typed syntax owner.
+pub(super) fn plan_clause_boundaries(
+    context: &PlanningContext<'_, '_>,
+    boundaries: impl IntoIterator<Item = usize>,
+    indent: usize,
+    expanded: bool,
+    plan: &mut LayoutPlan,
+) -> bool {
+    let mut authored = false;
+    for boundary in boundaries {
+        let lines = context.tokens[boundary].line_breaks_before;
+        authored |= lines > 0;
+        if expanded || lines > 0 {
+            plan.break_before(boundary, lines.clamp(1, 2), indent);
+        }
+    }
+    authored
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GroupLayout {

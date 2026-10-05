@@ -10,6 +10,12 @@ therefore produces no formatting difference in `check` or `diff`. Short queries
 authored on one line may remain compact; casing, spacing, nesting, and width
 rules still apply.
 
+The same clause-boundary rule applies to `UPDATE`, `DELETE`, and `INSERT`,
+including partial multiline layouts and `ON CONFLICT` actions. `DEFAULT VALUES`
+stays together. Authored blank boundaries in reviewed table, index, view,
+materialized-view, and ALTER layouts are retained alongside mandatory nesting
+and action-group separation.
+
 Format files in place:
 
 ```bash

@@ -30,6 +30,27 @@ and a self-review; syntax support also requires a fixture.
 - [x] Review dependency stability and staged scope with GitNexus; commit the
   separate version batch.
 
+## DML/DDL authored layout follow-up batch
+
+- [x] Add failing sibling regressions for partial DML layouts, blank clause
+  boundaries, DEFAULT VALUES, conflict actions, ALTER actions, and DDL suffixes.
+- [x] Share typed clause-boundary preservation between SELECT, DML, and DDL.
+- [x] Separate authored clause retention from structural/width expansion; keep
+  DEFAULT VALUES together and retain authored DO NOTHING boundaries.
+- [x] Remove the obsolete VALUES-only accessor and unused bound VALUES field.
+- [x] Update design/user documentation and review README/SQL coverage status;
+  no onboarding/example or syntax-status change is needed.
+- [x] Complete focused and full tests, formatting, locked Clippy/Rustdoc, and
+  diff hygiene, including semantic and idempotence self-review.
+- [x] Review staged scope with GitNexus and commit the coherent follow-up.
+
+Follow-up evidence: all required gates pass on Rust 1.88. The shared Go/Rust
+corpus exercises the new inline SQL regressions; the existing opt-in real-SQLx
+test remains ignored in the default suite. GitNexus staged review reports
+CRITICAL aggregate risk across 23 flows. Manual diff review confirms the
+intended 11-file scope, including removal of unused INSERT metadata, with
+discovery, rewriting, host extraction, and unrelated planner bodies unchanged.
+
 ## Global gates
 
 - [x] Preserve the original handoff, style guide, and ZIP with checksums.

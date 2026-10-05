@@ -382,6 +382,11 @@ keywords. The shared Boolean planner then applies one precedence-preserving
 layout policy to every derived range.
 
 Compact-versus-expanded decisions flow through one `LayoutGroup` contract.
+`groups::plan_clause_boundaries` separately preserves authored gaps at typed
+query, DML, and DDL clause locations; a retained boundary does not force unrelated
+inline clauses to expand. DML planners collect child-list decisions before
+planning the owning clause boundaries. No host-specific preservation path or
+document-wide keyword scan participates in this rule.
 List, predicate, and expression owners provide only their compact width,
 structural-complexity facts, hard comment/blank-line boundaries, authored-group
 requirements, and whether an overflow is genuinely indivisible. Comma lists

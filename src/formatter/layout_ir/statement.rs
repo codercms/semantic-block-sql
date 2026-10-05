@@ -1112,7 +1112,7 @@ pub(super) fn bind_insert(
         .find(|index| depths[*index] == base_depth && tokens[*index].kind == Token::Select);
     let source = match (default, values, query_start) {
         (Some(default), Some(values), _) if default + 1 == values => {
-            InsertSource::DefaultValues { default, values }
+            InsertSource::DefaultValues { default }
         }
         (_, Some(keyword), _) => InsertSource::Values { keyword },
         (_, None, Some(start)) => InsertSource::Query { start },

@@ -26,7 +26,9 @@ use ddl::{
     plan_values_statements, plan_views,
 };
 use expressions::{ExpressionSources, owned_expression_ranges};
-use groups::{GroupLayout, LayoutGroup, has_hard_boundary, has_list_hard_boundary};
+use groups::{
+    GroupLayout, LayoutGroup, has_hard_boundary, has_list_hard_boundary, plan_clause_boundaries,
+};
 use lists::{
     ParenthesizedListSources, parenthesized_lists, plan_keyword_list_at_indent,
     plan_parenthesized_lists, plan_select_lists,
@@ -716,16 +718,17 @@ fn plan_query_clauses(
             || width_driven;
         // Authored clause boundaries are independent of width-driven expansion.
         // Preserve them without expanding the query's remaining inline clauses.
-        let mut has_authored_clause = false;
-        for boundary in query.clauses.ordered_boundaries(end) {
-            if boundary < end {
-                let authored_lines = tokens[boundary].line_breaks_before;
-                has_authored_clause |= authored_lines > 0;
-                if expanded || authored_lines > 0 {
-                    plan.break_before(boundary, authored_lines.clamp(1, 2), indent);
-                }
-            }
-        }
+        let has_authored_clause = plan_clause_boundaries(
+            context,
+            query
+                .clauses
+                .ordered_boundaries(end)
+                .into_iter()
+                .filter(|boundary| *boundary < end),
+            indent,
+            expanded,
+            plan,
+        );
         if !expanded && !has_authored_clause {
             continue;
         }

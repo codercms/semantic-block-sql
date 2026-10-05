@@ -11,23 +11,31 @@ pub(super) fn plan_update_statements(
     let tokens = context.tokens;
     let options = context.options;
     for update in updates {
-        let authored = tokens[update.span.start + 1..update.span.end]
-            .iter()
-            .any(|token| token.line_breaks_before > 0);
         let compact_statement_width = update.span.base_depth * INDENT_WIDTH
             + compact_width(tokens, update.span.start, update.span.end, options);
-        let width_driven = compact_statement_width > options.soft_line_width;
         let has_expanded_predicate = update.where_clause.is_some_and(|where_clause| {
             boolean_ranges
                 .iter()
                 .any(|range| range.start == where_clause + 1 && range.end <= update.span.end)
         });
-        let expanded = authored || update.from.is_some() || width_driven || has_expanded_predicate;
-        if !expanded {
+        // Retain compact one-line DML; authored layout permits the child owners
+        // to plan their groups without forcing every sibling clause to expand.
+        let mut expanded = LayoutGroup {
+            compact_line_width: compact_statement_width,
+            structurally_complex: update.from.is_some() || has_expanded_predicate,
+            hard_boundary: false,
+            force_expand: false,
+            compact_overflow_is_unavoidable: false,
+        }
+        .decide(options)
+            == GroupLayout::Expanded;
+        if !expanded
+            && !tokens[update.span.start + 1..update.span.end]
+                .iter()
+                .any(|token| token.line_breaks_before > 0)
+        {
             continue;
         }
-
-        plan.break_before(update.set, 1, update.span.base_depth);
         let set_end = update
             .from
             .as_ref()
@@ -35,7 +43,7 @@ pub(super) fn plan_update_statements(
             .or(update.where_clause)
             .or(update.returning)
             .unwrap_or(update.span.end);
-        plan_keyword_list(
+        let mut has_expanded_list = plan_keyword_list(
             context,
             update.set,
             set_end,
@@ -44,16 +52,8 @@ pub(super) fn plan_update_statements(
             plan,
         );
 
-        if let Some(from) = &update.from {
-            plan.break_before(from.introducer, 1, update.span.base_depth);
-            plan_relation_source(from, plan);
-        }
-        if let Some(where_clause) = update.where_clause {
-            plan.break_before(where_clause, 1, update.span.base_depth);
-        }
         if let Some(returning) = update.returning {
-            plan.break_before(returning, 1, update.span.base_depth);
-            plan_keyword_list(
+            has_expanded_list |= plan_keyword_list(
                 context,
                 returning,
                 update.span.end,
@@ -61,6 +61,24 @@ pub(super) fn plan_update_statements(
                 false,
                 plan,
             );
+        }
+        expanded |= has_expanded_list;
+        plan_clause_boundaries(
+            context,
+            [
+                Some(update.set),
+                update.from.as_ref().map(|source| source.introducer),
+                update.where_clause,
+                update.returning,
+            ]
+            .into_iter()
+            .flatten(),
+            update.span.base_depth,
+            expanded,
+            plan,
+        );
+        if let Some(from) = &update.from {
+            plan_relation_source(from, plan);
         }
     }
 }
@@ -74,9 +92,6 @@ pub(super) fn plan_delete_statements(
     let tokens = context.tokens;
     let options = context.options;
     for delete in deletes {
-        let authored = tokens[delete.span.start + 1..delete.span.end]
-            .iter()
-            .any(|token| token.line_breaks_before > 0);
         let compact_statement_width = delete.span.base_depth * INDENT_WIDTH
             + compact_width(tokens, delete.span.start, delete.span.end, options);
         let width_driven = compact_statement_width > options.soft_line_width;
@@ -85,21 +100,25 @@ pub(super) fn plan_delete_statements(
                 .iter()
                 .any(|range| range.start == where_clause + 1 && range.end <= delete.span.end)
         });
-        let expanded = authored || delete.using.is_some() || width_driven || has_expanded_predicate;
-        if !expanded {
+        let mut expanded = LayoutGroup {
+            compact_line_width: compact_statement_width,
+            structurally_complex: delete.using.is_some() || has_expanded_predicate,
+            hard_boundary: false,
+            force_expand: false,
+            compact_overflow_is_unavoidable: false,
+        }
+        .decide(options)
+            == GroupLayout::Expanded;
+        if !expanded
+            && !tokens[delete.span.start + 1..delete.span.end]
+                .iter()
+                .any(|token| token.line_breaks_before > 0)
+        {
             continue;
         }
-
-        if let Some(using) = &delete.using {
-            plan.break_before(using.introducer, 1, delete.span.base_depth);
-            plan_relation_source(using, plan);
-        }
-        if let Some(where_clause) = delete.where_clause {
-            plan.break_before(where_clause, 1, delete.span.base_depth);
-        }
+        let mut has_expanded_list = false;
         if let Some(returning) = delete.returning {
-            plan.break_before(returning, 1, delete.span.base_depth);
-            plan_keyword_list(
+            has_expanded_list = plan_keyword_list(
                 context,
                 returning,
                 delete.span.end,
@@ -107,6 +126,23 @@ pub(super) fn plan_delete_statements(
                 width_driven,
                 plan,
             );
+        }
+        expanded |= has_expanded_list;
+        plan_clause_boundaries(
+            context,
+            [
+                delete.using.as_ref().map(|source| source.introducer),
+                delete.where_clause,
+                delete.returning,
+            ]
+            .into_iter()
+            .flatten(),
+            delete.span.base_depth,
+            expanded,
+            plan,
+        );
+        if let Some(using) = &delete.using {
+            plan_relation_source(using, plan);
         }
     }
 }
@@ -233,10 +269,7 @@ pub(super) fn plan_insert_statements(
     let options = context.options;
     let mut query_starts = HashSet::new();
     for insert in inserts {
-        let authored = tokens[insert.span.start + 1..insert.span.end]
-            .iter()
-            .any(|token| token.line_breaks_before > 0);
-        let has_expanded_list = lists.iter().any(|list| {
+        let mut has_expanded_list = lists.iter().any(|list| {
             list.expanded
                 && (insert.target_open == Some(list.open)
                     || insert.rows.iter().any(|&(open, _)| open == list.open)
@@ -252,19 +285,61 @@ pub(super) fn plan_insert_statements(
             InsertSource::Query { start } => Some(start),
             _ => None,
         };
-        let expanded =
-            authored || has_expanded_list || width_driven || has_update || query_source.is_some();
-        if !expanded {
+        let mut expanded = LayoutGroup {
+            compact_line_width: compact_statement_width,
+            structurally_complex: has_expanded_list || has_update || query_source.is_some(),
+            hard_boundary: false,
+            force_expand: insert
+                .rows
+                .iter()
+                .any(|(open, _)| tokens[*open].line_breaks_before > 0),
+            compact_overflow_is_unavoidable: false,
+        }
+        .decide(options)
+            == GroupLayout::Expanded;
+        if !expanded
+            && !tokens[insert.span.start + 1..insert.span.end]
+                .iter()
+                .any(|token| token.line_breaks_before > 0)
+        {
+            continue;
+        }
+        if let Some(returning) = insert.returning {
+            has_expanded_list |= plan_keyword_list(
+                context,
+                returning,
+                insert.span.end,
+                insert.span.base_depth,
+                width_driven,
+                plan,
+            );
+        }
+        expanded |= has_expanded_list;
+
+        let source_start = match insert.source {
+            InsertSource::Values { keyword } => keyword,
+            InsertSource::DefaultValues { default, .. } => default,
+            InsertSource::Query { start } => start,
+        };
+        let authored = plan_clause_boundaries(
+            context,
+            [
+                Some(source_start),
+                insert.on_conflict.map(|conflict| conflict.start),
+                insert.returning,
+            ]
+            .into_iter()
+            .flatten(),
+            insert.span.base_depth,
+            expanded,
+            plan,
+        );
+        if !expanded && !authored {
             continue;
         }
 
         if let Some(start) = query_source {
             query_starts.insert(start);
-        }
-        if let Some(values) = insert.values_keyword() {
-            plan.break_before(values, 1, insert.span.base_depth);
-        } else if let InsertSource::Query { start } = insert.source {
-            plan.break_before(start, 1, insert.span.base_depth);
         }
 
         let rows_are_multiline = insert.rows.len() > 1
@@ -280,33 +355,33 @@ pub(super) fn plan_insert_statements(
         }
 
         if let Some(conflict) = insert.on_conflict {
-            plan.break_before(conflict.start, 1, insert.span.base_depth);
+            plan_clause_boundaries(
+                context,
+                [Some(conflict.action), conflict.set, conflict.action_where]
+                    .into_iter()
+                    .flatten(),
+                insert.span.base_depth,
+                conflict.update,
+                plan,
+            );
             if conflict.update {
-                plan.break_before(conflict.action, 1, insert.span.base_depth);
                 if let Some(set) = conflict.set {
-                    plan.break_before(set, 1, insert.span.base_depth);
                     let set_end = conflict
                         .action_where
                         .or(insert.returning)
                         .unwrap_or(insert.span.end);
-                    plan_keyword_list(context, set, set_end, insert.span.base_depth, true, plan);
-                }
-                if let Some(action_where) = conflict.action_where {
-                    plan.break_before(action_where, 1, insert.span.base_depth);
+                    // An authored SET clause may already have a valid inline list.
+                    let force_expand = tokens[set].line_breaks_before == 0;
+                    plan_keyword_list(
+                        context,
+                        set,
+                        set_end,
+                        insert.span.base_depth,
+                        force_expand,
+                        plan,
+                    );
                 }
             }
-        }
-
-        if let Some(returning) = insert.returning {
-            plan.break_before(returning, 1, insert.span.base_depth);
-            plan_keyword_list(
-                context,
-                returning,
-                insert.span.end,
-                insert.span.base_depth,
-                width_driven,
-                plan,
-            );
         }
     }
     query_starts
