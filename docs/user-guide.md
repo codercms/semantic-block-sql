@@ -400,7 +400,9 @@ CLI diagnostics use one-based `line:column` locations followed by a half-open UT
 
 Unsupported syntax points to a parser-located construct when a bounded source
 range can be proven, including rejected VALUES derived-table shapes. Otherwise
-the diagnostic covers its enclosing statement.
+the diagnostic covers its enclosing statement, starting at its first SQL token
+rather than attached leading comments. Skipped-statement messages use that same
+SQL statement line.
 
 Coordinates refer to the source the user can act on:
 

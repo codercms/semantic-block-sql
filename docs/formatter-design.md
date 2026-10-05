@@ -1092,3 +1092,17 @@ When PostgreSQL provides a first-expression location for such a rejected VALUES
 shape, diagnostics point to its bounded VALUES construct instead of the entire
 outer statement. Source-relative byte offsets are retained through document/CLI
 coordinate translation, including CRLF and UTF-8 prefixes.
+
+
+### Statement diagnostic anchors after dump comments
+
+The explicit diagnostic-location requirement treats a statement's first SQL
+token as the fallback anchor. PostgreSQL RawStmt spans may include attached
+leading dump comments; those comments remain inside the statement's immutable
+rewrite/opaque span, but unsupported and skipped-statement fallbacks no longer
+point at their leading `--` separator. The shared diagnostic builder uses scanner
+tokens to locate syntax and preserves existing ranges if scanning is unavailable.
+Trusted cause ranges remain exact. Skipped-statement messages adjust their
+absolute statement line consistently. File fmt recomputes these locations in
+its output pass; check/diff retain input coordinates. Synthetic CLI coverage
+includes Unicode, CRLF, preceding layout changes, and repeated fmt calls.

@@ -259,6 +259,12 @@ pub(super) fn statement_skipped_diagnostic(
     statement_line: usize,
     cause_range: Option<SourceRange>,
 ) -> Diagnostic {
+    let statement_range = syntax_source_range(source, SourceRange::new(0, source.len()));
+    let statement_line = statement_line
+        + source[..statement_range.start]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count();
     Diagnostic {
         rule_id: "format.statement_skipped".into(),
         severity: match policy {
@@ -266,7 +272,7 @@ pub(super) fn statement_skipped_diagnostic(
             super::UnsupportedPolicy::Error => Severity::Error,
         },
         message: format!("statement formatting skipped at line {statement_line}: {error}"),
-        source_range: cause_range.unwrap_or_else(|| SourceRange::new(0, source.len())),
+        source_range: cause_range.unwrap_or(statement_range),
         fix_available: false,
     }
 }
@@ -285,7 +291,9 @@ pub(super) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diag
         | FormatDiagnostic::Ownership(_) => "format.safety_failure",
     };
     let source_range = match error {
-        FormatDiagnostic::UnsupportedSyntax { start, end, .. } => SourceRange::new(*start, *end),
+        FormatDiagnostic::UnsupportedSyntax { start, end, .. } => {
+            syntax_source_range(source, SourceRange::new(*start, *end))
+        }
         _ => SourceRange::new(0, source.len()),
     };
     Diagnostic {
@@ -295,6 +303,24 @@ pub(super) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diag
         source_range,
         fix_available: false,
     }
+}
+
+/// Parser statement ranges can include attached leading comments. Diagnostic
+/// fallbacks point to SQL syntax without changing the statement's rewrite span.
+/// Keep the original range if scanner provenance is unavailable.
+fn syntax_source_range(source: &str, range: SourceRange) -> SourceRange {
+    source
+        .get(range.start..range.end)
+        .and_then(|slice| tokenize(slice).ok())
+        .and_then(|tokens| {
+            tokens
+                .iter()
+                .find(|token| !token.is_comment())
+                .map(|token| token.start)
+        })
+        .map_or(range, |offset| {
+            SourceRange::new(range.start + offset, range.end)
+        })
 }
 
 fn align_tokens(

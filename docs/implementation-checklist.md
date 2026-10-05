@@ -1402,3 +1402,25 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Review semantic equivalence, ownership boundaries, idempotence, authored
   groups/comments, diagnostics, atomicity, dependencies, and dead code. No new
   dependencies or private SQL/domain fixtures were added.
+
+
+## Dump-comment diagnostic anchors
+
+- [x] Reproduce unsupported and skipped-statement warnings anchored to leading
+  dump comment blocks rather than SQL syntax, including repeated file fmt runs.
+- [x] Locate the first non-comment scanner token in fallback diagnostic ranges;
+  keep rewrite/opaque spans and trusted cause ranges unchanged.
+- [x] Adjust skipped-statement message lines to the same SQL token anchor.
+- [x] Add a synthetic CLI regression spanning check/diff and repeated fmt,
+  preceding layout changes, line/block comments, Unicode, and CRLF input/output.
+- [x] Verify the private schema copy: no unsupported/skipped warnings remain
+  anchored to comment blocks. Reported examples move from 1367 to 1371 and from
+  1421 to 1425, matching their actual SQL statement starts.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. The full suite
+  passes existing targets and diagnostic controls; the same eleven pending
+  routine/DDL cases in the two desired-coverage targets remain red.
+- [x] Review diagnostic provenance, input/output coordinates, comments,
+  idempotence, semantic/rewrite boundaries, atomicity, and dependencies/dead code.
+  No formatting/layout behavior or dependency changes were introduced.
+- [x] Rebuild/install optimized 0.2.1 on PATH and verify matching hashes and the
+  installed CLI's syntax-token location. Keep all private files outside the repo.
