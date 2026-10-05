@@ -252,6 +252,25 @@ owned layouts and acceptance fixtures.
 
 ### Authored group model
 
+Core sections 5.4 and 6 take precedence over compact-query preferences:
+authored breaks before typed SELECT and DML clauses remain boundaries even when the
+whole query fits on one line. Preserve blank clause boundaries as well. Keeping
+one authored boundary does not force otherwise inline sibling clauses to break;
+structural complexity and width can still require additional breaks. This
+decision belongs to the canonical query planner, using `QueryClauses` and
+scanner gap metadata, rather than host adapters or a source-text bypass.
+`groups::plan_clause_boundaries` supplies the same rule to query, DML, and DDL
+planners. It receives only typed clause locations, never guesses boundaries
+from keyword spelling, and preserves blank gaps when a planner requires a break.
+Mandatory CREATE TABLE column layout and ALTER action-category separation retain
+priority, while authored blank action boundaries remain hard boundaries.
+`DEFAULT VALUES` is one typed INSERT source whose boundary is `DEFAULT`, so
+planning cannot strand `DEFAULT` on the INSERT header. Authored `DO NOTHING`
+boundaries and short inline lists on an authored conflict `SET` clause are retained.
+`tests/authored_query_clauses.rs` and `tests/coverage_layout_matrix.rs` cover
+COUNT, DML, conflict actions, DDL, partial layouts, suffixes, nested queries,
+comments, and unchanged Go/Rust literals.
+
 Within list-like syntax, original non-empty line groups are authored groups
 that remain stable while safely breakable within the hard limit. Predicates use
 the same rule for a break after `ON` / `WHERE` / `HAVING` and for breaks before

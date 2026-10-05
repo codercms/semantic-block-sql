@@ -26,7 +26,9 @@ use ddl::{
     plan_values_statements, plan_views,
 };
 use expressions::{ExpressionSources, owned_expression_ranges};
-use groups::{GroupLayout, LayoutGroup, has_hard_boundary, has_list_hard_boundary};
+use groups::{
+    GroupLayout, LayoutGroup, has_hard_boundary, has_list_hard_boundary, plan_clause_boundaries,
+};
 use lists::{
     ParenthesizedListSources, parenthesized_lists, plan_keyword_list_at_indent,
     plan_parenthesized_lists, plan_select_lists,
@@ -714,7 +716,20 @@ fn plan_query_clauses(
             || with_body_starts.contains(&select)
             || cte_body_selects.contains(&select)
             || width_driven;
-        if !expanded {
+        // Authored clause boundaries are independent of width-driven expansion.
+        // Preserve them without expanding the query's remaining inline clauses.
+        let has_authored_clause = plan_clause_boundaries(
+            context,
+            query
+                .clauses
+                .ordered_boundaries(end)
+                .into_iter()
+                .filter(|boundary| *boundary < end),
+            indent,
+            expanded,
+            plan,
+        );
+        if !expanded && !has_authored_clause {
             continue;
         }
 
@@ -724,11 +739,6 @@ fn plan_query_clauses(
             plan.break_before(close, 1, indent.saturating_sub(1));
         }
 
-        for boundary in query.clauses.ordered_boundaries(end) {
-            if boundary < end {
-                plan.break_before(boundary, 1, indent);
-            }
-        }
         if query.clauses.locking.is_some() {
             for index in select + 1..end {
                 if depths[index] == base_depth && tokens[index].kind == Token::For {

@@ -233,7 +233,7 @@ pub(super) struct OnConflictBlock {
 pub(super) enum InsertSource {
     Values { keyword: usize },
     Query { start: usize },
-    DefaultValues { default: usize, values: usize },
+    DefaultValues { default: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -254,16 +254,6 @@ pub(super) struct InsertBlock {
     pub on_conflict: Option<OnConflictBlock>,
     pub returning: Option<usize>,
     pub identifier_tokens: Vec<usize>,
-}
-
-impl InsertBlock {
-    pub fn values_keyword(&self) -> Option<usize> {
-        match self.source {
-            InsertSource::Values { keyword } => Some(keyword),
-            InsertSource::DefaultValues { values, .. } => Some(values),
-            InsertSource::Query { .. } => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

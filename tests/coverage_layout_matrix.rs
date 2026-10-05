@@ -4,6 +4,84 @@ use semblock::FormatOptions;
 use support::{SqlCase, assert_cases, assert_cases_with};
 
 #[test]
+fn preserves_authored_conflict_action_boundaries() {
+    for source in [
+        "INSERT INTO items (id)\nVALUES (1)\nON CONFLICT (id)\nDO NOTHING;",
+        "INSERT INTO items (id)\nVALUES (1)\n\nON CONFLICT (id)\n\nDO UPDATE\n\nSET id = 1\n\nWHERE items.id = 1;",
+    ] {
+        support::assert_sql(source, source);
+    }
+}
+
+#[test]
+fn preserves_blank_lines_at_ddl_clause_boundaries() {
+    for source in [
+        "CREATE TABLE items (\n    id int\n)\n\nTABLESPACE pg_default;",
+        "CREATE VIEW all_items AS\n\nSELECT id\nFROM items;",
+        "CREATE MATERIALIZED VIEW all_items AS\n\nSELECT id\nFROM items\n\nWITH NO DATA;",
+    ] {
+        support::assert_sql(source, source);
+    }
+}
+
+#[test]
+fn preserves_short_multiline_dml_clauses() {
+    for source in [
+        "UPDATE items\nSET value = 1\nWHERE id = 2\nRETURNING id;",
+        "DELETE FROM items\nWHERE id = 2\nRETURNING id;",
+        "INSERT INTO items (id)\nVALUES (1)\nRETURNING id;",
+        "INSERT INTO items\nDEFAULT VALUES\nRETURNING id;",
+    ] {
+        support::assert_sql(source, source);
+    }
+}
+
+#[test]
+fn preserves_partially_multiline_dml_clauses() {
+    for source in [
+        "UPDATE items SET value = 1\nWHERE id = 2 RETURNING id;",
+        "DELETE FROM items WHERE id = 2\nRETURNING id;",
+        "INSERT INTO items (id) VALUES (1)\nRETURNING id;",
+    ] {
+        support::assert_sql(source, source);
+    }
+}
+
+#[test]
+fn preserves_blank_lines_between_dml_clauses() {
+    for source in [
+        "UPDATE items\n\nSET value = 1\n\nWHERE id = 2\n\nRETURNING id;",
+        "DELETE FROM items\n\nWHERE id = 2\n\nRETURNING id;",
+        "INSERT INTO items (id)\n\nVALUES (1)\n\nRETURNING id;",
+    ] {
+        support::assert_sql(source, source);
+    }
+}
+
+#[test]
+fn preserves_short_multiline_ddl_owners() {
+    for source in [
+        "CREATE TABLE items (\n    id int,\n    value int\n);",
+        "ALTER TABLE items\n    ADD COLUMN value int,\n    ADD COLUMN active boolean;",
+        "CREATE INDEX items_idx ON items (id)\nWHERE id > 0;",
+        "CREATE VIEW active_items AS\nSELECT id\nFROM items\nWHERE active;",
+    ] {
+        support::assert_sql(source, source);
+    }
+}
+
+#[test]
+fn preserves_blank_lines_within_ddl_owners() {
+    for source in [
+        "CREATE TABLE items (\n    id int,\n\n    value int\n);",
+        "ALTER TABLE items\n    ADD COLUMN value int,\n\n    ADD COLUMN active boolean;",
+        "CREATE INDEX items_idx ON items (id)\n\nWHERE id > 0;",
+    ] {
+        support::assert_sql(source, source);
+    }
+}
+
+#[test]
 fn preserves_authored_groups_across_clause_and_list_owners() {
     assert_cases(&[
         SqlCase::new(

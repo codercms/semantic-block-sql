@@ -36,40 +36,49 @@ pub(super) fn plan_values_statements(
 }
 
 pub(super) fn plan_views(
-    _context: &PlanningContext<'_, '_>,
+    context: &PlanningContext<'_, '_>,
     statements: &[ViewBlock],
     plan: &mut LayoutPlan,
 ) {
     for view in statements {
-        plan.break_before(view.query_start, 1, view.span.base_depth);
-        if let Some(check) = view.check_option {
-            plan.break_before(check, 1, view.span.base_depth);
-        }
+        plan_clause_boundaries(
+            context,
+            [Some(view.query_start), view.check_option]
+                .into_iter()
+                .flatten(),
+            view.span.base_depth,
+            true,
+            plan,
+        );
     }
 }
 
 pub(super) fn plan_materialized_views(
-    _context: &PlanningContext<'_, '_>,
+    context: &PlanningContext<'_, '_>,
     statements: &[MaterializedViewBlock],
     plan: &mut LayoutPlan,
 ) {
     for view in statements {
-        for clause in [view.using, view.tablespace].into_iter().flatten() {
-            plan.break_before(clause, 1, view.span.base_depth);
-        }
-        if let Some((open, _)) = view.options {
-            let with = open.saturating_sub(1);
-            plan.break_before(with, 1, view.span.base_depth);
-        }
-        plan.break_before(view.query_start, 1, view.span.base_depth);
-        if let Some(data_clause) = view.data_clause {
-            plan.break_before(data_clause, 1, view.span.base_depth);
-        }
+        plan_clause_boundaries(
+            context,
+            [
+                view.using,
+                view.tablespace,
+                view.options.map(|(open, _)| open.saturating_sub(1)),
+                Some(view.query_start),
+                view.data_clause,
+            ]
+            .into_iter()
+            .flatten(),
+            view.span.base_depth,
+            true,
+            plan,
+        );
     }
 }
 
 pub(super) fn plan_create_tables(
-    _context: &PlanningContext<'_, '_>,
+    context: &PlanningContext<'_, '_>,
     statements: &[CreateTableBlock],
     plan: &mut LayoutPlan,
 ) {
@@ -85,9 +94,13 @@ pub(super) fn plan_create_tables(
         if let Some(close) = table.close {
             plan.break_before(close, 1, table.span.base_depth);
         }
-        for clause in &table.clauses {
-            plan.break_before(*clause, 1, table.span.base_depth);
-        }
+        plan_clause_boundaries(
+            context,
+            table.clauses.iter().copied(),
+            table.span.base_depth,
+            true,
+            plan,
+        );
     }
 }
 
@@ -136,23 +149,29 @@ pub(super) fn plan_create_indexes(
         if !expanded {
             continue;
         }
-        if let Some((keyword, _open, close, items)) = &index.include {
-            plan.break_before(*keyword, 1, index.span.base_depth);
+        plan_clause_boundaries(
+            context,
+            [
+                index.include.as_ref().map(|(keyword, ..)| *keyword),
+                index.with_options.as_ref().map(|(keyword, ..)| *keyword),
+                index.tablespace,
+                index.where_clause,
+            ]
+            .into_iter()
+            .flatten(),
+            index.span.base_depth,
+            true,
+            plan,
+        );
+        if let Some((_keyword, _open, close, items)) = &index.include {
             if items.len() > 1 {
                 plan_ranges(items, *close, index.span.base_depth, plan);
             }
         }
-        if let Some((keyword, _open, close, items)) = &index.with_options {
-            plan.break_before(*keyword, 1, index.span.base_depth);
+        if let Some((_keyword, _open, close, items)) = &index.with_options {
             if items.len() > 1 {
                 plan_ranges(items, *close, index.span.base_depth, plan);
             }
-        }
-        if let Some(tablespace) = index.tablespace {
-            plan.break_before(tablespace, 1, index.span.base_depth);
-        }
-        if let Some(where_clause) = index.where_clause {
-            plan.break_before(where_clause, 1, index.span.base_depth);
         }
     }
 }
@@ -212,7 +231,13 @@ pub(super) fn plan_alter_tables(
             let group_changed = position > 0 && table.actions[position - 1].group != action.group;
             plan.break_before(
                 action.range.start,
-                if group_changed { 2 } else { 1 },
+                if group_changed {
+                    2
+                } else {
+                    context.tokens[action.range.start]
+                        .line_breaks_before
+                        .clamp(1, 2)
+                },
                 indent,
             );
             if let Some(options) = &action.relation_options {

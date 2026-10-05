@@ -203,7 +203,7 @@ fn crlf_and_closing_host_indent_are_preserved() {
     let source = "fn run() {\r\n    let sql = r##\"\r\n        select id\r\n        from items\r\n    \"##;\r\n}\r\n";
     let output = format(source).output;
     assert!(
-        output.contains("r##\"\r\nSELECT id FROM items\r\n    \"##"),
+        output.contains("r##\"\r\nSELECT id\r\nFROM items\r\n    \"##"),
         "{output:?}"
     );
     assert!(!output.replace("\r\n", "").contains('\n'));
