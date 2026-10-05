@@ -89,9 +89,16 @@ impl LayoutPlan {
         }
     }
 
-    fn set_fallback_indent(&mut self, range: std::ops::Range<usize>, indent: usize) {
-        for slot in &mut self.token_indents[range] {
-            slot.get_or_insert(indent);
+    fn set_fallback_indent(
+        &mut self,
+        range: std::ops::Range<usize>,
+        depths: &[usize],
+        base_depth: usize,
+        indent: usize,
+    ) {
+        for index in range {
+            self.token_indents[index]
+                .get_or_insert(indent + depths[index].saturating_sub(base_depth));
         }
     }
 
@@ -431,7 +438,7 @@ pub(super) fn format(
 
 fn query_indent(query: &QueryBlock, plan: &LayoutPlan) -> usize {
     query.wrapper.map_or(query.indent, |(open, _close)| {
-        plan.indent_for(open, query.indent.saturating_sub(1)) + 1
+        plan.line_indent_for(open, query.indent.saturating_sub(1)) + 1
     })
 }
 
@@ -677,6 +684,9 @@ fn plan_query_clauses(
     for query in queries {
         let select = query.select;
         let base_depth = query.base_depth;
+        if let Some(source) = &query.from {
+            plan_relation_source(source, plan);
+        }
         let indent = query_indent(query, plan);
         let end = query.end;
         let has_join = query
@@ -735,7 +745,7 @@ fn plan_query_clauses(
 
         if let Some((_open, close)) = query.wrapper {
             plan.break_before(select, 1, indent);
-            plan.set_fallback_indent(select..close, indent);
+            plan.set_fallback_indent(select..close, depths, base_depth, indent);
             plan.break_before(close, 1, indent.saturating_sub(1));
         }
 

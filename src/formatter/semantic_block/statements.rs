@@ -254,7 +254,6 @@ pub(super) fn plan_relation_source(source: &RelationSourceBlock, plan: &mut Layo
     }
     for &(open, close, inner_depth) in &source.wrappers {
         plan.break_before(open + 1, 1, inner_depth);
-        plan.set_indent(open + 1..close, inner_depth);
         plan.break_before(close, 1, inner_depth.saturating_sub(1));
     }
 }

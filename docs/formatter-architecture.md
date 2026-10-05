@@ -342,6 +342,11 @@ A wrapped query's visual indent is one level below the planned indent of its
 opening parenthesis, with its typed `QueryBlock` indent as the fallback before
 the parent has been planned. This keeps CTE, derived-relation, scalar-subquery,
 and deeper nested wrappers on the same rule without inferring syntax globally.
+Wrapper fallback indentation retains each descendant's relative delimiter
+depth rather than assigning one indent to the complete subtree. Query clauses
+also plan their own typed relation sources, including nested parenthesized join
+trees. A relation wrapper supplies opening/closing breaks without overwriting
+indentation owned by child SELECT lists or queries.
 
 Every statement, query, and keyword-list planner receives one immutable
 `PlanningContext` containing the token slice, depth index, CASE analysis,

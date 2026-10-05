@@ -1299,3 +1299,16 @@ tests; the production audit and queries remain in local temporary storage only.
 
 This version includes the synthetic regression coverage; the intentionally red
 tests track pending formatter fixes and do not imply those fixes have shipped.
+
+## Nested query ownership layout implementation
+
+- [x] Use the opening parent's planned line indent consistently for query lists
+  and clauses; preserve relative depth in wrapper fallback indentation.
+- [x] Plan relation sources for every typed query, including nested grouped
+  lateral sources; remove the relation wrapper's blanket child-indent override.
+- [x] Turn all three nested-query regression tests green with semantic equality,
+  authored comment/blank grouping, clean checks, and idempotence.
+- [x] Run formatting, locked Clippy, Rustdoc, diff hygiene, and all test targets;
+  all existing targets pass, with only the 33 remaining new red cases failing.
+- [x] Review shared SELECT/DML/MERGE call paths, dead code, and dependency scope;
+  no new dependencies, keyword scans, or production examples are introduced.
