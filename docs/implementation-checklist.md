@@ -1291,3 +1291,11 @@ failures, three optional-END-semicolon failures, two procedural ownership
 alignment failures, one SQL RETURN adapter failure, and one materialized-view
 query binding failure. Representative grammar shapes are covered by the new
 tests; the production audit and queries remain in local temporary storage only.
+
+## Tests-only patch version batch
+
+- [x] Bump the application and lockfile package version from 0.2.0 to 0.2.1.
+- [x] Build and verify the optimized executable through the existing user PATH.
+
+This version includes the synthetic regression coverage; the intentionally red
+tests track pending formatter fixes and do not imply those fixes have shipped.
