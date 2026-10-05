@@ -1057,3 +1057,14 @@ is already in the lockfile, is MIT OR Apache-2.0 licensed, declares Rust 1.71,
 and is directly enabled only for `derive` and `parsing` (string and type parsing).
 The MIT license texts are retained in third-party notices. No fork, vendored
 backend, new parser runtime, or database dependency is introduced.
+
+
+### Reviewed view CTE and wrapped-query coverage
+
+The explicit desired-support requirement supersedes the former unsupported
+boundary for CTE-led view and materialized-view queries. Both now carry typed
+CTE ownership into the shared work queue. View AS binds the query's first token,
+including a WITH prefix or branch parenthesis; set-operation owners exclude
+CREATE headers and check/data suffixes. Adjacent unreviewed expressions remain
+byte-identical with `syntax.unsupported`. Synthetic fixtures cover nested CTEs,
+comments, alias/storage options, check/data suffixes, and wrapped UNION branches.

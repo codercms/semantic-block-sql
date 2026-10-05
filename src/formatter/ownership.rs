@@ -212,6 +212,7 @@ pub(super) struct ViewSpec {
     pub options: usize,
     pub check: ViewCheckSpec,
     pub query: SelectSpec,
+    pub ctes: Vec<CteStatementSpec>,
 }
 
 /// Exact CREATE MATERIALIZED VIEW capabilities proven by PostgreSQL AST
@@ -225,6 +226,7 @@ pub(super) struct MaterializedViewSpec {
     pub has_tablespace: bool,
     pub skip_data: bool,
     pub query: SelectSpec,
+    pub ctes: Vec<CteStatementSpec>,
 }
 
 /// CREATE TABLE element kind used to preserve the authored order while still

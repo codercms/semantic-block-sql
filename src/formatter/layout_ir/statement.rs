@@ -179,6 +179,24 @@ pub(super) fn verify_select_shape(
     Ok(())
 }
 
+/// The AST proves a SELECT body; AS owns its first significant token, including
+/// a WITH prefix or a parenthesized set-operation branch.
+fn bind_view_query_start(
+    tokens: &[SqlToken<'_>],
+    as_index: usize,
+    end: usize,
+) -> Result<usize, FormatDiagnostic> {
+    (as_index + 1..end)
+        .find(|index| !tokens[*index].is_comment())
+        .filter(|index| {
+            matches!(
+                tokens[*index].kind,
+                Token::Select | Token::With | Token::Ascii40
+            )
+        })
+        .ok_or_else(|| FormatDiagnostic::Ownership("view AS has no owned SELECT body".into()))
+}
+
 pub(super) fn bind_view(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
@@ -206,8 +224,7 @@ pub(super) fn bind_view(
     )?;
     let as_index = find_kind(tokens, depths, view + 1, end, base_depth, Token::As)
         .ok_or_else(|| FormatDiagnostic::Ownership("CREATE VIEW has no AS clause".into()))?;
-    let query_start = find_kind(tokens, depths, as_index + 1, end, base_depth, Token::Select)
-        .ok_or_else(|| FormatDiagnostic::Ownership("CREATE VIEW has no SELECT query".into()))?;
+    let query_start = bind_view_query_start(tokens, as_index, end)?;
     let check_option = (query_start + 1..end).rev().find(|index| {
         depths[*index] == base_depth
             && tokens[*index].kind == Token::With
@@ -344,10 +361,7 @@ pub(super) fn bind_materialized_view(
         find_kind(tokens, depths, view + 1, end, base_depth, Token::As).ok_or_else(|| {
             FormatDiagnostic::Ownership("CREATE MATERIALIZED VIEW has no AS clause".into())
         })?;
-    let query_start = find_kind(tokens, depths, as_index + 1, end, base_depth, Token::Select)
-        .ok_or_else(|| {
-            FormatDiagnostic::Ownership("CREATE MATERIALIZED VIEW has no SELECT query".into())
-        })?;
+    let query_start = bind_view_query_start(tokens, as_index, end)?;
     let data_clause = (query_start + 1..end).rev().find(|index| {
         depths[*index] == base_depth
             && tokens[*index].kind == Token::With

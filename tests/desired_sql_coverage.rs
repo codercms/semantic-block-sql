@@ -203,3 +203,20 @@ fn lays_out_long_trigger_headers() {
         "CREATE TRIGGER {name}changes\nBEFORE UPDATE OF first_value, second_value ON sample_rows\nFOR EACH ROW\nEXECUTE FUNCTION sample_handler();"
     ));
 }
+
+#[test]
+fn view_cte_owners_preserve_nested_queries_comments_and_suffixes() {
+    assert_supported(
+        "CREATE VIEW sample_view (id) WITH (security_barrier = true) AS\nWITH seed AS (\n    -- retain this source comment\n    WITH inner_seed AS (SELECT 1 AS id)\n    SELECT id FROM inner_seed\n)\nSELECT id FROM seed\nWITH LOCAL CHECK OPTION;",
+    );
+    assert_supported(
+        "CREATE MATERIALIZED VIEW sample_view AS\nWITH seed AS (SELECT id FROM sample_rows)\nSELECT id FROM seed UNION ALL SELECT id FROM sample_archive\nWITH NO DATA;",
+    );
+}
+
+#[test]
+fn wrapped_view_set_operations_keep_query_suffix_ownership() {
+    assert_supported(
+        "CREATE VIEW sample_view AS\n(SELECT id FROM sample_rows ORDER BY id LIMIT 2)\nUNION ALL\n(SELECT id FROM sample_archive ORDER BY id LIMIT 2)\nORDER BY id;",
+    );
+}

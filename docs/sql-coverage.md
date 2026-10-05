@@ -156,8 +156,9 @@ Fixture-backed support includes:
 - reviewed access method, storage, tablespace, and `ON COMMIT` options;
 - feature-rich `CREATE INDEX`;
 - multi-action `ALTER TABLE`;
-- `CREATE VIEW`;
-- `CREATE MATERIALIZED VIEW`, including reviewed storage options.
+- `CREATE VIEW`, including CTE-led queries and wrapped set-operation branches;
+- `CREATE MATERIALIZED VIEW`, including reviewed storage options, CTE-led
+  queries, and wrapped set-operation branches with owned data clauses.
 
 ## Operational and migration statements
 
@@ -218,8 +219,6 @@ qualified, quoted, custom, and `float(p)` type names remain outside the rewrite.
 
 The following valid PostgreSQL forms are deliberately preserved as unsupported today and have explicit boundary tests:
 
-- `CREATE VIEW ... AS WITH ...`;
-- `CREATE MATERIALIZED VIEW ... AS WITH ...`;
 - subpartition declarations that combine `PARTITION OF` with another `PARTITION BY`;
 - `CREATE TABLE ... LIKE ...`;
 - `CREATE TABLE ... AS ...`;

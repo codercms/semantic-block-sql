@@ -210,8 +210,8 @@ fn longer_preferences_participate_in_width_layout() {
 
 #[test]
 fn preserves_aliases_inside_unsupported_statements() {
-    let source = "SELECT NULL::integer;\nCREATE VIEW sample AS WITH values_source AS (SELECT NULL::integer) SELECT * FROM values_source;";
-    let unsupported = "CREATE VIEW sample AS WITH values_source AS (SELECT NULL::integer) SELECT * FROM values_source;";
+    let source = "SELECT NULL::integer;\nCREATE VIEW sample AS WITH values_source AS (SELECT NULL::integer, json_value(payload, '$.id') FROM items) SELECT * FROM values_source;";
+    let unsupported = "CREATE VIEW sample AS WITH values_source AS (SELECT NULL::integer, json_value(payload, '$.id') FROM items) SELECT * FROM values_source;";
     let mut options = FormatOptions::default();
     options
         .type_aliases

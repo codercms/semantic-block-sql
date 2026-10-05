@@ -32,12 +32,12 @@ fn formats_the_reviewed_neighbor_of_each_high_risk_boundary() {
 fn preserves_adjacent_valid_but_unreviewed_syntax_byte_identically() {
     assert_unsupported_cases(&[
         (
-            "view query beginning with WITH",
-            "CREATE VIEW v AS WITH source AS (SELECT 1 AS id) SELECT id FROM source;",
+            "view CTE with an unreviewed expression",
+            "CREATE VIEW v AS WITH source AS (SELECT json_value(payload, '$.id') AS id FROM items) SELECT id FROM source;",
         ),
         (
-            "materialized-view query beginning with WITH",
-            "CREATE MATERIALIZED VIEW mv AS WITH source AS (SELECT 1 AS id) SELECT id FROM source WITH DATA;",
+            "materialized-view CTE with an unreviewed expression",
+            "CREATE MATERIALIZED VIEW mv AS WITH source AS (SELECT json_value(payload, '$.id') AS id FROM items) SELECT id FROM source WITH DATA;",
         ),
         (
             "subpartition declaration",

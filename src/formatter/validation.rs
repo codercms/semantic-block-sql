@@ -895,9 +895,12 @@ fn validate_view(view: &ViewStmt) -> Result<ViewSpec, &'static str> {
         Some(NodeEnum::SelectStmt(query)) => validate_select(query, false)?,
         _ => return Err("CREATE VIEW without a SELECT query"),
     };
-    if query.has_with {
-        return Err("CREATE VIEW query with WITH clause");
-    }
+    let ctes = validated_nested_cte_specs(
+        view.query
+            .as_deref()
+            .and_then(|query| query.node.as_ref())
+            .ok_or("CREATE VIEW without a query")?,
+    )?;
     let check = match ViewCheckOption::try_from(view.with_check_option)
         .unwrap_or(ViewCheckOption::Undefined)
     {
@@ -912,6 +915,7 @@ fn validate_view(view: &ViewStmt) -> Result<ViewSpec, &'static str> {
         options: view.options.len(),
         check,
         query,
+        ctes,
     })
 }
 
@@ -954,9 +958,13 @@ fn validate_materialized_view(
         Some(NodeEnum::SelectStmt(query)) => validate_select(query, false)?,
         _ => return Err("CREATE MATERIALIZED VIEW without a SELECT query"),
     };
-    if query.has_with {
-        return Err("materialized-view query with WITH clause");
-    }
+    let ctes = validated_nested_cte_specs(
+        create
+            .query
+            .as_deref()
+            .and_then(|query| query.node.as_ref())
+            .ok_or("CREATE MATERIALIZED VIEW without a query")?,
+    )?;
     Ok(MaterializedViewSpec {
         if_not_exists: create.if_not_exists,
         aliases: into.col_names.len(),
@@ -965,6 +973,7 @@ fn validate_materialized_view(
         has_tablespace: !into.table_space_name.is_empty(),
         skip_data: into.skip_data,
         query,
+        ctes,
     })
 }
 

@@ -506,12 +506,39 @@ impl LayoutDocument {
                 StatementSpec::Merge(spec) => StatementLayout::Merge(bind_merge(
                     tokens, structure, &statement, body_start, spec,
                 )?),
-                StatementSpec::View(spec) => StatementLayout::View(bind_view(
-                    tokens, structure, &statement, body_start, spec,
-                )?),
-                StatementSpec::MaterializedView(spec) => StatementLayout::MaterializedView(
-                    bind_materialized_view(tokens, structure, &statement, body_start, spec)?,
-                ),
+                StatementSpec::View(spec) => {
+                    let view = bind_view(tokens, structure, &statement, body_start, spec)?;
+                    if spec.query.has_with {
+                        token_statements.push(StatementTokens {
+                            spec: StatementSpec::Select(spec.query.clone()),
+                            ctes: spec.ctes.clone(),
+                            range: TokenRange::new(
+                                view.query_start,
+                                view.check_option.unwrap_or(view.span.end),
+                            )?,
+                            semicolon: None,
+                            base_depth: structure.depth(view.query_start),
+                        });
+                    }
+                    StatementLayout::View(view)
+                }
+                StatementSpec::MaterializedView(spec) => {
+                    let view =
+                        bind_materialized_view(tokens, structure, &statement, body_start, spec)?;
+                    if spec.query.has_with {
+                        token_statements.push(StatementTokens {
+                            spec: StatementSpec::Select(spec.query.clone()),
+                            ctes: spec.ctes.clone(),
+                            range: TokenRange::new(
+                                view.query_start,
+                                view.data_clause.unwrap_or(view.span.end),
+                            )?,
+                            semicolon: None,
+                            base_depth: structure.depth(view.query_start),
+                        });
+                    }
+                    StatementLayout::MaterializedView(view)
+                }
                 StatementSpec::CreateTable(spec) => StatementLayout::CreateTable(
                     bind_create_table(tokens, structure, &statement, body_start, spec)?,
                 ),
@@ -535,8 +562,13 @@ impl LayoutDocument {
 
         let queries = bind_queries(tokens, structure, &top_level_statements, document.queries())?;
         let predicates = bind_predicates(tokens, structure.depths(), &queries, &statements);
-        let set_operations =
-            bind_set_operations(tokens, structure, &top_level_statements, document.queries())?;
+        let set_operations = bind_set_operations(
+            tokens,
+            structure,
+            &top_level_statements,
+            &statements,
+            document.queries(),
+        )?;
         let window_blocks = bind_window_blocks(tokens, structure, &queries);
 
         let mut identifier_tokens = queries

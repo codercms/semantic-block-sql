@@ -1335,3 +1335,24 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   width error; keep its source and diagnostics outside the repository.
 - [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. All existing
   tests and the five new controls pass; only the nineteen remaining red cases fail.
+
+
+## View CTE and wrapped-query ownership implementation
+
+- [x] Retain parser-validated view CTE capabilities and enqueue their bounded
+  SELECT owner into the existing statement/CTE work queue.
+- [x] Bind AS to its actual query start and exclude CREATE headers and check/data
+  suffixes from set-operation owners, including wrapped branches.
+- [x] Turn three additional original red cases green; twenty of the original 36
+  now pass, with sixteen routine/DDL/VALUES cases pending.
+- [x] Cover nested CTEs, comments, options, aliases, and query suffixes with two
+  additional synthetic controls; preserve unreviewed-expression boundaries.
+- [x] Run the full suite, then reconcile and rerun the three historical negative
+  fixture targets whose unsupported assumptions the new requirement supersedes.
+  Those targets and all other existing targets pass; the two desired-coverage
+  targets retain only the sixteen remaining expected red cases.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene; review semantic
+  preservation, exhaustive ownership, comments, idempotence, diagnostics, and
+  dependency/dead-code scope. No dependencies or production SQL were added.
+- [x] Repeat formatting on the private schema copy without document-fatal errors;
+  keep all private source and diff artifacts in temporary storage.

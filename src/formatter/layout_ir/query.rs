@@ -418,13 +418,23 @@ pub(super) fn bind_set_operations(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
     statements: &[StatementTokens],
+    layouts: &[StatementLayout],
     specs: &[QuerySpec],
 ) -> Result<Vec<SetOperationBlock>, FormatDiagnostic> {
     let depths = structure.depths();
     let mut owners = BTreeMap::<(usize, usize, usize), (Option<(usize, usize)>, Vec<usize>)>::new();
 
     for (statement_index, statement) in statements.iter().enumerate() {
-        for operator in statement.range.start..statement.range.end {
+        let query_range = match layouts.get(statement_index) {
+            Some(StatementLayout::View(view)) => {
+                view.query_start..view.check_option.unwrap_or(view.span.end)
+            }
+            Some(StatementLayout::MaterializedView(view)) => {
+                view.query_start..view.data_clause.unwrap_or(view.span.end)
+            }
+            _ => statement.range.start..statement.range.end,
+        };
+        for operator in query_range.clone() {
             if !matches!(
                 tokens[operator].kind,
                 Token::Union | Token::Intersect | Token::Except
@@ -442,7 +452,7 @@ pub(super) fn bind_set_operations(
                 .map(|(open, close)| (*open, *close));
             let (owner_start, raw_owner_end) = owner_wrapper
                 .map(|(open, close)| (open + 1, close))
-                .unwrap_or((statement.range.start, statement.range.end));
+                .unwrap_or((query_range.start, query_range.end));
             let owner_end = set_operation_owner_end(
                 tokens,
                 depths,

@@ -683,3 +683,12 @@ formats Rust itself, expands macros, runs the compiler, or writes files.
 preservation, whole-source idempotence, diagnostic ranges, and an actual
 compiled literal/runtime-value check. `tests/rust_cli.rs` covers discovery,
 configuration, stdin, Git selection, and project-wide no-write failures.
+
+
+### View query owners
+
+View capability records retain the recursively validated CTE specifications.
+Their bound AS query span enqueues a SELECT owner in the existing statement
+work queue, so CTE bodies use the same binder and planners as standalone SQL.
+Set-operation binding uses that span rather than the CREATE header or the
+view check/data suffix. Parenthesized branches retain their structural owners.
