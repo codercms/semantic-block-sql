@@ -692,3 +692,13 @@ Their bound AS query span enqueues a SELECT owner in the existing statement
 work queue, so CTE bodies use the same binder and planners as standalone SQL.
 Set-operation binding uses that span rather than the CREATE header or the
 view check/data suffix. Parenthesized branches retain their structural owners.
+
+
+### Utility list ownership
+
+Aggregate signatures distinguish the parser's star marker from parameter lists.
+Aggregate option counts and composite field counts are carried by the exhaustive
+utility enum. Binding verifies the corresponding top-level list ranges and item
+counts once, then the existing parenthesized-list planner consumes those ranges.
+Settings and index attachments have explicit validators and utility variants;
+ordered-set aggregates and unrelated index actions still fail closed.

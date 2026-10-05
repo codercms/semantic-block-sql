@@ -303,6 +303,13 @@ pub(super) struct AlterTableSpec {
     pub actions: Vec<AlterTableActionSpec>,
 }
 
+/// Parser-proven aggregate input signature; star is not an empty argument list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AggregateSignatureSpec {
+    Star,
+    Parameters { count: usize },
+}
+
 /// Reviewed top-level migration/utility statement family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UtilityStatementKind {
@@ -316,7 +323,15 @@ pub(super) enum UtilityStatementKind {
     RevokeRole,
     Comment,
     CreateEnum,
-    CreateCompositeType,
+    CreateCompositeType {
+        fields: usize,
+    },
+    CreateAggregate {
+        signature: AggregateSignatureSpec,
+        options: usize,
+    },
+    Set,
+    AttachIndexPartition,
     CreateDomain,
     CreateSequence,
     CreateTrigger,
@@ -352,6 +367,7 @@ impl UtilityStatementKind {
             Self::Grant | Self::GrantRole => Token::Grant,
             Self::Revoke | Self::RevokeRole => Token::Revoke,
             Self::Comment => Token::Comment,
+            Self::Set => Token::Set,
             Self::Copy => Token::Copy,
             Self::Call => Token::Call,
             Self::Explain => Token::Explain,
@@ -360,13 +376,15 @@ impl UtilityStatementKind {
             Self::RefreshMaterializedView => Token::Refresh,
             Self::Listen => Token::Listen,
             Self::Notify => Token::Notify,
-            Self::AlterType
+            Self::AttachIndexPartition
+            | Self::AlterType
             | Self::AlterDomain
             | Self::AlterPolicy
             | Self::AlterSequence
             | Self::RenameObject => Token::Alter,
             Self::CreateEnum
-            | Self::CreateCompositeType
+            | Self::CreateCompositeType { .. }
+            | Self::CreateAggregate { .. }
             | Self::CreateDomain
             | Self::CreateSequence
             | Self::CreateTrigger
@@ -392,7 +410,10 @@ impl UtilityStatementKind {
             Self::RevokeRole => "REVOKE ROLE",
             Self::Comment => "COMMENT ON",
             Self::CreateEnum => "CREATE TYPE AS ENUM",
-            Self::CreateCompositeType => "CREATE TYPE AS",
+            Self::CreateCompositeType { .. } => "CREATE TYPE AS",
+            Self::CreateAggregate { .. } => "CREATE AGGREGATE",
+            Self::Set => "SET",
+            Self::AttachIndexPartition => "ALTER INDEX ATTACH PARTITION",
             Self::CreateDomain => "CREATE DOMAIN",
             Self::CreateSequence => "CREATE SEQUENCE",
             Self::CreateTrigger => "CREATE TRIGGER",

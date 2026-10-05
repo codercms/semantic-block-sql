@@ -16,13 +16,13 @@ pub(super) mod equivalence;
 pub use equivalence::validate_equivalent;
 
 use super::ownership::{
-    AliasSpec, AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec, ConflictActionSpec,
-    ConflictSpec, CreateIndexSpec, CreateTableElementSpec, CreateTableSpec, CteStatementSpec,
-    DeleteSpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec,
-    MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec, RelationItemSpec,
-    RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec,
-    SelectSpec, StatementSpec, SupportedDocument, UpdateSpec, UtilityStatementKind, ValuesSpec,
-    ViewCheckSpec, ViewSpec, source_statement,
+    AggregateSignatureSpec, AliasSpec, AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec,
+    ConflictActionSpec, ConflictSpec, CreateIndexSpec, CreateTableElementSpec, CreateTableSpec,
+    CteStatementSpec, DeleteSpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec,
+    MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec,
+    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
+    RelationListSpec, SelectSpec, StatementSpec, SupportedDocument, UpdateSpec,
+    UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -325,6 +325,25 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
             Ok(StatementSpec::CreateTable(validate_create_table(create)?))
         }
         NodeEnum::IndexStmt(index) => Ok(StatementSpec::CreateIndex(validate_create_index(index)?)),
+        NodeEnum::AlterTableStmt(alter)
+            if ObjectType::try_from(alter.objtype).unwrap_or(ObjectType::Undefined)
+                == ObjectType::ObjectIndex =>
+        {
+            validate_index_attachment(alter)?;
+            Ok(StatementSpec::Utility(
+                UtilityStatementKind::AttachIndexPartition,
+            ))
+        }
+        NodeEnum::VariableSetStmt(setting) => {
+            validate_session_setting(setting)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::Set))
+        }
+        NodeEnum::DefineStmt(aggregate)
+            if ObjectType::try_from(aggregate.kind).unwrap_or(ObjectType::Undefined)
+                == ObjectType::ObjectAggregate =>
+        {
+            Ok(StatementSpec::Utility(validate_aggregate(aggregate)?))
+        }
         NodeEnum::AlterTableStmt(alter) => {
             Ok(StatementSpec::AlterTable(validate_alter_table(alter)?))
         }
@@ -368,7 +387,9 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
                 validate_column_def(column)?;
             }
             Ok(StatementSpec::Utility(
-                UtilityStatementKind::CreateCompositeType,
+                UtilityStatementKind::CreateCompositeType {
+                    fields: statement.coldeflist.len(),
+                },
             ))
         }
         NodeEnum::CreateDomainStmt(statement) => {
@@ -554,6 +575,130 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
         NodeEnum::DoStmt(_) => Err("DO block"),
         _ => Err("unimplemented PostgreSQL statement family"),
     }
+}
+
+fn validate_session_setting(
+    setting: &pg_query::protobuf::VariableSetStmt,
+) -> Result<(), &'static str> {
+    use pg_query::protobuf::VariableSetKind;
+    let kind = VariableSetKind::try_from(setting.kind).unwrap_or(VariableSetKind::Undefined);
+    if setting.name.is_empty()
+        || !matches!(
+            kind,
+            VariableSetKind::VarSetValue
+                | VariableSetKind::VarSetDefault
+                | VariableSetKind::VarSetCurrent
+        )
+    {
+        return Err("unreviewed session setting form");
+    }
+    if setting
+        .args
+        .iter()
+        .any(|argument| !matches!(argument.node.as_ref(), Some(NodeEnum::AConst(_))))
+    {
+        return Err("unreviewed session setting value");
+    }
+    Ok(())
+}
+
+fn validate_index_attachment(alter: &AlterTableStmt) -> Result<(), &'static str> {
+    if alter.relation.is_none() || alter.missing_ok || alter.cmds.len() != 1 {
+        return Err("unreviewed ALTER INDEX attachment shape");
+    }
+    let Some(NodeEnum::AlterTableCmd(command)) = alter.cmds[0].node.as_ref() else {
+        return Err("unrecognized ALTER INDEX action");
+    };
+    if AlterTableType::try_from(command.subtype).unwrap_or(AlterTableType::Undefined)
+        != AlterTableType::AtAttachPartition
+        || command.missing_ok
+        || command.recurse
+    {
+        return Err("unreviewed ALTER INDEX action");
+    }
+    let Some(NodeEnum::PartitionCmd(partition)) =
+        command.def.as_deref().and_then(|node| node.node.as_ref())
+    else {
+        return Err("ALTER INDEX attachment without partition ownership");
+    };
+    if partition.name.is_none() || partition.bound.is_some() || partition.concurrent {
+        return Err("unreviewed index partition attachment");
+    }
+    Ok(())
+}
+
+fn validate_aggregate(
+    aggregate: &pg_query::protobuf::DefineStmt,
+) -> Result<UtilityStatementKind, &'static str> {
+    if aggregate.oldstyle || aggregate.defnames.is_empty() || aggregate.if_not_exists {
+        return Err("unreviewed aggregate definition form");
+    }
+    let [parameters, ordered] = aggregate.args.as_slice() else {
+        return Err("aggregate without signature ownership");
+    };
+    let (signature, parameters) = match parameters.node.as_ref() {
+        None => (AggregateSignatureSpec::Star, &[][..]),
+        Some(NodeEnum::List(parameters)) => (
+            AggregateSignatureSpec::Parameters {
+                count: parameters.items.len(),
+            },
+            parameters.items.as_slice(),
+        ),
+        _ => return Err("unrecognized aggregate signature"),
+    };
+    if !matches!(ordered.node.as_ref(), Some(NodeEnum::Integer(value)) if value.ival == -1) {
+        return Err("ordered-set aggregate signature");
+    }
+    for parameter in parameters {
+        let Some(NodeEnum::FunctionParameter(parameter)) = parameter.node.as_ref() else {
+            return Err("unrecognized aggregate parameter");
+        };
+        if parameter.arg_type.is_none()
+            || parameter.defexpr.is_some()
+            || !matches!(
+                pg_query::protobuf::FunctionParameterMode::try_from(parameter.mode),
+                Ok(pg_query::protobuf::FunctionParameterMode::FuncParamIn
+                    | pg_query::protobuf::FunctionParameterMode::FuncParamDefault)
+            )
+        {
+            return Err("unreviewed aggregate parameter shape");
+        }
+    }
+    validate_def_elements(&aggregate.definition, "aggregate option")?;
+    for option in &aggregate.definition {
+        let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
+            return Err("unrecognized aggregate option");
+        };
+        if !matches!(
+            option.defname.as_str(),
+            "sfunc"
+                | "stype"
+                | "sspace"
+                | "finalfunc"
+                | "finalfunc_extra"
+                | "finalfunc_modify"
+                | "combinefunc"
+                | "serialfunc"
+                | "deserialfunc"
+                | "initcond"
+                | "msfunc"
+                | "minvfunc"
+                | "mstype"
+                | "msspace"
+                | "mfinalfunc"
+                | "mfinalfunc_extra"
+                | "mfinalfunc_modify"
+                | "minitcond"
+                | "sortop"
+                | "parallel"
+        ) {
+            return Err("unreviewed aggregate option");
+        }
+    }
+    Ok(UtilityStatementKind::CreateAggregate {
+        signature,
+        options: aggregate.definition.len(),
+    })
 }
 
 fn validate_transaction(statement: &TransactionStmt) -> Result<UtilityStatementKind, &'static str> {

@@ -143,7 +143,10 @@ Fixture-backed support includes:
 - `TRUNCATE`;
 - object and role `GRANT` / `REVOKE`;
 - `COMMENT ON`;
-- enum and composite types;
+- enum and composite types, including authored multiline composite fields;
+- ordinary aggregate definitions with star or parameter signatures and reviewed
+  transition/final/combine/serialization/moving/sort/parallel options;
+- `ALTER INDEX ... ATTACH PARTITION`;
 - domains;
 - sequences;
 - triggers;
@@ -164,6 +167,7 @@ Fixture-backed support includes:
 
 Reviewed support includes:
 
+- session/local `SET` values, `TO DEFAULT`, and `FROM CURRENT`;
 - `BEGIN` with reviewed transaction modes;
 - unchained `COMMIT`, including `WORK` / `TRANSACTION` spellings;
 - `COPY`, including protected `FROM STDIN` payloads;
@@ -228,7 +232,8 @@ The following valid PostgreSQL forms are deliberately preserved as unsupported t
 - `JSON_TABLE`;
 - advanced SQL-standard JSON query/value/aggregate forms that are not in the reviewed expression subset;
 - multi-statement SQL-standard `BEGIN ATOMIC` routine bodies;
-- procedural transaction control.
+- procedural transaction control;
+- ordered-set aggregate definitions and multi-setting `SET TRANSACTION` forms.
 
 This list highlights known high-value boundaries; it is not a promise that every PostgreSQL feature not listed here is already supported.
 

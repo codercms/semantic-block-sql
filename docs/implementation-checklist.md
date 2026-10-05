@@ -1356,3 +1356,22 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   dependency/dead-code scope. No dependencies or production SQL were added.
 - [x] Repeat formatting on the private schema copy without document-fatal errors;
   keep all private source and diff artifacts in temporary storage.
+
+
+## Migration utility ownership implementation
+
+- [x] Review SET values/default/current forms, ordinary aggregate definitions,
+  and ALTER INDEX partition attachment through explicit utility variants.
+- [x] Bind aggregate signature/option and composite-field lists against AST
+  cardinality and reuse the shared list planner; distinguish star signatures.
+- [x] Turn four additional original red cases green; twenty-four of the original
+  36 now pass, with twelve remaining routine/DDL/VALUES cases pending.
+- [x] Add five fixture-backed controls for aggregate options and grouping,
+  session/local settings, attachments, and adjacent unsupported forms.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. Full all-target
+  testing passes every existing target and new control target; only the twelve
+  intentionally pending cases in the two desired-coverage targets remain red.
+- [x] Review semantics, parser/IR/layout boundaries, comments, idempotence,
+  diagnostics, atomicity, dependencies, and dead code. No dependencies added.
+- [x] Re-audit the private schema copy: 37 unsupported units, 27 safety skips,
+  no fatal errors. All source and audit artifacts remain outside the repository.

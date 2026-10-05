@@ -1068,3 +1068,15 @@ including a WITH prefix or branch parenthesis; set-operation owners exclude
 CREATE headers and check/data suffixes. Adjacent unreviewed expressions remain
 byte-identical with `syntax.unsupported`. Synthetic fixtures cover nested CTEs,
 comments, alias/storage options, check/data suffixes, and wrapped UNION branches.
+
+
+### Reviewed migration utility coverage
+
+The desired-support requirement is implemented for ordinary SET values/defaults/
+current values, ordinary aggregate definitions, index partition attachments, and
+multiline composite fields. The shared utility ownership model carries aggregate
+signature/option and composite-field cardinality into bounded list owners. It
+reuses the canonical list renderer and semantic/idempotence gates. Star aggregate
+signatures have an explicit variant because PostgreSQL represents them with a
+missing parameter node. Ordered-set signatures, SET TRANSACTION, and unrelated
+index actions retain fixture-backed unsupported boundaries.

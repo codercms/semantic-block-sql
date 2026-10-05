@@ -2,11 +2,11 @@ use pg_query::protobuf::Token;
 
 use super::*;
 use crate::formatter::ownership::{
-    AliasSpec, AlterTableSpec, ConflictActionSpec, CreateIndexSpec, CreateTableSpec,
-    CteStatementSpec, DeleteSpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec,
-    MergeActionSpec, MergeSpec, OverrideSpec, RelationIdentifierSpec, RelationItemSpec,
-    RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec,
-    SelectSpec, StatementTokens, UpdateSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
+    AggregateSignatureSpec, AliasSpec, AlterTableSpec, ConflictActionSpec, CreateIndexSpec,
+    CreateTableSpec, CteStatementSpec, DeleteSpec, InsertSourceSpec, InsertSpec,
+    MaterializedViewSpec, MergeActionSpec, MergeSpec, OverrideSpec, RelationIdentifierSpec,
+    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
+    RelationListSpec, SelectSpec, StatementTokens, UpdateSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
 };
 use crate::formatter::tokens::{
     is_join_start, is_query_clause_start, next_non_comment, previous_non_comment,
@@ -195,6 +195,79 @@ fn bind_view_query_start(
             )
         })
         .ok_or_else(|| FormatDiagnostic::Ownership("view AS has no owned SELECT body".into()))
+}
+
+pub(super) fn bind_utility(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: &StatementTokens,
+    kind: UtilityStatementKind,
+) -> Result<UtilityBlock, FormatDiagnostic> {
+    let expected_lists = match kind {
+        UtilityStatementKind::CreateCompositeType { fields } => vec![fields],
+        UtilityStatementKind::CreateAggregate { signature, options } => vec![
+            match signature {
+                AggregateSignatureSpec::Star => 1,
+                AggregateSignatureSpec::Parameters { count } => count,
+            },
+            options,
+        ],
+        _ => Vec::new(),
+    };
+    let mut lists = [None; 2];
+    if !expected_lists.is_empty() {
+        let owned = (statement.range.start..statement.range.end)
+            .filter(|index| {
+                structure.depth(*index) == statement.base_depth
+                    && tokens[*index].kind == Token::Ascii40
+            })
+            .collect::<Vec<_>>();
+        require_count(
+            kind.family_name(),
+            "owned list count",
+            owned.len(),
+            expected_lists.len(),
+        )?;
+        for ((slot, open), expected) in lists.iter_mut().zip(owned).zip(expected_lists) {
+            let close = structure
+                .matching_parenthesis(open)
+                .ok_or_else(|| FormatDiagnostic::Ownership("utility list is unclosed".into()))?;
+            require_count(
+                kind.family_name(),
+                "list item count",
+                parenthesized_item_count(tokens, structure, open)?,
+                expected,
+            )?;
+            *slot = Some((open, close));
+        }
+    }
+    if matches!(
+        kind,
+        UtilityStatementKind::CreateAggregate {
+            signature: AggregateSignatureSpec::Star,
+            ..
+        }
+    ) {
+        let (open, close) = lists[0].expect("aggregate signature is bound");
+        let contents = tokens[open + 1..close]
+            .iter()
+            .filter(|token| !token.is_comment())
+            .collect::<Vec<_>>();
+        if contents.len() != 1 || contents[0].kind != Token::Ascii42 {
+            return Err(FormatDiagnostic::Ownership(
+                "aggregate star signature disagrees with the AST".into(),
+            ));
+        }
+    }
+    Ok(UtilityBlock {
+        span: TokenSpan {
+            start: statement.range.start,
+            end: statement.range.end,
+            base_depth: statement.base_depth,
+        },
+        kind,
+        lists,
+    })
 }
 
 pub(super) fn bind_view(

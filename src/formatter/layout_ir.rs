@@ -14,8 +14,8 @@ mod statement;
 use self::query::{bind_predicates, bind_queries, bind_set_operations, bind_window_blocks};
 use self::statement::{
     bind_alter_table, bind_body_start, bind_create_index, bind_create_table, bind_delete,
-    bind_insert, bind_materialized_view, bind_merge, bind_select, bind_update, bind_values,
-    bind_view, bind_with_block,
+    bind_insert, bind_materialized_view, bind_merge, bind_select, bind_update, bind_utility,
+    bind_values, bind_view, bind_with_block,
 };
 
 /// Generic token span owned by one PostgreSQL construct.
@@ -401,6 +401,7 @@ pub(super) struct AlterTableBlock {
 pub(super) struct UtilityBlock {
     pub span: TokenSpan,
     pub kind: UtilityStatementKind,
+    pub lists: [Option<(usize, usize)>; 2],
 }
 
 /// Exhaustive top-level layout dispatcher.
@@ -548,14 +549,9 @@ impl LayoutDocument {
                 StatementSpec::AlterTable(spec) => StatementLayout::AlterTable(bind_alter_table(
                     tokens, structure, &statement, body_start, spec,
                 )?),
-                StatementSpec::Utility(kind) => StatementLayout::Utility(UtilityBlock {
-                    span: TokenSpan {
-                        start: statement.range.start,
-                        end: statement.range.end,
-                        base_depth: statement.base_depth,
-                    },
-                    kind: *kind,
-                }),
+                StatementSpec::Utility(kind) => {
+                    StatementLayout::Utility(bind_utility(tokens, structure, &statement, *kind)?)
+                }
             });
             statement_index += 1;
         }

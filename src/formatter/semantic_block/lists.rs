@@ -31,6 +31,13 @@ pub(super) fn parenthesized_lists(
                     .iter()
                     .any(|(using_open, _)| *using_open == open)
                 || is_create_enum_list_open(tokens, sources.utilities, open)
+                || sources.utilities.iter().any(|utility| {
+                    utility
+                        .lists
+                        .iter()
+                        .flatten()
+                        .any(|(list_open, _)| *list_open == open)
+                })
                 || is_values_list_open(sources.values, open))
         {
             continue;
