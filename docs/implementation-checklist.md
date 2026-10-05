@@ -5,6 +5,23 @@ Status: **Runnable CLI PoC complete; PostgreSQL statement coverage expanding**
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
 
+## Authored SELECT clause layout regression batch
+
+- [x] Reproduce the reported COUNT query collapse with a failing fixture before
+  changing layout, including unchanged Go/Rust literal expectations.
+- [x] Preserve authored typed clause breaks independently of query expansion;
+  retain blank boundaries and nested wrapper indentation.
+- [x] Cover partially multiline layouts, grouping, suffixes, comments, literal
+  newlines, one-line inputs, equivalence, idempotence, and clean `check` output.
+- [x] Record core-spec precedence over compact-query preferences in the design
+  document and explain user-visible behavior in the user guide.
+- [x] Run formatting, locked Clippy, all-target tests, Rustdoc, and diff hygiene.
+- [x] Complete semantic, architecture, idempotence, comment/group, diagnostic,
+  atomicity, dependency, and dead-code self-review.
+- [x] Review README and SQL coverage: no onboarding/example changes or syntax
+  status changes are required for this layout correction.
+- [x] Run GitNexus change-scope review and commit the coherent batch.
+
 ## Global gates
 
 - [x] Preserve the original handoff, style guide, and ZIP with checksums.

@@ -714,7 +714,19 @@ fn plan_query_clauses(
             || with_body_starts.contains(&select)
             || cte_body_selects.contains(&select)
             || width_driven;
-        if !expanded {
+        // Authored clause boundaries are independent of width-driven expansion.
+        // Preserve them without expanding the query's remaining inline clauses.
+        let mut has_authored_clause = false;
+        for boundary in query.clauses.ordered_boundaries(end) {
+            if boundary < end {
+                let authored_lines = tokens[boundary].line_breaks_before;
+                has_authored_clause |= authored_lines > 0;
+                if expanded || authored_lines > 0 {
+                    plan.break_before(boundary, authored_lines.clamp(1, 2), indent);
+                }
+            }
+        }
+        if !expanded && !has_authored_clause {
             continue;
         }
 
@@ -724,11 +736,6 @@ fn plan_query_clauses(
             plan.break_before(close, 1, indent.saturating_sub(1));
         }
 
-        for boundary in query.clauses.ordered_boundaries(end) {
-            if boundary < end {
-                plan.break_before(boundary, 1, indent);
-            }
-        }
         if query.clauses.locking.is_some() {
             for index in select + 1..end {
                 if depths[index] == base_depth && tokens[index].kind == Token::For {

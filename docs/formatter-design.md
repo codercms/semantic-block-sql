@@ -252,6 +252,16 @@ owned layouts and acceptance fixtures.
 
 ### Authored group model
 
+Core sections 5.4 and 6 take precedence over compact-query preferences:
+authored breaks before typed SELECT clauses remain boundaries even when the
+whole query fits on one line. Preserve blank clause boundaries as well. Keeping
+one authored boundary does not force otherwise inline sibling clauses to break;
+structural complexity and width can still require additional breaks. This
+decision belongs to the canonical query planner, using `QueryClauses` and
+scanner gap metadata, rather than host adapters or a source-text bypass.
+`tests/authored_query_clauses.rs` covers the reported COUNT query, partial
+layouts, suffixes, nested queries, comments, and unchanged Go/Rust literals.
+
 Within list-like syntax, original non-empty line groups are authored groups
 that remain stable while safely breakable within the hard limit. Predicates use
 the same rule for a break after `ON` / `WHERE` / `HAVING` and for breaks before

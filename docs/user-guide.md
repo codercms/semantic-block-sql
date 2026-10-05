@@ -4,6 +4,12 @@ This guide contains operational details intentionally kept out of the project RE
 
 ## Commands
 
+Short SQL authored with separate `SELECT`, `FROM`, and `WHERE` lines keeps those
+clause breaks, including in Go and Rust literals. An already compliant query
+therefore produces no formatting difference in `check` or `diff`. Short queries
+authored on one line may remain compact; casing, spacing, nesting, and width
+rules still apply.
+
 Format files in place:
 
 ```bash
