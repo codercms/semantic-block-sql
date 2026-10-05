@@ -6,6 +6,12 @@ It describes **fixture-backed structural support**, not every grammar production
 
 For exact machine behavior, see the [core `fmt` / `check` specification](semantic-block-sql-fmt-check-core-spec.md). For implementation progress and engineering gates, see the [implementation checklist](implementation-checklist.md).
 
+Two intentionally failing test targets track pending work:
+`tests/synthetic_layout_regressions.rs` covers layout and routine safety bugs;
+`tests/desired_sql_coverage.rs` records desired support for currently rejected
+syntax and additional safety skips. All examples are synthetic. These tests
+do not change the current support states listed below.
+
 ## Coverage model
 
 There are three useful states:

@@ -1260,3 +1260,34 @@ application version, and installed executable unchanged. Existing SQL assertion
 helpers enforce golden layout, semantic equivalence where applicable,
 idempotence, and clean checks once the fixes land. Long headers assert width and
 semantics without requiring an arbitrary canonical header layout.
+
+## Second synthetic coverage pass (intentionally red)
+
+- [x] Retry formatting fresh local copies after the first tests-only batch;
+  production source files remain unchanged and outside the repository.
+- [x] Audit statements independently so document-level fatal failures do not
+  hide unsupported syntax or statement safety skips.
+- [x] Add 24 desired-support tests after explicit user direction to cover both
+  unsupported syntax and formatter bugs.
+- [x] Cover settings, aggregate definitions, index attachment, SQL routine
+  body forms/options, procedural RAISE options/ELSIF/RETURN NEXT, VALUES-backed
+  views, CTE-backed views/materialized views, wrapped materialized-view set
+  operation branches, and trigger transition tables.
+- [x] Cover optional final procedural END semicolons, `=` assignment, static
+  procedural ANALYSE/TRUNCATE, and composite type/foreign key/sequence/trigger
+  width failures.
+- [x] Prove every synthetic example parses as PostgreSQL and all 24 tests fail
+  for unsupported, ownership, parse-adapter, or layout reasons on today's engine.
+- [x] Keep generated identifiers within PostgreSQL's 63-byte limit, with only
+  generic sample names and constants; copy no production query or domain.
+- [x] Document the pending support requirement without changing current support
+  claims; reconcile older rejection tests when each capability is implemented.
+- [ ] Implement the pending capabilities through reviewed typed ownership and
+  turn both new test targets green in subsequent batches.
+
+The local second audit found two document-fatal width errors, 85 unsupported
+statements, and 28 safety-skipped statements. The latter comprise 21 width
+failures, three optional-END-semicolon failures, two procedural ownership
+alignment failures, one SQL RETURN adapter failure, and one materialized-view
+query binding failure. Representative grammar shapes are covered by the new
+tests; the production audit and queries remain in local temporary storage only.

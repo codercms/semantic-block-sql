@@ -95,6 +95,23 @@ Current application-level decisions are:
 
 Any future ambiguity is recorded here before implementation.
 
+### Desired coverage recorded by red tests
+
+The latest explicit requirement is to add desired-support tests for currently
+unsupported migration syntax as well as formatter regressions. The active
+`tests/desired_sql_coverage.rs` target records those future capabilities with
+invented examples; it does not broaden today's machine support classification.
+Session settings, aggregate definitions, index attachment, additional SQL routine
+forms/options, procedural RAISE options/ELSIF/RETURN NEXT, nested VALUES sources,
+CTE-backed views, and trigger transition tables remain pending implementations.
+The same target covers additional procedural and DDL safety skips.
+
+Existing rejection fixtures describe the current implementation. When a desired
+capability is implemented, reconcile its former rejection fixture and coverage
+entry with the newly reviewed AST/ownership/planner contract; retain adjacent
+unreviewed forms as negative tests. Do not satisfy the red tests with a generic
+fallback, an unsupported-diagnostic suppression, or copied production SQL.
+
 ## Architecture hardening decisions
 
 The formatter uses a closed, compiler-checked ownership model rather than a
