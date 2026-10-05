@@ -27,7 +27,16 @@ pub(super) fn plan_values_statements(
         if values.rows.len() <= 1 && !authored && width <= context.options.soft_line_width {
             continue;
         }
-        let indent = values.span.base_depth + 1;
+        let keyword_indent = values
+            .wrapper
+            .map_or(values.span.base_depth, |(open, close)| {
+                let parent_indent =
+                    plan.line_indent_for(open, values.span.base_depth.saturating_sub(1));
+                plan.break_before(values.keyword, 1, parent_indent + 1);
+                plan.break_before(close, 1, parent_indent);
+                parent_indent + 1
+            });
+        let indent = keyword_indent + 1;
         for &(open, close) in &values.rows {
             plan.set_indent(open..close + 1, indent);
             plan.break_before(open, 1, indent);

@@ -11,7 +11,9 @@ use super::tokens::SqlToken;
 mod query;
 mod statement;
 
-use self::query::{bind_predicates, bind_queries, bind_set_operations, bind_window_blocks};
+use self::query::{
+    bind_predicates, bind_queries, bind_set_operations, bind_values_relations, bind_window_blocks,
+};
 use self::statement::{
     bind_alter_table, bind_body_start, bind_create_index, bind_create_table, bind_delete,
     bind_insert, bind_materialized_view, bind_merge, bind_select, bind_update, bind_utility,
@@ -339,6 +341,7 @@ pub(super) struct ValuesBlock {
     pub span: TokenSpan,
     pub keyword: usize,
     pub rows: Vec<(usize, usize)>,
+    pub wrapper: Option<(usize, usize)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -426,6 +429,7 @@ pub(super) enum StatementLayout {
 pub(super) struct LayoutDocument {
     statements: Vec<StatementLayout>,
     queries: Vec<QueryBlock>,
+    values_relations: Vec<ValuesBlock>,
     with_blocks: Vec<WithBlock>,
     predicates: Vec<PredicateBlock>,
     set_operations: Vec<SetOperationBlock>,
@@ -557,6 +561,12 @@ impl LayoutDocument {
         }
 
         let queries = bind_queries(tokens, structure, &top_level_statements, document.queries())?;
+        let values_relations = bind_values_relations(
+            tokens,
+            structure,
+            &top_level_statements,
+            document.values_relations(),
+        )?;
         let predicates = bind_predicates(tokens, structure.depths(), &queries, &statements);
         let set_operations = bind_set_operations(
             tokens,
@@ -594,6 +604,7 @@ impl LayoutDocument {
         Ok(Self {
             statements,
             queries,
+            values_relations,
             with_blocks,
             predicates,
             set_operations,
@@ -722,6 +733,7 @@ impl LayoutDocument {
                 StatementLayout::Values(block) => Some(block),
                 _ => None,
             })
+            .chain(self.values_relations.iter())
     }
 
     pub fn create_tables(&self) -> impl Iterator<Item = &CreateTableBlock> {

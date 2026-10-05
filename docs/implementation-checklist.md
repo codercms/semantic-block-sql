@@ -1375,3 +1375,30 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   diagnostics, atomicity, dependencies, and dead code. No dependencies added.
 - [x] Re-audit the private schema copy: 37 unsupported units, 27 safety skips,
   no fatal errors. All source and audit artifacts remain outside the repository.
+
+
+## VALUES derived relations and diagnostic locations
+
+- [x] Retain typed VALUES relation capabilities from RangeSubselect nodes;
+  verify structural wrapper/row cardinality within each owning statement.
+- [x] Reuse VALUES row and parenthesized-list planners, retain derived-table
+  wrappers, and measure each row without including preceding rows.
+- [x] Retain every wrapper around parser-owned relation JOINs rather than only
+  the outer item wrapper, preserving readable VALUES/lateral nesting.
+- [x] Locate rejected VALUES shapes from parser-proven expression locations;
+  retain the whole-statement fallback when no bounded location is available.
+- [x] Add seven synthetic controls spanning SELECT/view, UPDATE/DELETE/MERGE,
+  INSERT SELECT, repeated/nested sources, comments/groups, wrapper/row layouts,
+  and API/CLI line-column-byte locations with CRLF and UTF-8 prefixes.
+- [x] Turn the original VALUES-source desired-support case green; twenty-five
+  of the original 36 now pass, with eleven unrelated cases still pending.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. Full all-target
+  testing passes all existing and new controls; only the eleven pending cases
+  in the two desired-coverage targets fail.
+- [x] Format/check a fresh private input copy without warnings; confirm the
+  original path can produce a diff without warnings, without rewriting it.
+- [x] Rebuild and install the current optimized 0.2.1 on the user PATH; verify
+  matching hashes, private-copy clean check, and installed CLI diagnostic offsets.
+- [x] Review semantic equivalence, ownership boundaries, idempotence, authored
+  groups/comments, diagnostics, atomicity, dependencies, and dead code. No new
+  dependencies or private SQL/domain fixtures were added.

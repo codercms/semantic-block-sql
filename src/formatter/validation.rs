@@ -22,7 +22,8 @@ use super::ownership::{
     MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec,
     RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
     RelationListSpec, SelectSpec, StatementSpec, SupportedDocument, UpdateSpec,
-    UtilityStatementKind, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
+    UtilityStatementKind, ValuesRelationSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
+    source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -71,6 +72,7 @@ pub(super) fn parse_supported_postgresql(
     }
 
     let mut queries = Vec::new();
+    let mut values_relations = Vec::new();
     for (statement_index, raw) in parsed.protobuf.stmts.iter().enumerate() {
         let root = raw
             .stmt
@@ -81,17 +83,21 @@ pub(super) fn parse_supported_postgresql(
                 start: 0,
                 end: source.len(),
             })?;
-        collect_query_specs(root, statement_index, &mut queries).map_err(|feature| {
-            FormatDiagnostic::UnsupportedSyntax {
+        collect_query_specs(root, statement_index, &mut queries, &mut values_relations).map_err(
+            |feature| FormatDiagnostic::UnsupportedSyntax {
                 feature: feature.into(),
                 start: 0,
                 end: source.len(),
-            }
-        })?;
+            },
+        )?;
     }
     queries.sort_by_key(|query| (query.statement_index, query.anchor.unwrap_or(usize::MAX)));
 
-    Ok(SupportedDocument::with_queries(statements, queries))
+    Ok(SupportedDocument::with_queries(
+        statements,
+        queries,
+        values_relations,
+    ))
 }
 
 /// Walk every reviewed PostgreSQL child field that semblock depends on.
@@ -188,10 +194,26 @@ fn collect_query_specs(
     root: &NodeEnum,
     statement_index: usize,
     queries: &mut Vec<QuerySpec>,
+    values_relations: &mut Vec<ValuesRelationSpec>,
 ) -> Result<(), &'static str> {
     walk_complete_tree(root, &mut |node, _| {
         if let NodeRef::SelectStmt(select) = node {
             push_query_spec(select, statement_index, queries)?;
+        }
+        if let NodeRef::RangeSubselect(source) = node
+            && let Some(NodeEnum::SelectStmt(query)) = source
+                .subquery
+                .as_deref()
+                .and_then(|node| node.node.as_ref())
+            && is_values_select_shape(query)
+        {
+            validate_values_select(query)?;
+            values_relations.push(ValuesRelationSpec {
+                statement_index,
+                values: ValuesSpec {
+                    rows: query.values_lists.len(),
+                },
+            });
         }
         Ok(())
     })
@@ -1947,9 +1969,15 @@ fn validate_relation_source(
                 Some(NodeEnum::SelectStmt(query)) => query,
                 _ => return Err(feature),
             };
-            let _ = validate_select(query, false)?;
+            let kind = if is_values_select_shape(query) {
+                validate_values_select(query)?;
+                RelationItemSpec::Values
+            } else {
+                let _ = validate_select(query, false)?;
+                RelationItemSpec::Subquery
+            };
             push_alias(&mut result.identifiers, source.alias.as_ref())?;
-            Ok(RelationItemSpec::Subquery)
+            Ok(kind)
         }
         Some(NodeEnum::RangeFunction(source)) => {
             validate_alias_columns(source.alias.as_ref(), "function alias column list")?;
@@ -2480,6 +2508,78 @@ fn is_values_select_shape(select: &SelectStmt) -> bool {
         && select.limit_count.is_none()
 }
 
+/// Localize a rejected VALUES shape using its parser-owned first expression.
+/// The location must lie in a structural VALUES wrapper; otherwise retain the
+/// enclosing statement range rather than guessing a keyword occurrence.
+fn unsupported_values_range(source: &str, raw: &RawStmt, feature: &str) -> Option<(usize, usize)> {
+    let root = raw.stmt.as_deref()?.node.as_ref()?;
+    let mut anchors = Vec::new();
+    walk_complete_tree(root, &mut |node, _| {
+        if let NodeRef::SelectStmt(query) = node
+            && !query.values_lists.is_empty()
+            && validate_select(query, false).err() == Some(feature)
+            && let Some(NodeEnum::List(row)) = query.values_lists[0].node.as_ref()
+            && let Some(expression) = row.items.first().and_then(|node| node.node.as_ref())
+            && let Some(anchor) = first_expression_location(expression)
+        {
+            anchors.push(anchor);
+        }
+        Ok(())
+    })
+    .ok()?;
+    if anchors.is_empty() {
+        return None;
+    }
+    let tokens = super::tokens::tokenize(source).ok()?;
+    let structure = super::structure::TokenStructure::new(&tokens);
+    structure
+        .parenthesis_pairs()
+        .iter()
+        .filter_map(|(open, close)| {
+            let keyword = (*open + 1..*close).find(|index| !tokens[*index].is_comment())?;
+            if tokens[keyword].kind != pg_query::protobuf::Token::Values {
+                return None;
+            }
+            let first_row = (keyword + 1..*close).find(|index| !tokens[*index].is_comment())?;
+            if tokens[first_row].kind != pg_query::protobuf::Token::Ascii40 {
+                return None;
+            }
+            let row_close = structure.matching_parenthesis(first_row)?;
+            anchors
+                .iter()
+                .any(|anchor| tokens[first_row].start <= *anchor && *anchor < tokens[row_close].end)
+                .then_some((tokens[keyword].start, tokens[*close].start))
+        })
+        .min_by_key(|(start, _)| *start)
+}
+
+fn first_expression_location(expression: &NodeEnum) -> Option<usize> {
+    expression
+        .nodes()
+        .into_iter()
+        .filter_map(|(node, _, _, _)| {
+            let location = match node {
+                NodeRef::AConst(value) => value.location,
+                NodeRef::ColumnRef(value) => value.location,
+                NodeRef::ParamRef(value) => value.location,
+                NodeRef::FuncCall(value) => value.location,
+                NodeRef::TypeCast(value) => value.location,
+                NodeRef::AExpr(value) => value.location,
+                NodeRef::BoolExpr(value) => value.location,
+                NodeRef::CaseExpr(value) => value.location,
+                NodeRef::CoalesceExpr(value) => value.location,
+                NodeRef::MinMaxExpr(value) => value.location,
+                NodeRef::RowExpr(value) => value.location,
+                NodeRef::AArrayExpr(value) => value.location,
+                NodeRef::SubLink(value) => value.location,
+                NodeRef::SetToDefault(value) => value.location,
+                _ => return None,
+            };
+            usize::try_from(location).ok()
+        })
+        .min()
+}
+
 fn unsupported(source: &str, raw: &RawStmt, feature: &'static str) -> FormatDiagnostic {
     let start = usize::try_from(raw.stmt_location)
         .unwrap_or(0)
@@ -2493,6 +2593,7 @@ fn unsupported(source: &str, raw: &RawStmt, feature: &'static str) -> FormatDiag
     if source.as_bytes().get(end) == Some(&b';') {
         end += 1;
     }
+    let (start, end) = unsupported_values_range(source, raw, feature).unwrap_or((start, end));
     FormatDiagnostic::UnsupportedSyntax {
         feature: feature.into(),
         start,

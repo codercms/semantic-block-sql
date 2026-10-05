@@ -8,6 +8,83 @@ use crate::formatter::ownership::{
 };
 use crate::formatter::tokens::{is_join_start, is_query_clause_start};
 
+/// Match parser-owned VALUES relations as counted groups within each statement.
+/// Only a parenthesis whose first significant token is VALUES can own a derived
+/// relation; INSERT VALUES and partition-bound syntax cannot claim this role.
+pub(super) fn bind_values_relations(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statements: &[StatementTokens],
+    specs: &[crate::formatter::ownership::ValuesRelationSpec],
+) -> Result<Vec<ValuesBlock>, FormatDiagnostic> {
+    let mut result = Vec::new();
+    for (statement_index, statement) in statements.iter().enumerate() {
+        let expected = specs
+            .iter()
+            .filter(|spec| spec.statement_index == statement_index)
+            .collect::<Vec<_>>();
+        if expected.is_empty() {
+            continue;
+        }
+        let mut candidates = Vec::new();
+        for open in statement.range.start..statement.range.end {
+            if tokens[open].kind != Token::Ascii40 {
+                continue;
+            }
+            let Some(close) = structure
+                .matching_parenthesis(open)
+                .filter(|close| *close < statement.range.end)
+            else {
+                continue;
+            };
+            let Some(keyword) = (open + 1..close).find(|index| !tokens[*index].is_comment()) else {
+                continue;
+            };
+            if tokens[keyword].kind != Token::Values {
+                continue;
+            }
+            let rows = (keyword + 1..close)
+                .filter(|index| {
+                    tokens[*index].kind == Token::Ascii40
+                        && structure.depth(*index) == structure.depth(keyword)
+                })
+                .filter_map(|open| {
+                    structure
+                        .matching_parenthesis(open)
+                        .map(|close| (open, close))
+                })
+                .collect::<Vec<_>>();
+            candidates.push(ValuesBlock {
+                span: TokenSpan {
+                    start: keyword,
+                    end: close,
+                    base_depth: structure.depth(keyword),
+                },
+                keyword,
+                rows,
+                wrapper: Some((open, close)),
+            });
+        }
+        let mut actual_counts = candidates
+            .iter()
+            .map(|values| values.rows.len())
+            .collect::<Vec<_>>();
+        let mut expected_counts = expected
+            .iter()
+            .map(|spec| spec.values.rows)
+            .collect::<Vec<_>>();
+        actual_counts.sort_unstable();
+        expected_counts.sort_unstable();
+        if actual_counts != expected_counts {
+            return Err(FormatDiagnostic::Ownership(format!(
+                "VALUES relation ownership in statement {statement_index} expected row counts {expected_counts:?}, found {actual_counts:?}"
+            )));
+        }
+        result.extend(candidates);
+    }
+    Ok(result)
+}
+
 pub(super) fn bind_queries(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,

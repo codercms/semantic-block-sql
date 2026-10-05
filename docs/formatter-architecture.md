@@ -702,3 +702,18 @@ utility enum. Binding verifies the corresponding top-level list ranges and item
 counts once, then the existing parenthesized-list planner consumes those ranges.
 Settings and index attachments have explicit validators and utility variants;
 ordered-set aggregates and unrelated index actions still fail closed.
+
+
+### VALUES derived relations
+
+Completed AST traversal retains one VALUES relation capability per RangeSubselect,
+scoped to its top-level statement. Binding matches structural VALUES wrappers as
+counted groups and verifies row cardinalities before emitting typed ValuesBlocks.
+INSERT row sources remain with their existing INSERT owner. Derived wrappers and
+rows reuse the canonical VALUES/list planners; row width excludes preceding rows.
+Every wrapper around an AST-owned relation JOIN is retained independently.
+
+Rejected VALUES shapes use their parser-owned first expression location to bind
+a structural VALUES wrapper for diagnostics. If that provenance cannot be proven,
+the diagnostic retains its enclosing statement range. No text keyword guess is
+used to manufacture a source location.

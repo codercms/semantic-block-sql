@@ -79,7 +79,7 @@ Reviewed relation-source support includes:
 - `NATURAL` join variants;
 - `ON` and `USING`;
 - authored multiline `ON` and `USING` groups;
-- derived queries;
+- derived queries, including reviewed VALUES relations and row/alias lists;
 - parenthesized join trees;
 - `LATERAL`;
 - function relation sources;
@@ -233,7 +233,8 @@ The following valid PostgreSQL forms are deliberately preserved as unsupported t
 - advanced SQL-standard JSON query/value/aggregate forms that are not in the reviewed expression subset;
 - multi-statement SQL-standard `BEGIN ATOMIC` routine bodies;
 - procedural transaction control;
-- ordered-set aggregate definitions and multi-setting `SET TRANSACTION` forms.
+- ordered-set aggregate definitions and multi-setting `SET TRANSACTION` forms;
+- VALUES derived relations with ORDER BY suffixes.
 
 This list highlights known high-value boundaries; it is not a promise that every PostgreSQL feature not listed here is already supported.
 

@@ -1080,3 +1080,15 @@ reuses the canonical list renderer and semantic/idempotence gates. Star aggregat
 signatures have an explicit variant because PostgreSQL represents them with a
 missing parameter node. Ordered-set signatures, SET TRANSACTION, and unrelated
 index actions retain fixture-backed unsupported boundaries.
+
+
+### VALUES source support and diagnostic locations
+
+The explicit desired-support requirement includes VALUES derived relations in
+SELECT/view and DML relation owners. Their typed capability and wrapper/row
+ownership extend the existing VALUES renderer; nested join grouping and each
+row's own width are preserved. Unreviewed ORDER BY suffixes remain opaque.
+When PostgreSQL provides a first-expression location for such a rejected VALUES
+shape, diagnostics point to its bounded VALUES construct instead of the entire
+outer statement. Source-relative byte offsets are retained through document/CLI
+coordinate translation, including CRLF and UTF-8 prefixes.

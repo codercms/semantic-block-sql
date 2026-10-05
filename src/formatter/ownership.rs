@@ -38,6 +38,13 @@ pub(super) struct ValuesSpec {
     pub rows: usize,
 }
 
+/// One parser-owned VALUES derived relation, scoped to its top-level statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ValuesRelationSpec {
+    pub statement_index: usize,
+    pub values: ValuesSpec,
+}
+
 /// INSERT source shape accepted by the validator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum InsertSourceSpec {
@@ -100,6 +107,7 @@ pub(super) enum RelationIdentifierSpec {
 pub(super) enum RelationItemSpec {
     Relation,
     Subquery,
+    Values,
     Function,
     RowsFrom,
     TableSample,
@@ -539,6 +547,7 @@ pub(super) struct CteStatementSpec {
 pub(super) struct SupportedDocument {
     statements: Vec<SourceStatement>,
     queries: Vec<QuerySpec>,
+    values_relations: Vec<ValuesRelationSpec>,
 }
 
 impl SupportedDocument {
@@ -547,18 +556,28 @@ impl SupportedDocument {
         Self {
             statements,
             queries: Vec::new(),
+            values_relations: Vec::new(),
         }
     }
 
-    pub fn with_queries(statements: Vec<SourceStatement>, queries: Vec<QuerySpec>) -> Self {
+    pub fn with_queries(
+        statements: Vec<SourceStatement>,
+        queries: Vec<QuerySpec>,
+        values_relations: Vec<ValuesRelationSpec>,
+    ) -> Self {
         Self {
             statements,
             queries,
+            values_relations,
         }
     }
 
     pub fn statements(&self) -> &[SourceStatement] {
         &self.statements
+    }
+
+    pub fn values_relations(&self) -> &[ValuesRelationSpec] {
+        &self.values_relations
     }
 
     pub fn queries(&self) -> &[QuerySpec] {

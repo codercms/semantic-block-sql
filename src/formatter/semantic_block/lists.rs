@@ -90,7 +90,7 @@ pub(super) fn parenthesized_lists(
                     .values
                     .iter()
                     .find(|values| values.rows.iter().any(|&(row, _)| row == open))
-                    .map(|values| values.span.start)
+                    .map(|_| open)
             })
             .unwrap_or_else(|| open.saturating_sub(1));
         let compact = compact_width(tokens, compact_start, close + 1, options);

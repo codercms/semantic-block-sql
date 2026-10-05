@@ -570,6 +570,7 @@ pub(super) fn bind_values(
         },
         keyword: body_start,
         rows,
+        wrapper: None,
     })
 }
 
@@ -1930,6 +1931,8 @@ pub(super) fn bind_relation_source(
             .any(|start| item.start <= *start && *start < item.end);
         let contains_select =
             (item.start..item.end).any(|index| tokens[index].kind == Token::Select);
+        let contains_values =
+            (item.start..item.end).any(|index| tokens[index].kind == Token::Values);
         let contains_rows_from = (item.start..item.end).any(|index| {
             tokens[index].kind == Token::Rows
                 && tokens
@@ -1943,6 +1946,7 @@ pub(super) fn bind_relation_source(
         let agrees = match expected {
             RelationItemSpec::Join => contains_join,
             RelationItemSpec::Subquery => contains_select && !contains_join,
+            RelationItemSpec::Values => contains_values && !contains_join,
             RelationItemSpec::RowsFrom => contains_rows_from && !contains_join,
             RelationItemSpec::TableSample => contains_table_sample && !contains_join,
             RelationItemSpec::Function => {
@@ -2034,19 +2038,25 @@ pub(super) fn bind_relation_source(
         )));
     }
 
-    let wrappers = items
+    // Retain every structural wrapper around an AST-owned relation JOIN, not
+    // just the outer item wrapper. Query and VALUES wrappers own no JOIN from
+    // this relation list and are planned by their own typed blocks.
+    let mut wrappers = structure
+        .parenthesis_pairs()
         .iter()
-        .zip(&spec.items)
-        .filter_map(|(item, kind)| {
-            if *kind != RelationItemSpec::Join || tokens[item.start].kind != Token::Ascii40 {
-                return None;
-            }
-            structure
-                .matching_parenthesis(item.start)
-                .filter(|close| *close < item.end)
-                .map(|close| (item.start, close, depths[item.start] + 1))
+        .filter(|(open, close)| {
+            items
+                .iter()
+                .any(|item| item.start <= **open && **close < item.end)
         })
-        .collect();
+        .filter(|(open, close)| {
+            joins
+                .iter()
+                .any(|join| **open < join.start && join.start < **close)
+        })
+        .map(|(open, close)| (*open, *close, depths[*open] + 1))
+        .collect::<Vec<_>>();
+    wrappers.sort_by_key(|(open, _, _)| *open);
 
     let identifier_tokens =
         bind_relation_identifiers(tokens, structure, range, &spec.identifiers, owner)?;

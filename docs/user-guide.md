@@ -398,6 +398,10 @@ query.sql:1:1 (bytes 0-6): error[casing.keyword]: SQL keyword or grammar constru
 
 CLI diagnostics use one-based `line:column` locations followed by a half-open UTF-8 byte range.
 
+Unsupported syntax points to a parser-located construct when a bounded source
+range can be proven, including rejected VALUES derived-table shapes. Otherwise
+the diagnostic covers its enclosing statement.
+
 Coordinates refer to the source the user can act on:
 
 - `check` and `diff` refer to the original input;
