@@ -1238,3 +1238,25 @@ indentation. No PostgreSQL formatter-core source or existing user files change.
 - [x] Verify the CLI version and complete the required repository gates.
 - [x] Build the optimized release locally and verify installation through the existing user PATH.
 - [x] Review staged scope with GitNexus, commit and push to PR #47.
+
+## Synthetic layout regression tests (intentionally red)
+
+- [x] Add twelve active regression tests using only invented SQL, generic
+  identifiers, and constants; include no production queries, paths, or domains.
+- [x] Reproduce deeper derived-query indentation, SELECT item/clause alignment,
+  authored blank/comment groups, and grouped lateral-source indentation.
+- [x] Reproduce procedural WITH layout for SELECT, INSERT, UPDATE, and DELETE,
+  including a collapse beyond the hard width.
+- [x] Reproduce safely breakable FUNCTION and PROCEDURE header failures.
+- [x] Require statement-level routine width handling under default and strict
+  policy, independently of the WITH and header regressions.
+- [x] Confirm all twelve tests fail against the unchanged formatter; no ignores
+  or expected-panic annotations hide the failures.
+- [ ] Fix the formatter and turn the regression target green in a later batch.
+
+Run `cargo test --locked --test synthetic_layout_regressions` to reproduce.
+This tests-only batch deliberately leaves the formatter, support classification,
+application version, and installed executable unchanged. Existing SQL assertion
+helpers enforce golden layout, semantic equivalence where applicable,
+idempotence, and clean checks once the fixes land. Long headers assert width and
+semantics without requiring an arbitrary canonical header layout.
