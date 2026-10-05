@@ -230,3 +230,21 @@ The most precise executable documentation is the test suite:
 - the statement-family integration tests and realistic Go corpus
 
 For contributor guidance on extending the capability set, see the [PostgreSQL extension guide](formatter-extension-guide.md).
+
+
+## Rust embedding
+
+The same SQL capability boundary applies in Rust ordinary/raw strings, including
+`const` values and the reviewed SQLx macro positions documented in the
+[user guide](user-guide.md#rust-source). Adding this host adapter introduces no
+new PostgreSQL syntax support. The publication-query fixture proves nested
+`NOT EXISTS`, joins, authored Boolean groups, and `$1` placeholders through the
+Rust path; unsupported XML-table neighbors retain their source spelling and
+diagnostics. See `tests/rust_host.rs` and `tests/fixtures/rust/` for evidence.
+
+The [Go/Rust parity suite](host-sql-parity-tests.md) additionally exercises every
+SQL input fixture and the existing valid SQL regression literals through both
+adapters, comparing canonical output, unsupported/skipped diagnostics, semantic
+equivalence where applicable, and idempotence. Permanent Go and Rust project
+goldens have the same decoded SQL corpus, including migrations and PL/pgSQL.
+This expands host integration evidence without adding PostgreSQL capabilities.

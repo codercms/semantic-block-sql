@@ -1,0 +1,38 @@
+// semblock:sql
+const RECENT: &str = r#"
+/* dashboard query */ SELECT id, user_id, total FROM public.orders WHERE created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC;
+"#;
+
+// semblock:ignore
+const LEGACY: &str = r#"
+    select id,total from legacy.orders where deleted_at is null;
+"#;
+
+const UPDATE_FROM_IMPORT: &str = r#"
+UPDATE public.orders item
+SET total = source.total, updated_at = NOW()
+FROM staging.orders source
+WHERE item.id = source.id AND source.ready = TRUE
+RETURNING item.id, item.updated_at;
+"#;
+
+const DELETE_EXPIRED: &str = r#"
+DELETE FROM public.orders item
+USING staging.orders source
+WHERE item.id = source.id AND source.expired = TRUE
+RETURNING item.id;
+"#;
+
+const GROUPED_QUERY: &str = r#"SELECT id, total FROM public.orders;"#;
+const MESSAGE: &str = r#"choose a plan from the menu"#;
+const FRAGMENT: &str = r#"WHERE deleted_at IS NULL"#;
+const INTERPRETED: &str = "SELECT id, total FROM public.orders;";
+
+pub fn queries() -> Vec<String> {
+    let dynamic_columns = "id,total";
+    let dynamic_query = format!("SELECT {} FROM public.orders", dynamic_columns);
+    let mut queries = vec![RECENT, LEGACY, UPDATE_FROM_IMPORT, DELETE_EXPIRED,
+        GROUPED_QUERY, MESSAGE, FRAGMENT, INTERPRETED].into_iter().map(str::to_owned).collect::<Vec<_>>();
+    queries.push(dynamic_query);
+    queries
+}

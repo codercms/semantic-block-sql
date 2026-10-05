@@ -1128,3 +1128,67 @@ The architecture plan and executable checklist are maintained in
   diagnostics, dependency, and dead-code self-review.
 - [x] Run GitNexus change-scope review before committing.
 - [x] Commit the coherent batch without unrelated workspace files.
+
+
+## Rust embedded SQL batch
+
+- [x] Establish a failing Rust CLI regression before implementation.
+- [x] Review dependency license, MSRV, activity, ABI, and architectural fit.
+- [x] Add Rust CST extraction for ordinary/raw strings in reviewed expression positions.
+- [x] Cover the publication `const` example with a golden fixture and SQL equivalence.
+- [x] Add direct SQL literals in the six reviewed SQLx query macros, preserving parameters.
+- [x] Exclude dynamic strings, fragments, patterns, attributes, ABI/byte/C strings, and other macros.
+- [x] Decode Rust escapes with Syn and verify emitted runtime values, including compilation.
+- [x] Preserve raw delimiters, CRLF, boundary newlines, SQL-root indentation, and closing host indentation.
+- [x] Add strict Rust configuration, source diagnostics, stdin, discovery, and Git selection.
+- [x] Cover directives, idempotence, strict unsupported policy, and whole-project no-write failures.
+- [x] Keep existing source/discovery API signatures and SQL formatter ownership boundaries.
+- [x] Synchronize README, user guide, design, architecture, coverage notes, and notices.
+- [x] Run all formatting, Clippy, test, Rustdoc, and diff-hygiene gates.
+- [x] Complete semantic, architecture, comment/group, diagnostic, atomicity, dependency, and dead-code self-review.
+- [x] Run GitNexus change-scope review and commit the coherent batch.
+
+
+Rust batch evidence: all 329 tests across 46 targets pass on the pinned Rust
+1.88 Windows/MSVC toolchain, including 23 new Rust host/CLI tests and an actual
+compiled runtime-value check. Formatting, locked Clippy with warnings denied,
+locked Rustdoc, and diff hygiene pass. The existing LLVM library at
+`D:/msys64/clang64/bin` supplies libclang for the PostgreSQL backend build.
+GitNexus aggregate scope is CRITICAL because shared entry points, new host
+symbols, tests, and documentation participate in many flows; manual staged-diff
+and flow review confirms the intended 25-file scope, with no PostgreSQL
+formatter-core source changes. Existing user workspace files are excluded.
+
+## Go/Rust SQL coverage parity batch
+
+- [x] Reuse existing SQL fixtures and regression literals through both adapters.
+- [x] Reproduce and fix multiline Rust migration host-indentation divergence.
+- [x] Add equivalent permanent Go/Rust SQL input and expected-output corpus checks.
+- [x] Add a nine-file Rust Cargo fixture with CLI goldens, discovery/ignore,
+  serial/parallel determinism, no-write check/diff and idempotence.
+- [x] Compile and test the formatted Cargo fixture locked and offline.
+- [x] Pin real SQLx in an isolated opt-in fixture, reusing existing Go queries.
+- [x] Generate original/formatted SQLx metadata against isolated PostgreSQL 18
+  and compile all six real macros before/after formatting offline.
+- [x] Document SQL complexity, coverage scope, SQLx metadata and test commands.
+- [x] Run full formatting, locked Clippy/test/Rustdoc and diff-hygiene gates.
+- [x] Complete semantic, architecture, comments/groups, diagnostics, atomicity,
+  dependency and dead-code self-review.
+- [x] Run GitNexus change-scope review, commit the batch and update PR #47.
+
+Parity batch evidence: 337 tests pass across 48 targets on Rust 1.88, with the
+real SQLx compilation test explicitly run and passing separately (opt-in in the
+normal suite). Both Cargo fixtures additionally pass locked offline checks on
+Rust 1.98.1. The shared matrix covers 732 distinct valid SQL regression values,
+all 29 SQL input fixtures, and exact input/golden parity for 32 complete SQL
+expressions in the permanent projects. All formatter/Clippy/Rustdoc/diff gates
+pass. GitNexus staged review reports 45 symbols, 32 flows and CRITICAL aggregate
+risk across the intended 44 files; the sole production change is Rust host
+indentation. No PostgreSQL formatter-core source or existing user files change.
+
+## Rust-support release version batch
+
+- [x] Bump the application and its lockfile package entry from 0.1.21 to 0.1.22.
+- [x] Verify the CLI version and complete the required repository gates.
+- [x] Build the optimized release locally and verify installation through the existing user PATH.
+- [x] Review staged scope with GitNexus, commit and push to PR #47.

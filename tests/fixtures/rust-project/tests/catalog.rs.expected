@@ -1,0 +1,13 @@
+#[test]
+fn query_corpus_compiles() {
+    let tests = [
+        ("active", "SELECT id, name FROM public.catalog_items WHERE active = TRUE;"),
+        ("by id", "SELECT id, name FROM public.catalog_items WHERE id = $1;"),
+    ];
+    for (name, query) in tests {
+        assert!(!query.is_empty(), "{name} has no query");
+    }
+    assert!(!semblock_rust_fixture::users::load(1).is_empty());
+    assert_eq!(semblock_rust_fixture::orders::queries().len(), 9);
+    assert!(semblock_rust_fixture::catalog::dynamic_query("id,name").contains("id,name"));
+}

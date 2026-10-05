@@ -9,10 +9,12 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand};
 use semblock::config::{Config, ConfigError};
 use semblock::diff;
-use semblock::discover::{DiscoverError, discover, filter_candidates};
+use semblock::discover::{
+    DiscoverError, discover_with_rust as discover, filter_candidates_with_rust as filter_candidates,
+};
 use semblock::git::{GitError, GitSelection, read_staged_files, select_files};
 use semblock::rewrite::{RewriteError, atomic_replace};
-use semblock::source::{Language, SourceError, format_source, infer_language};
+use semblock::source::{Language, SourceError, format_source_with_rust, infer_language};
 use semblock::{Severity, UnsupportedPolicy};
 
 use output::{
@@ -285,8 +287,9 @@ impl Cli {
         io::stdin()
             .read_to_string(&mut source)
             .map_err(|error| RunError::filesystem(format!("failed to read stdin: {error}")))?;
-        let formatted = format_source(&source, language, &config.format, &config.go)
-            .map_err(RunError::source)?;
+        let formatted =
+            format_source_with_rust(&source, language, &config.format, &config.go, &config.rust)
+                .map_err(RunError::source)?;
         let has_errors = formatted.diagnostics.iter().any(is_fatal_diagnostic);
         if has_errors {
             emit_diagnostics(&filename, &source, &formatted.diagnostics, self.quiet, true);
@@ -356,6 +359,7 @@ impl Cli {
                 self.language,
                 &config.discovery,
                 &config.go,
+                &config.rust,
                 self.jobs,
             )
             .map_err(RunError::discovery)?;
@@ -410,6 +414,7 @@ impl Cli {
                 self.language,
                 &config.discovery,
                 &config.go,
+                &config.rust,
                 self.jobs,
             )
             .map_err(RunError::discovery)?

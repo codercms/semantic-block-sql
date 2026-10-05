@@ -18,6 +18,7 @@ pub struct Config {
     pub format: FormatOptions,
     pub discovery: DiscoveryConfig,
     pub go: GoConfig,
+    pub rust: RustConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +73,36 @@ impl Default for GoConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RustMultilineStringStyle {
+    #[default]
+    PreferRaw,
+    Preserve,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RustConfig {
+    pub enabled: bool,
+    pub auto_detect: bool,
+    pub raw_strings: bool,
+    pub interpreted_strings: bool,
+    pub multiline_string_style: RustMultilineStringStyle,
+}
+
+impl Default for RustConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_detect: true,
+            raw_strings: true,
+            interpreted_strings: true,
+            multiline_string_style: RustMultilineStringStyle::PreferRaw,
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("failed to determine current directory: {0}")]
@@ -99,6 +130,8 @@ struct FileConfig {
     discovery: FileDiscoveryConfig,
     #[serde(default)]
     go: FileGoConfig,
+    #[serde(default)]
+    rust: RustConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -177,7 +210,7 @@ impl Config {
                 format!("{} = \"{}\"\n", family.config_name(), toml_string(spelling))
             })
             .collect::<String>();
-        format!(
+        let mut output = format!(
             "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\nunsupported_policy = \"{}\"\n\n[format.type_aliases]\n{}\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nignore_generated_files = {}\nraw_strings = {}\ninterpreted_strings = {}\nmultiline_string_style = \"{}\"\n",
             semicolon_policy_name(self.format.semicolon_policy),
             not_equal_policy_name(self.format.not_equal_policy),
@@ -193,7 +226,19 @@ impl Config {
             self.go.raw_strings,
             self.go.interpreted_strings,
             go_multiline_string_style_name(self.go.multiline_string_style),
-        )
+        );
+        output.push_str(&format!(
+            "\n[rust]\nenabled = {}\nauto_detect = {}\nraw_strings = {}\ninterpreted_strings = {}\nmultiline_string_style = \"{}\"\n",
+            self.rust.enabled,
+            self.rust.auto_detect,
+            self.rust.raw_strings,
+            self.rust.interpreted_strings,
+            match self.rust.multiline_string_style {
+                RustMultilineStringStyle::PreferRaw => "prefer_raw",
+                RustMultilineStringStyle::Preserve => "preserve",
+            },
+        ));
+        output
     }
 
     fn from_file(file: FileConfig) -> Result<Self, ConfigError> {
@@ -203,7 +248,10 @@ impl Config {
             ));
         }
 
-        let mut config = Self::default();
+        let mut config = Self {
+            rust: file.rust,
+            ..Self::default()
+        };
         if let Some(value) = file.format.semicolon_policy {
             config.format.semicolon_policy = value;
         }

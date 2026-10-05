@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use ignore::{WalkBuilder, WalkState};
 use thiserror::Error;
 
-use crate::config::{DiscoveryConfig, GoConfig};
+use crate::config::{DiscoveryConfig, GoConfig, RustConfig};
 use crate::source::Language;
 
 #[derive(Debug, Error)]
@@ -28,6 +28,17 @@ pub fn discover(
     language: Language,
     discovery: &DiscoveryConfig,
     go: &GoConfig,
+    jobs: usize,
+) -> Result<Vec<PathBuf>, DiscoverError> {
+    discover_with_rust(roots, language, discovery, go, &RustConfig::default(), jobs)
+}
+
+pub fn discover_with_rust(
+    roots: &[PathBuf],
+    language: Language,
+    discovery: &DiscoveryConfig,
+    go: &GoConfig,
+    rust: &RustConfig,
     jobs: usize,
 ) -> Result<Vec<PathBuf>, DiscoverError> {
     let mut explicit = BTreeSet::new();
@@ -64,7 +75,7 @@ pub fn discover(
             Box::new(move |entry| {
                 match entry {
                     Ok(entry) if entry.file_type().is_some_and(|kind| kind.is_file()) => {
-                        if accepts(entry.path(), language, go) {
+                        if accepts_with_rust(entry.path(), language, go, rust) {
                             let _ = sender.send(Ok(entry.into_path()));
                         }
                     }
@@ -98,6 +109,26 @@ pub fn filter_candidates(
     language: Language,
     discovery: &DiscoveryConfig,
     go: &GoConfig,
+    jobs: usize,
+) -> Result<Vec<PathBuf>, DiscoverError> {
+    filter_candidates_with_rust(
+        root,
+        candidates,
+        language,
+        discovery,
+        go,
+        &RustConfig::default(),
+        jobs,
+    )
+}
+
+pub fn filter_candidates_with_rust(
+    root: &Path,
+    candidates: &[PathBuf],
+    language: Language,
+    discovery: &DiscoveryConfig,
+    go: &GoConfig,
+    rust: &RustConfig,
     jobs: usize,
 ) -> Result<Vec<PathBuf>, DiscoverError> {
     let mut exact = BTreeMap::new();
@@ -143,7 +174,7 @@ pub fn filter_candidates(
             match entry {
                 Ok(entry) if entry.file_type().is_some_and(|kind| kind.is_file()) => {
                     if let Some(candidate) = exact.get(entry.path())
-                        && accepts(entry.path(), language, go)
+                        && accepts_with_rust(entry.path(), language, go, rust)
                     {
                         let _ = sender.send(Ok(candidate.clone()));
                     }
@@ -169,7 +200,7 @@ pub fn filter_candidates(
         }
     }
     for candidate in candidates {
-        if root.join(candidate).is_file() || !accepts(candidate, language, go) {
+        if root.join(candidate).is_file() || !accepts_with_rust(candidate, language, go, rust) {
             continue;
         }
         let (matched, error) = matcher.matched_with_errors(candidate, false);
@@ -200,15 +231,28 @@ fn configure_builder(builder: &mut WalkBuilder, discovery: &DiscoveryConfig, job
 }
 
 pub fn accepts(path: &Path, language: Language, go: &GoConfig) -> bool {
+    accepts_with_rust(path, language, go, &RustConfig::default())
+}
+
+pub fn accepts_with_rust(
+    path: &Path,
+    language: Language,
+    go: &GoConfig,
+    rust: &RustConfig,
+) -> bool {
     let extension = path.extension().and_then(|extension| extension.to_str());
     match language {
         Language::Sql => extension.is_some_and(|extension| extension.eq_ignore_ascii_case("sql")),
         Language::Go => {
             go.enabled && extension.is_some_and(|extension| extension.eq_ignore_ascii_case("go"))
         }
+        Language::Rust => {
+            rust.enabled && extension.is_some_and(|extension| extension.eq_ignore_ascii_case("rs"))
+        }
         Language::Auto => match extension {
             Some(extension) if extension.eq_ignore_ascii_case("sql") => true,
             Some(extension) if extension.eq_ignore_ascii_case("go") => go.enabled,
+            Some(extension) if extension.eq_ignore_ascii_case("rs") => rust.enabled,
             _ => false,
         },
     }

@@ -6,6 +6,7 @@ use tree_sitter::{Node, Parser, Tree};
 use super::go_string::{
     GoStringError, can_encode_raw, decode_literal, encode_interpreted, encode_raw,
 };
+use super::looks_like_complete_sql_prefix;
 use crate::config::{GoConfig, GoMultilineStringStyle};
 use crate::{
     Diagnostic, FormatDiagnostic, FormatOptions, FormatWarning, Severity, SourceRange,
@@ -816,42 +817,6 @@ fn directive_name(directive: GoDirective) -> &'static str {
         GoDirective::Ignore => "semblock:ignore",
         GoDirective::Sql => "semblock:sql/language=SQL",
     }
-}
-
-fn looks_like_complete_sql_prefix(source: &str) -> bool {
-    let trimmed = source.trim_start();
-    let word = trimmed
-        .bytes()
-        .take_while(|byte| byte.is_ascii_alphabetic())
-        .collect::<Vec<_>>();
-    let Ok(word) = std::str::from_utf8(&word) else {
-        return false;
-    };
-    matches!(
-        word.to_ascii_uppercase().as_str(),
-        "WITH"
-            | "SELECT"
-            | "INSERT"
-            | "UPDATE"
-            | "DELETE"
-            | "MERGE"
-            | "CREATE"
-            | "ALTER"
-            | "DROP"
-            | "DO"
-            | "CALL"
-            | "GRANT"
-            | "REVOKE"
-            | "TRUNCATE"
-            | "COMMENT"
-            | "COPY"
-            | "EXPLAIN"
-            | "VACUUM"
-            | "ANALYZE"
-            | "REFRESH"
-            | "LISTEN"
-            | "NOTIFY"
-    )
 }
 
 #[derive(Debug)]

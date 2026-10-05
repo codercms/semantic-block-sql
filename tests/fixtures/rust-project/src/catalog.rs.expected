@@ -1,0 +1,33 @@
+pub struct Queries {
+    pub find_active: &'static str,
+    pub archive: &'static str,
+}
+
+fn wrap(query: &str) -> &str { query }
+fn consume(query: &str, _: i64) -> &str { query }
+
+pub fn find_active(minimum_id: i64) -> &'static str {
+    consume("SELECT id, name, metadata FROM public.catalog_items WHERE active = TRUE AND id >= $1 ORDER BY id;", minimum_id)
+}
+
+pub fn archive(id: i64) -> &'static str {
+    consume(wrap("UPDATE public.catalog_items SET archived_at = NOW() WHERE id = $1 RETURNING id;"), id)
+}
+
+pub fn default_queries() -> Queries {
+    Queries {
+        find_active: "SELECT id, name FROM public.catalog_items WHERE active = TRUE ORDER BY name;",
+        archive: "UPDATE public.catalog_items SET archived_at = NOW() WHERE id = $1;",
+    }
+}
+
+pub fn static_query() -> &'static str {
+    "SELECT id, name FROM public.catalog_items WHERE active = TRUE AND id > 0;"
+}
+
+pub fn dynamic_query(columns: &str) -> String {
+    format!("SELECT {} FROM public.catalog_items", columns)
+}
+
+const MARKER_QUERY: &str = "SELECT '`' AS marker, id FROM public.catalog_items WHERE id = $1;";
+pub fn marker_query() -> &'static str { MARKER_QUERY }

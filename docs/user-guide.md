@@ -45,7 +45,7 @@ Normal discovery:
 
 - respects `.gitignore`;
 - respects nested `.semblockignore` files;
-- applies language selection and Go enablement;
+- applies language selection and Go/Rust enablement;
 - processes an explicitly named file even when an ignore rule would otherwise match it.
 
 Use `--jobs` to control discovery and formatting concurrency.
@@ -146,6 +146,84 @@ Process Go explicitly with:
 semblock fmt --language go ./internal/...
 ```
 
+## Rust source
+
+Rust support is enabled by default for `.rs` discovery, Git selection, and
+stdin with `--filename query.rs` or `--language rust`. `fmt`, `check`, and `diff`
+use the same PostgreSQL formatter as standalone SQL and Go.
+
+```bash
+semblock diff --language rust ./src
+semblock fmt --language rust ./src
+semblock check --language rust ./src
+```
+
+The extractor uses a Rust CST and accepts complete SQL values in ordinary
+`"..."` and raw `r"..."`, `r#"..."#` strings in `const`, `static`, local
+bindings, assignments, returns, direct/nested call arguments, closures, and
+struct, tuple, and array values. No `_SQL` name or database-library allowlist is
+required for ordinary expressions. PostgreSQL parsing decides whether an
+auto-detected candidate is a complete statement; invalid automatic candidates
+are skipped, while explicitly marked invalid SQL fails the source.
+
+```rust
+const VALIDATE_SQL: &str = r#"
+SELECT id
+FROM public.items
+WHERE id = $1
+"#;
+
+fn load() {
+    query("SELECT 1");
+}
+```
+
+Rust escapes and line continuations are decoded before formatting. Existing raw
+hash delimiters are retained whenever safe. Multiline formatted values prefer
+raw strings; delimiter hashes are added as needed to avoid closing the literal
+inside SQL. `multiline_string_style = "preserve"` keeps ordinary strings
+ordinary. Control values can require escaped output. SQL indentation starts at
+its own root, independently of Rust block indentation; authored outer newlines,
+closing indentation, and physical CRLF convention are retained. A common host
+indentation prefix is removed from every line of a multiline SQL body, as in
+Go, while deeper SQL indentation remains intact. Every emitted
+literal is decoded again and compared with the intended formatted runtime value.
+The complete Rust source must reparse and pass a second, byte-identical pass.
+Surrounding Rust code is preserved; semblock does not run rustfmt.
+
+Macro support is deliberately limited to direct SQL literals in these reviewed
+positions:
+
+| Macro | SQL argument |
+| --- | --- |
+| `sqlx::query!`, `sqlx::query_unchecked!` | First |
+| `sqlx::query_scalar!`, `sqlx::query_scalar_unchecked!` | First |
+| `sqlx::query_as!`, `sqlx::query_as_unchecked!` | Second, after a parsed Rust type |
+
+SQLx offline metadata is keyed by the exact query text. After formatting macro
+SQL, regenerate `.sqlx` metadata with `cargo sqlx prepare` against your schema
+before an offline SQLx build. semblock formats Rust source; it does not generate
+database descriptions. The [host parity tests](host-sql-parity-tests.md) include
+real offline compilation with metadata for both query spellings.
+
+Parameter arguments, `query_file!` paths, other macros, macro definitions,
+`format!`, `concat!`, runtime concatenations, string method receivers, byte/C strings, attributes,
+patterns, ABI strings, and incomplete SQL fragments remain untouched. Macros
+are inspected as token trees and never expanded. A macro imported under another
+name is outside this reviewed boundary. A Rust grammar error aborts formatting;
+compiler type checking and macro expansion are outside semblock's responsibilities.
+
+Rust accepts adjacent `// semblock:sql`, `// language=SQL`, and
+`// semblock:ignore` comments before a reviewed literal or its containing
+statement/declaration. Block-comment equivalents also work. A leading
+`// semblock:file-ignore` preserves the entire source. Documentation comments
+are not directives. Conflicting, malformed, misplaced, and unmatched markers
+are errors, including markers targeting unreviewed expressions. Explicit SQL
+markers bypass automatic detection but never SQL validation or disabled string
+kinds. Host diagnostics identify the complete owning literal, separately in the
+input and formatted output. Existing exit codes and whole-project preflight /
+atomic replacement behavior apply to Rust too.
+
 ## Directives
 
 ### Go directives
@@ -239,6 +317,13 @@ ignore_generated_files = true
 raw_strings = true
 interpreted_strings = true
 multiline_string_style = "prefer_raw"
+
+[rust]
+enabled = true
+auto_detect = true
+raw_strings = true
+interpreted_strings = true
+multiline_string_style = "prefer_raw"
 ```
 
 Indentation is always four spaces. Authored list groups, blank lines, and comment boundaries are mandatory structural boundaries and are not configurable.
@@ -312,7 +397,7 @@ The Rust source API exposes both views: `FormattedSource::diagnostics` is input-
 | `0` | Success. |
 | `1` | `check` or `diff` found formatting changes. |
 | `2` | Invalid CLI arguments or configuration. |
-| `3` | SQL, directive, or Go parse/validation failure, or unsupported syntax under explicit strict policy. |
+| `3` | SQL, directive, or Go/Rust parse/validation failure, or unsupported syntax under explicit strict policy. |
 | `4` | Discovery, filesystem, or atomic replacement failure. |
 
 ## Further reading

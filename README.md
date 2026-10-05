@@ -2,14 +2,14 @@
 
 `semblock` is a deterministic, fail-safe PostgreSQL formatter and checker implementing the **Semantic Block SQL** style.
 
-It understands PostgreSQL structure instead of formatting by keyword heuristics, preserves comments and intentional logical groups, supports SQL embedded in Go code, and leaves unsupported syntax untouched rather than guessing.
+It understands PostgreSQL structure instead of formatting by keyword heuristics, preserves comments and intentional logical groups, supports SQL embedded in Go and Rust code, and leaves unsupported syntax untouched rather than guessing.
 
 ## Highlights
 
 - **PostgreSQL-aware** — formatting is backed by the PostgreSQL parser.
 - **Preserves intent** — authored multiline groups, comments, and semantic block boundaries stay meaningful.
 - **Fail-safe** — unsupported or ambiguous statements remain byte-identical by default.
-- **SQL + Go** — formats `.sql` files and complete PostgreSQL queries inside Go string expressions.
+- **SQL + Go + Rust** — formats `.sql` files and complete PostgreSQL queries inside Go and Rust strings, including Rust `const` values and reviewed SQLx macros.
 - **Repository-friendly** — recursive discovery, `.gitignore`, `.semblockignore`, staged files, and `--changed-since`.
 - **Deterministic** — successful rewrites pass semantic-equivalence and byte-idempotence safety gates.
 
