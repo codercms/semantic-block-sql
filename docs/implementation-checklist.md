@@ -22,6 +22,14 @@ and a self-review; syntax support also requires a fixture.
   status changes are required for this layout correction.
 - [x] Run GitNexus change-scope review and commit the coherent batch.
 
+## Authored-clause fix minor release batch
+
+- [x] Bump the application and lockfile package entry from `0.1.22` to `0.2.0`.
+- [x] Verify CLI version and complete formatting, locked Clippy/test/Rustdoc,
+  and diff-hygiene gates.
+- [x] Review dependency stability and staged scope with GitNexus; commit the
+  separate version batch.
+
 ## Global gates
 
 - [x] Preserve the original handoff, style guide, and ZIP with checksums.
