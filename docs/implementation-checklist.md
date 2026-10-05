@@ -1185,3 +1185,10 @@ expressions in the permanent projects. All formatter/Clippy/Rustdoc/diff gates
 pass. GitNexus staged review reports 45 symbols, 32 flows and CRITICAL aggregate
 risk across the intended 44 files; the sole production change is Rust host
 indentation. No PostgreSQL formatter-core source or existing user files change.
+
+## Rust-support release version batch
+
+- [x] Bump the application and its lockfile package entry from 0.1.21 to 0.1.22.
+- [x] Verify the CLI version and complete the required repository gates.
+- [x] Build the optimized release locally and verify installation through the existing user PATH.
+- [x] Review staged scope with GitNexus, commit and push to PR #47.
