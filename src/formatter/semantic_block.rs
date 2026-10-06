@@ -145,6 +145,7 @@ impl LayoutPlan {
 #[derive(Debug, Clone, Copy)]
 struct BooleanRange {
     kind: ExpressionOwnerKind,
+    introducer: Option<usize>,
     start: usize,
     end: usize,
     base_depth: usize,
@@ -368,6 +369,7 @@ pub(super) fn format(
         depths,
         &expression_ranges,
         layout.queries(),
+        layout.predicates(),
         parens,
         options,
     );
@@ -1074,6 +1076,7 @@ fn boolean_ranges(
     depths: &[usize],
     expressions: &[ExpressionRange],
     queries: &[QueryBlock],
+    predicates: &[PredicateBlock],
     parens: &HashMap<usize, usize>,
     options: &FormatOptions,
 ) -> Vec<BooleanRange> {
@@ -1118,6 +1121,12 @@ fn boolean_ranges(
         if expanded {
             result.push(BooleanRange {
                 kind: expression.kind,
+                introducer: predicates
+                    .iter()
+                    .find(|predicate| {
+                        predicate.start == expression.start && predicate.wrapper_close.is_none()
+                    })
+                    .map(|predicate| predicate.introducer),
                 start: expression.start,
                 end: expression.end,
                 base_depth: expression.base_depth,
@@ -1202,12 +1211,16 @@ fn plan_booleans(
             (range.start..range.end)
                 .any(|index| depths[index] == root_depth && tokens[index].kind == Token::And)
         });
-        let root_indent = plan
-            .line_indent_for(
-                range.start,
-                range.root_indent + plan.indent_offsets[range.start],
-            )
-            .max(range.root_indent + plan.indent_offsets[range.start]);
+        let root_indent = range.introducer.map_or_else(
+            || {
+                plan.line_indent_for(
+                    range.start,
+                    range.root_indent + plan.indent_offsets[range.start],
+                )
+                .max(range.root_indent + plan.indent_offsets[range.start])
+            },
+            |introducer| plan.line_indent_for(introducer, range.root_indent.saturating_sub(1)) + 1,
+        );
 
         if !matches!(
             range.kind,

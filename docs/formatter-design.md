@@ -1300,3 +1300,9 @@ A parenthesized comparison containing an already expanded scalar query also
 expands its outer wrapper. Query contents indent beneath their opener and each
 closing delimiter aligns with its own owner, rather than combining query and
 comparison closes on one hanging line. Compact atomic siblings remain compact.
+
+Expanded predicates retain their typed clause introducer as an indentation
+anchor. Their first line sits one level below the introducer's displayed
+indentation after enclosing query movement. Raw lexical depth plus accumulated
+offsets remains a fallback for non-clause expressions and CHECK wrappers; it
+must not override the contextual WHERE/ON owner and add an extra level.

@@ -100,3 +100,36 @@ fn subquery_comparison_wrappers_preserve_comments_and_compact_siblings() {
     );
     assert!(check_sql(&result.output, &options).compliant);
 }
+
+#[test]
+fn nested_exists_predicate_is_one_level_below_its_where_clause() {
+    let source = "WITH prepared AS (SELECT * FROM rows a WHERE ((NOT (EXISTS (SELECT 1 FROM mutes m WHERE ((m.id = a.id) AND (m.active = TRUE))))) AND (NOT (EXISTS (SELECT 1 FROM progress p WHERE\n((p.id = a.id)\nAND (p.item = a.item)\nAND (p.part = a.part))\n))))) SELECT * FROM prepared;";
+    for source in [
+        source.to_owned(),
+        format!(
+            "CREATE FUNCTION sample() RETURNS SETOF rows LANGUAGE SQL BEGIN ATOMIC {source} END;"
+        ),
+    ] {
+        let options = FormatOptions::default();
+        let result = format_sql_result(&source, &options);
+        assert!(
+            result.diagnostics.iter().all(|d| d.fix_available),
+            "{:?}",
+            result.diagnostics
+        );
+        let lines = result.output.lines().collect::<Vec<_>>();
+        let from = lines
+            .iter()
+            .position(|line| line.trim() == "FROM progress p")
+            .unwrap();
+        let where_indent = lines[from + 1].len() - lines[from + 1].trim_start().len();
+        let predicate_indent = lines[from + 2].len() - lines[from + 2].trim_start().len();
+        assert_eq!(predicate_indent, where_indent + 4, "{}", result.output);
+        validate_equivalent(&source, &result.output).unwrap();
+        assert_eq!(
+            format_sql_result(&result.output, &options).output,
+            result.output
+        );
+        assert!(check_sql(&result.output, &options).compliant);
+    }
+}

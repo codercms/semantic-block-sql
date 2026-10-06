@@ -1812,3 +1812,16 @@ the published 0.3.0 release is unchanged.
 - [x] Install optimized 0.3.1 on PATH with matching hash; review ownership,
   comments, compact siblings, semantics, idempotence, diagnostics, atomicity,
   dependencies and dead code; scope review, batch commit and PR update.
+
+## Contextual nested WHERE indentation
+
+- [x] Reproduce the extra predicate level with synthetic sibling EXISTS
+  subqueries in a CTE and SQL-standard routine body.
+- [x] Carry typed predicate introducers into Boolean ranges and derive their
+  final indentation from the displayed clause owner.
+- [x] Pass 493 tests across 62 targets and all engineering checks; private-copy
+  fmt/check/repeat passes without unsupported/skipped/errors. Verify the reported
+  WHERE/condition indentation is 28/32 spaces and install optimized 0.3.1 on PATH.
+- [x] Review typed ownership, semantic/comment preservation, authored groups,
+  nested query shifts, idempotence, diagnostics, atomicity, dependencies and dead
+  code; scope review, batch commit and PR update.

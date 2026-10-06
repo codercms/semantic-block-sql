@@ -374,3 +374,7 @@ connectors retain consistent indentation, equivalence and idempotence.
 The same fixture covers comparison wrappers around expanded scalar queries,
 including comments at query and comparison boundaries and compact neighboring
 comparisons. Each expanded closing delimiter aligns with its own wrapper.
+
+Nested EXISTS predicates in CTEs and SQL-standard routine bodies are also
+covered: expanded WHERE contents sit exactly one level beneath their clause,
+including when sibling subqueries have different Boolean layouts.
