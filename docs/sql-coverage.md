@@ -10,6 +10,9 @@ For exact machine behavior, see the [core `fmt` / `check` specification](semanti
 cover the original layout failures and requested syntax expansions. Their
 original 36 cases now pass. All examples are synthetic; support states below
 remain scoped to reviewed AST shapes and executable fixtures.
+All 22 follow-up cases in `tests/remaining_migration_regressions.rs` also pass.
+The [0.2.1 coverage report](coverage-improvements-0.2.1.md) maps the improvements
+to their fixtures and records the completed migration audit.
 
 ## Coverage model
 

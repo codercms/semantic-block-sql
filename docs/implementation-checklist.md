@@ -1,9 +1,13 @@
 # Durable implementation checklist
 
-Status: **Runnable CLI PoC complete; PostgreSQL statement coverage expanding**
+Status: **0.2.1 migration coverage and regression batches complete**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
+
+The [0.2.1 coverage report](coverage-improvements-0.2.1.md) records the current
+verified outcome. Earlier batch notes retain historical red-test counts and
+audit findings; those counts do not describe the final implementation.
 
 ## Authored SELECT clause layout regression batch
 
@@ -1282,7 +1286,7 @@ semantics without requiring an arbitrary canonical header layout.
   generic sample names and constants; copy no production query or domain.
 - [x] Document the pending support requirement without changing current support
   claims; reconcile older rejection tests when each capability is implemented.
-- [ ] Implement the pending capabilities through reviewed typed ownership and
+- [x] Implement the pending capabilities through reviewed typed ownership and
   turn both new test targets green in subsequent batches.
 
 The local second audit found two document-fatal width errors, 85 unsupported
@@ -1523,8 +1527,8 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   nodes, VALUES suffixes, and external-language routine declarations.
 - [x] Keep array-subquery and recordset/CTE controls; further reductions are
   required for the private ownership and procedural idempotence failures.
-- [ ] Implement the remaining reviewed capabilities and make this target green.
-- [ ] Repeat private formatting/check/idempotence audits and resolve remaining
+- [x] Implement the remaining reviewed capabilities and make this target green.
+- [x] Repeat private formatting/check/idempotence audits and resolve remaining
   safety skips before reporting the final coverage and updating the PR.
 
 ## AST-owned function calls and relation alias binding
@@ -1616,3 +1620,13 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   multiline comments, and ordinary dollar literal ownership.
 - [x] Run full gates and private file fmt/check/idempotence audits; review source
   attribution, safety, module boundaries, comments, and dependency/dead-code status.
+
+## Final migration coverage verification and documentation
+
+- [x] Verify all 454 tests and required formatter/Clippy/Rustdoc/diff gates.
+- [x] Verify supplied copies and original Git snapshot: zero unsupported/skipped
+  statements, clean check exit status, and byte-identical repeated formatting.
+- [x] Verify all 873 original dump-header gaps and accurate indivisible warnings.
+- [x] Synchronize README, coverage, architecture, user guide, and design decisions;
+  record the detailed fixture/bug/audit report without private SQL or domains.
+- [x] Build and verify the optimized 0.2.1 Windows executable.

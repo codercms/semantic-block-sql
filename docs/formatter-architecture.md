@@ -36,13 +36,26 @@ src/formatter/
 ├── layout_ir.rs                layout types and document-level dispatch
 ├── layout_ir/
 │   ├── statement.rs            statement-family token binding and shape checks
-│   └── query.rs                SELECT, WITH, predicate, and set-operation binding
+│   ├── query.rs                SELECT, WITH, predicate, and set-operation binding
+│   ├── values.rs               counted VALUES rows and query suffix binding
+│   ├── arrays.rs               constructor element groups, distinct from subscripts
+│   ├── function_calls.rs       AST-owned names, call parentheses, escape helpers
+│   └── migration_ddl.rs        sequence, identity, trigger, and foreign-key clauses
+├── routine_header.rs           shared signatures, options, and literal arguments
+├── sql_standard_routine.rs     SQL RETURN, atomic, and dollar-body adapters
+├── external_routine.rs         protected C/internal declaration adapter
+├── procedural/
+│   ├── mod.rs                  PL parser validation and canonical SQL leaf adapters
+│   ├── ir.rs                   procedural control and source-span ownership
+│   ├── capabilities.rs         parser-owned INTO, datatype, and transaction binding
+│   └── layout.rs               procedural indentation and body rendering
 ├── semantic_block.rs           planning orchestration and query/expression rules
 ├── semantic_block/
 │   ├── statements.rs           INSERT/UPDATE/DELETE/MERGE planners
 │   ├── ddl.rs                  VALUES and DDL planners
 │   ├── expressions.rs          typed owned-expression range derivation
 │   ├── lists.rs                shared list and parenthesized-argument planning
+│   ├── groups.rs               authored/compact/expanded group policy
 │   └── render.rs               casing, spacing, and token rendering
 ├── tokens.rs                   exact scanner tokens and authored gaps
 └── diagnostics.rs              rule diagnostics and source ranges

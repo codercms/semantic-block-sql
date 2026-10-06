@@ -97,14 +97,13 @@ Any future ambiguity is recorded here before implementation.
 
 ### Desired coverage recorded by red tests
 
-The latest explicit requirement is to add desired-support tests for currently
-unsupported migration syntax as well as formatter regressions. The active
-`tests/desired_sql_coverage.rs` target records those future capabilities with
-invented examples; it does not broaden today's machine support classification.
-Session settings, aggregate definitions, index attachment, additional SQL routine
-forms/options, procedural RAISE options/ELSIF/RETURN NEXT, nested VALUES sources,
-CTE-backed views, and trigger transition tables remain pending implementations.
-The same target covers additional procedural and DDL safety skips.
+The explicit requirement to cover unsupported migration syntax and formatter
+regressions is implemented with invented fixtures. The original 36 cases and all
+22 follow-up cases pass through reviewed AST/ownership/planner contracts. This
+includes session settings, aggregate definitions, index attachment, SQL routine
+forms/options, procedural adapters, VALUES sources, CTE-backed views, trigger
+transition tables, and the subsequent layout/diagnostic reductions. The coverage
+report records their fixture-backed scope; PostgreSQL support remains closed.
 
 Existing rejection fixtures describe the current implementation. When a desired
 capability is implemented, reconcile its former rejection fixture and coverage
@@ -1180,7 +1179,7 @@ Identity constraints carry their AST introduction location and reviewed sequence
 options. CREATE TABLE column items and ALTER TABLE actions bind the same typed
 option capability within their own spans, preserving generation mode and order.
 The sequence-option binder accepts an owned token range and depth rather than
-inventing a utility statement for an identity child. Empty and multiline option
+inventing a utility statement for an identity child. Absent and multiline option
 forms retain the existing semantic, comment, hard-width, and idempotence gates.
 
 ### Nested expression and relation group ownership
