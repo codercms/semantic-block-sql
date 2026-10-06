@@ -103,3 +103,98 @@ fn atomic_bodies_reuse_each_reviewed_dml_formatter() {
         assert_sql_layout_only(&result.output, &result.output);
     }
 }
+
+#[test]
+fn dollar_sql_bodies_preserve_delimiters_comments_and_multiline_literals() {
+    let source = "CREATE FUNCTION sample_value(input_value int) RETURNS text\nLANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE SECURITY DEFINER COST 10\nAS $sample$\n-- retained literal\nSELECT 'first\n  second'::text;\n\nSELECT $1::text;\n$sample$;";
+    let result = semblock::format_sql(source, &semblock::FormatOptions::default()).unwrap();
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.fix_available),
+        "{:?}",
+        result.diagnostics
+    );
+    assert!(result.output.contains("$sample$"));
+    assert!(result.output.contains("'first\n  second'"));
+    assert_sql_layout_only(&result.output, &result.output);
+    let source = "CREATE FUNCTION sample_work() RETURNS void AS $$INSERT INTO sample_rows (id) VALUES (1); DELETE FROM sample_rows WHERE id = 2;$$ LANGUAGE SQL;";
+    let result = semblock::format_sql(source, &semblock::FormatOptions::default()).unwrap();
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.fix_available)
+    );
+    assert_sql_layout_only(&result.output, &result.output);
+}
+
+#[test]
+fn dollar_sql_body_unsupported_nodes_preserve_the_complete_routine() {
+    let source = "CREATE FUNCTION sample_value() RETURNS text LANGUAGE SQL AS $$\nSELECT 1;\nSELECT json_value(payload, '$.id') FROM sample_rows;\n$$;";
+    let result = semblock::format_sql_result(source, &semblock::FormatOptions::default());
+    assert_eq!(result.output, source);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
+    );
+}
+
+#[test]
+fn routines_bind_locations_relative_to_their_own_document_statement() {
+    let source = "SELECT 'café';\n\n-- routine group\nCREATE FUNCTION sample_value() RETURNS integer LANGUAGE SQL RETURN 1;\nCREATE FUNCTION sample_other() RETURNS integer LANGUAGE SQL RETURN 2;";
+    let result = semblock::format_sql(source, &semblock::FormatOptions::default()).unwrap();
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.fix_available),
+        "{:?}",
+        result.diagnostics
+    );
+    semblock::validate_equivalent(source, &result.output).unwrap();
+    assert_sql_layout_only(&result.output, &result.output);
+}
+
+#[test]
+fn sql_routine_options_have_fixture_backed_ownership() {
+    for option in [
+        "VOLATILE CALLED ON NULL INPUT SECURITY INVOKER NOT LEAKPROOF",
+        "STABLE RETURNS NULL ON NULL INPUT LEAKPROOF SUPPORT sample_support",
+        "IMMUTABLE STRICT COST 10 ROWS 20 SET search_path TO sample_schema, public",
+        "SET work_mem FROM CURRENT PARALLEL RESTRICTED",
+    ] {
+        let source = format!(
+            "CREATE FUNCTION sample_options() RETURNS SETOF integer LANGUAGE SQL {option} AS $$SELECT 1;$$;"
+        );
+        let result = semblock::format_sql(&source, &semblock::FormatOptions::default()).unwrap();
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.fix_available),
+            "{option}: {:?}",
+            result.diagnostics
+        );
+        assert_sql_layout_only(&result.output, &result.output);
+    }
+}
+
+#[test]
+fn unreviewed_sql_body_quoting_is_preserved() {
+    for literal in ["'SELECT 1;'", "E'SELECT 1;'"] {
+        let source =
+            format!("CREATE FUNCTION sample_quoted() RETURNS integer LANGUAGE SQL AS {literal};");
+        let result = semblock::format_sql_result(&source, &semblock::FormatOptions::default());
+        assert_eq!(result.output, source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
+        );
+    }
+}

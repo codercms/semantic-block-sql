@@ -187,6 +187,12 @@ Reviewed SQL-standard routines support single and multiple SELECT/DML statements
 in `BEGIN ATOMIC`, RETURN expressions inside atomic bodies, and inline SQL RETURN
 bodies. `PARALLEL SAFE`, `RESTRICTED`, and `UNSAFE` options are reviewed.
 Unsupported body statements or expressions preserve the complete routine.
+Dollar-quoted LANGUAGE SQL functions and procedures reuse the canonical SQL
+formatter for each embedded statement. Dollar tags, embedded literals, comments,
+and authored groups are preserved. Common volatility, null-input, security,
+leakproof, cost, rows, support, configuration, and parallel options are covered
+by synthetic fixtures. Single-quoted and escape-string SQL bodies remain
+unsupported; their contents are never decoded and rewritten speculatively.
 Parser-backed PL/pgSQL support is described below.
 
 PL/pgSQL coverage includes:

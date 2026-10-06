@@ -239,7 +239,7 @@ fn successful_stdin_fmt_reports_formatted_stdout_coordinates() {
 #[test]
 fn dump_comment_headers_do_not_own_unsupported_or_skipped_locations() {
     let project = TempDir::new().expect("temp project");
-    let source = "select id,title from sample_rows where enabled=true;\r\n\r\n--\r\n-- Name: sample_value; Type: FUNCTION; café\r\n--\r\n\r\nCREATE FUNCTION sample_value() RETURNS int LANGUAGE SQL AS $$ SELECT 1; $$;\r\n\r\n/* header for the next statement */\r\n--\r\n\r\nALTER TABLE public.long_table_name ALTER COLUMN long_column_name SET DEFAULT 123;\r\n";
+    let source = "select id,title from sample_rows where enabled=true;\r\n\r\n--\r\n-- Name: sample_value; Type: FUNCTION; café\r\n--\r\n\r\nCREATE FUNCTION sample_value() RETURNS int LANGUAGE plpython3u AS $$ return 1 $$;\r\n\r\n/* header for the next statement */\r\n--\r\n\r\nALTER TABLE public.long_table_name ALTER COLUMN long_column_name SET DEFAULT 123;\r\n";
     write(project.path(), "schema.sql", source);
     write(
         project.path(),

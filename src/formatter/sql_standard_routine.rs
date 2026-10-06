@@ -12,6 +12,7 @@ enum BodyStatementKind {
 enum BodySpec {
     Atomic(Vec<BodyStatementKind>),
     Return { after_options: usize },
+    Dollar { as_location: usize, value: String },
 }
 
 #[derive(Debug)]
@@ -27,10 +28,29 @@ struct BoundBody {
 
 pub(super) fn format_single_routine(
     source: &str,
-    statement: &CreateFunctionStmt,
     options: &FormatOptions,
 ) -> Result<FormattedSql, StatementFormatError> {
+    // Input AST locations are relative to the enclosing document. Reparse the
+    // owning statement so every body/header capability has the same frame as
+    // the source being bound; do not patch individual protobuf locations.
+    let parsed = pg_query::parse(source)
+        .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
+    let [raw] = parsed.protobuf.stmts.as_slice() else {
+        return Err(
+            FormatDiagnostic::Ownership("SQL routine requires one statement".into()).into(),
+        );
+    };
+    let Some(Node::CreateFunctionStmt(statement)) =
+        raw.stmt.as_deref().and_then(|node| node.node.as_ref())
+    else {
+        return Err(
+            FormatDiagnostic::Ownership("SQL routine declaration is missing".into()).into(),
+        );
+    };
     let spec = validate(statement, source)?;
+    if let BodySpec::Dollar { as_location, value } = &spec {
+        return format_dollar_body(source, statement, *as_location, value, options);
+    }
     let body = bind_body(source, &spec)?;
     let mut body_options = options.clone();
     body_options.semicolon_policy = SemicolonPolicy::Preserve;
@@ -127,6 +147,169 @@ pub(super) fn format_single_routine(
     })
 }
 
+struct DollarBody<'a> {
+    literal_start: usize,
+    literal_end: usize,
+    start: usize,
+    end: usize,
+    delimiter: &'a str,
+}
+
+fn bind_dollar_body<'a>(
+    source: &'a str,
+    as_location: usize,
+    value: &str,
+) -> Result<DollarBody<'a>, FormatDiagnostic> {
+    let tokens = super::tokens::tokenize(source)?;
+    let as_index = tokens
+        .iter()
+        .position(|token| token.start == as_location && token.kind == Token::As)
+        .ok_or_else(|| {
+            FormatDiagnostic::Ownership("SQL AS clause disagrees with the AST".into())
+        })?;
+    let literal = tokens[as_index + 1..]
+        .iter()
+        .find(|token| !token.is_comment())
+        .filter(|token| token.kind == Token::Sconst && token.text.starts_with('$'))
+        .ok_or_else(|| unsupported(source, "SQL routine body outside reviewed dollar quoting"))?;
+    let delimiter_end = literal.text[1..]
+        .find('$')
+        .map(|index| index + 2)
+        .ok_or_else(|| FormatDiagnostic::Ownership("SQL body delimiter is missing".into()))?;
+    let delimiter = &literal.text[..delimiter_end];
+    if literal.text.len() < 2 * delimiter.len() || !literal.text.ends_with(delimiter) {
+        return Err(FormatDiagnostic::Ownership(
+            "SQL body delimiter is unclosed".into(),
+        ));
+    }
+    let start = literal.start + delimiter.len();
+    let end = literal.end - delimiter.len();
+    if &source[start..end] != value {
+        return Err(FormatDiagnostic::Ownership(
+            "SQL body literal disagrees with its decoded AST value".into(),
+        ));
+    }
+    Ok(DollarBody {
+        literal_start: literal.start,
+        literal_end: literal.end,
+        start,
+        end,
+        delimiter,
+    })
+}
+
+fn format_dollar_body(
+    source: &str,
+    statement: &CreateFunctionStmt,
+    as_location: usize,
+    value: &str,
+    options: &FormatOptions,
+) -> Result<FormattedSql, StatementFormatError> {
+    let body = bind_dollar_body(source, as_location, value)?;
+    let raw_body = &source[body.start..body.end];
+    let parsed = pg_query::parse(raw_body)
+        .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
+    if parsed.protobuf.stmts.is_empty() {
+        return Err(unsupported(source, "empty SQL routine body").into());
+    }
+    let mut body_options = options.clone();
+    body_options.semicolon_policy = SemicolonPolicy::Preserve;
+    body_options.soft_line_width = options.soft_line_width.saturating_sub(4).max(1);
+    body_options.hard_line_width = options
+        .hard_line_width
+        .saturating_sub(4)
+        .max(body_options.soft_line_width);
+    let mut formatted_body = String::new();
+    let mut cursor = 0;
+    for raw in &parsed.protobuf.stmts {
+        let (start, end) = super::statement_span(raw_body, raw);
+        let gap = super::normalize_document_gap(&raw_body[cursor..start], true);
+        if cursor > 0 && gap.is_empty() {
+            formatted_body.push('\n');
+        }
+        formatted_body.push_str(&gap);
+        let formatted = super::format_supported_statement(&raw_body[start..end], &body_options)
+            .map_err(|error| error.shifted(body.start + start))?;
+        formatted_body.push_str(&formatted.output);
+        cursor = end;
+    }
+    formatted_body.push_str(&super::normalize_document_gap(&raw_body[cursor..], true));
+    let framed = indent_sql_body(formatted_body.strip_prefix('\n').unwrap_or(&formatted_body))?;
+    super::semantic_block::validate_hard_width(&framed, options)?;
+    super::validation::equivalence::validate_equivalent_located(raw_body, &framed)
+        .map_err(|error| StatementFormatError::from(error).shifted(body.start))?;
+    let outer = super::procedural::OuterTokenOwnership {
+        language_location: routine_language_location(statement),
+        routine_kind_location: super::procedural::routine_kind_location(
+            source,
+            statement.is_procedure,
+        )?,
+        returns_location: super::procedural::routine_returns_location(source, statement)?,
+    };
+    let header = super::procedural::normalize_outer_tokens(
+        &source[..body.literal_start],
+        options,
+        outer.within(0, body.literal_start),
+    )?;
+    let footer = super::procedural::normalize_outer_tokens(
+        &source[body.literal_end..],
+        options,
+        outer.within(body.literal_end, source.len()),
+    )?;
+    // Seal the unchanged declaration independently of the separately validated
+    // embedded SQL. Never globally exempt routine literal contents from safety.
+    let declaration = format!(
+        "{header}{}{footer}",
+        &source[body.literal_start..body.literal_end]
+    );
+    super::validation::equivalence::validate_equivalent_located(source, &declaration)?;
+    let output = format!(
+        "{header}{}\n{framed}{}{footer}",
+        body.delimiter, body.delimiter
+    );
+    let reparsed = pg_query::parse(&output)
+        .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
+    let Some(Node::CreateFunctionStmt(statement)) = reparsed.protobuf.stmts[0]
+        .stmt
+        .as_deref()
+        .and_then(|node| node.node.as_ref())
+    else {
+        return Err(FormatDiagnostic::SemanticMismatch.into());
+    };
+    let BodySpec::Dollar { as_location, value } = validate(statement, &output)? else {
+        return Err(FormatDiagnostic::SemanticMismatch.into());
+    };
+    bind_dollar_body(&output, as_location, &value)?;
+    let warnings = super::semantic_block::validate_hard_width(&output, options)?;
+    Ok(FormattedSql {
+        changed: output != source,
+        output,
+        warnings,
+        diagnostics: Vec::new(),
+    })
+}
+
+/// Indent SQL trivia, never the continuation bytes of a multiline token.
+fn indent_sql_body(source: &str) -> Result<String, FormatDiagnostic> {
+    let tokens = super::tokens::tokenize(source)?;
+    let mut output = String::new();
+    let mut offset = 0;
+    for line in source.split_inclusive('\n') {
+        let continued_token = tokens
+            .iter()
+            .any(|token| token.start < offset && offset < token.end);
+        if !line.trim().is_empty() && !continued_token {
+            output.push_str("    ");
+        }
+        output.push_str(line);
+        offset += line.len();
+    }
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    Ok(output)
+}
+
 fn format_body_statement(
     source: &str,
     kind: BodyStatementKind,
@@ -218,6 +401,38 @@ fn validate(statement: &CreateFunctionStmt, source: &str) -> Result<BodySpec, Fo
                 .max()
                 .unwrap_or(0),
         },
+        None => {
+            let mut bodies = statement.options.iter().filter_map(|node| {
+                let Node::DefElem(option) = node.node.as_ref()? else {
+                    return None;
+                };
+                (option.defname == "as").then_some(option)
+            });
+            let option = bodies
+                .next()
+                .ok_or_else(|| unsupported(source, "SQL routine without a body"))?;
+            if bodies.next().is_some() {
+                return Err(unsupported(source, "multiple SQL routine bodies"));
+            }
+            let Some(Node::List(body)) = option.arg.as_deref().and_then(|node| node.node.as_ref())
+            else {
+                return Err(unsupported(source, "unrecognized SQL routine body literal"));
+            };
+            let [body] = body.items.as_slice() else {
+                return Err(unsupported(
+                    source,
+                    "SQL routine with multiple body literals",
+                ));
+            };
+            let Some(Node::String(value)) = body.node.as_ref() else {
+                return Err(unsupported(source, "unrecognized SQL routine body literal"));
+            };
+            BodySpec::Dollar {
+                as_location: usize::try_from(option.location)
+                    .map_err(|_| unsupported(source, "unlocated SQL routine body"))?,
+                value: value.sval.clone(),
+            }
+        }
         _ => {
             return Err(unsupported(
                 source,
@@ -232,7 +447,9 @@ fn validate(statement: &CreateFunctionStmt, source: &str) -> Result<BodySpec, Fo
         };
         match option.defname.as_str() {
             "language" => language = super::procedural::option_string(option),
-            "volatility" | "strict" => {}
+            "volatility" | "strict" | "security" | "leakproof" | "cost" | "rows" | "support"
+            | "set" => {}
+            "as" if matches!(spec, BodySpec::Dollar { .. }) => {}
             "parallel"
                 if super::procedural::option_string(option).is_some_and(|value| {
                     matches!(value.as_str(), "safe" | "restricted" | "unsafe")
@@ -313,6 +530,9 @@ fn bind_body(source: &str, spec: &BodySpec) -> Result<BoundBody, FormatDiagnosti
                 leading_lines: 0,
             })
         }
+        BodySpec::Dollar { .. } => Err(FormatDiagnostic::Ownership(
+            "dollar SQL body requires its literal binder".into(),
+        )),
         BodySpec::Return { after_options } => {
             let keyword = tokens
                 .iter()

@@ -760,9 +760,12 @@ fn format_statement_once(
     if is_routine_statement(raw) {
         if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(statement)) =
             raw.stmt.as_deref().and_then(|node| node.node.as_ref())
-            && statement.sql_body.is_some()
+            && (statement.sql_body.is_some() || statement.options.iter().any(|node| {
+                matches!(node.node.as_ref(), Some(pg_query::protobuf::node::Node::DefElem(option))
+                    if option.defname == "language" && procedural::option_string(option).as_deref() == Some("sql"))
+            }))
         {
-            return sql_standard_routine::format_single_routine(source, statement, options);
+            return sql_standard_routine::format_single_routine(source, options);
         }
         return procedural::format_single_routine(source, options).map_err(Into::into);
     }

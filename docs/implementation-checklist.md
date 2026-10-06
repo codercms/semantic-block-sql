@@ -1468,3 +1468,20 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   skips remain. Keep its source and diagnostic artifacts outside the repository.
 - [x] Review semantics, ownership/layout boundaries, idempotence, comments,
   diagnostics, atomicity, dependencies, and dead code; no dependencies added.
+
+## Dollar-quoted SQL routine implementation
+
+- [x] Bind LANGUAGE SQL AS bodies to typed AST locations and decoded values;
+  preserve tags and route each statement through the canonical formatter.
+- [x] Validate embedded SQL separately from the unchanged outer literal;
+  preserve multiline protected tokens and whole-routine failure atomicity.
+- [x] Cover common routine options, both language/body clause orders, comments,
+  body groups, unsupported inner expressions, and unreviewed quoting.
+- [x] Reparse statement-local routine metadata; cover Unicode and preceding
+  statements so inline RETURN locations cannot inherit document offsets.
+- [x] Reconcile former SQL-body rejection tests with other routine languages.
+- [x] Thirty of the original 36 desired cases now pass; six header/DDL cases
+  remain. Focused controls, formatting, Clippy, Rustdoc, and diff hygiene pass.
+- [x] Repeat the private statement audit without placing private SQL in fixtures.
+- [x] Review semantics, ownership, comments/groups, idempotence, diagnostics,
+  atomicity, dependencies, and dead code; no dependencies added.

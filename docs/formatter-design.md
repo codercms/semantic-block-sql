@@ -1129,3 +1129,14 @@ prefix adapter. Inline authored boundaries and atomic body groups are preserved,
 with indentation accounted for in the body width budget. Parallel option values
 are explicitly reviewed. Nested unsupported failures retain the complete original
 routine and report body-relative locations shifted to the enclosing source.
+
+### Reviewed dollar-quoted SQL bodies
+
+The explicit remaining-support requirement supersedes the former non-PL/pgSQL
+rejection for LANGUAGE SQL. Declaration metadata is parsed in its owning
+statement frame; document-relative AST locations are never applied to slices.
+The AS literal is bound through its DefElem location and decoded AST value.
+Embedded SQL passes its own structural and protected-token comparison, while
+the outer declaration is compared with its original literal restored. No
+generic literal exemption is introduced. Multiline token continuation bytes
+are never indented. Unreviewed quoting or inner syntax preserves the routine.
