@@ -717,3 +717,15 @@ Rejected VALUES shapes use their parser-owned first expression location to bind
 a structural VALUES wrapper for diagnostics. If that provenance cannot be proven,
 the diagnostic retains its enclosing statement range. No text keyword guess is
 used to manufacture a source location.
+
+
+### SQL-standard body statement ownership
+
+A closed body specification distinguishes atomic statement lists from inline
+RETURN bodies, with a parser-proven SQL/RETURN kind for each child. Binding verifies
+semicolon cardinality within the body span. SQL children use the canonical engine;
+RETURN children replace only their owned keyword with the equal-length SELECT
+adapter, then restore it before whole-routine AST/protected-token validation.
+The body budget includes its four-space framing indentation. Authored groups and
+comments are preserved, and nested unsupported ranges are shifted into the
+routine's coordinates without permitting a partial routine rewrite.

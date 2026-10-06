@@ -1117,3 +1117,15 @@ Layout plans can still supply the following token's indentation without reducing
 that gap. Comment attachment and inter-statement spacing remain under their
 existing ownership rules. Synthetic fixtures cover dump index headers, line and
 block comments, multiple blank lines, and comments within query groups.
+
+
+### Reviewed SQL-standard multi-statement and RETURN bodies
+
+The explicit remaining-support requirement supersedes the former rejection of
+multi-statement SQL-standard bodies. SELECT/DML and RETURN are closed AST-owned
+body variants; unknown statement families remain unsupported. RETURN uses the
+canonical expression layout and safety gates through an equal-length SELECT
+prefix adapter. Inline authored boundaries and atomic body groups are preserved,
+with indentation accounted for in the body width budget. Parallel option values
+are explicitly reviewed. Nested unsupported failures retain the complete original
+routine and report body-relative locations shifted to the enclosing source.

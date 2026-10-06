@@ -68,8 +68,8 @@ fn preserves_adjacent_valid_but_unreviewed_syntax_byte_identically() {
             "SELECT * FROM JSON_TABLE(doc, '$[*]' COLUMNS (id int PATH '$.id')) jt;",
         ),
         (
-            "multi-statement SQL-standard routine",
-            "CREATE FUNCTION f() RETURNS void LANGUAGE SQL BEGIN ATOMIC SELECT 1; SELECT 2; END;",
+            "unreviewed SQL-standard body statement",
+            "CREATE FUNCTION f() RETURNS void LANGUAGE SQL BEGIN ATOMIC SELECT 1; CALL sample_proc(); END;",
         ),
     ]);
 }

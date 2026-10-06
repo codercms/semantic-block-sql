@@ -183,7 +183,11 @@ Reviewed support includes:
 
 ## SQL routines and PL/pgSQL
 
-Reviewed routine support includes SQL-standard `BEGIN ATOMIC` bodies within the supported body boundary and parser-backed PL/pgSQL formatting.
+Reviewed SQL-standard routines support single and multiple SELECT/DML statements
+in `BEGIN ATOMIC`, RETURN expressions inside atomic bodies, and inline SQL RETURN
+bodies. `PARALLEL SAFE`, `RESTRICTED`, and `UNSAFE` options are reviewed.
+Unsupported body statements or expressions preserve the complete routine.
+Parser-backed PL/pgSQL support is described below.
 
 PL/pgSQL coverage includes:
 
@@ -231,7 +235,7 @@ The following valid PostgreSQL forms are deliberately preserved as unsupported t
 - `XMLTABLE`;
 - `JSON_TABLE`;
 - advanced SQL-standard JSON query/value/aggregate forms that are not in the reviewed expression subset;
-- multi-statement SQL-standard `BEGIN ATOMIC` routine bodies;
+- SQL-standard routine body statements outside the reviewed SELECT/DML/RETURN boundary;
 - procedural transaction control;
 - ordered-set aggregate definitions and multi-setting `SET TRANSACTION` forms;
 - VALUES derived relations with ORDER BY suffixes.

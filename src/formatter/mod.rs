@@ -246,6 +246,10 @@ struct StatementFormatError {
 impl StatementFormatError {
     fn shifted(mut self, offset: usize) -> Self {
         self.source_range = self.source_range.map(|range| range.shifted(offset));
+        if let FormatDiagnostic::UnsupportedSyntax { start, end, .. } = &mut self.diagnostic {
+            *start += offset;
+            *end += offset;
+        }
         self
     }
 }

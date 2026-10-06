@@ -1444,3 +1444,27 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Review semantics, authored groups/comments, idempotence, diagnostics,
   atomicity, module boundaries, dependencies, and dead code. No dependencies,
   ownership-model expansions, or private domain fixtures were added.
+
+
+## SQL-standard multi-statement and RETURN implementation
+
+- [x] Model atomic statement lists and inline RETURN with closed AST body kinds;
+  verify statement cardinality in the token-bound body span.
+- [x] Route SELECT/DML through the canonical formatter and RETURN expressions
+  through an equal-length SELECT adapter, restoring the keyword before gates.
+- [x] Review all three PARALLEL modes and preserve authored inline/body groups,
+  comments, and indentation-aware width budgets.
+- [x] Shift nested unsupported ranges together with located safety errors;
+  retain whole-routine default/strict atomicity.
+- [x] Turn four original red cases green; twenty-nine of the original 36 now
+  pass, with seven remaining dollar-body/header/DDL cases.
+- [x] Cover body grouping, PARALLEL modes, all reviewed DML kinds, authored
+  inline RETURN boundaries, and local nested-unsupported/strict diagnostics.
+- [x] Reconcile former multi-statement rejection fixtures with still-unreviewed
+  body statements. Pass formatting, locked Clippy, Rustdoc, and diff hygiene.
+- [x] Run all targets: existing/control targets pass; only the seven pending
+  cases in the two desired-coverage targets remain red.
+- [x] Re-audit the private schema copy: 22 unsupported statements and 29 safety
+  skips remain. Keep its source and diagnostic artifacts outside the repository.
+- [x] Review semantics, ownership/layout boundaries, idempotence, comments,
+  diagnostics, atomicity, dependencies, and dead code; no dependencies added.
