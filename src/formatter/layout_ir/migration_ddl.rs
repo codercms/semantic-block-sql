@@ -171,11 +171,15 @@ pub(super) fn bind_trigger(
             *slot = true;
             let table = next_non_comment(tokens, cursor)
                 .ok_or_else(|| missing("transition TABLE is missing"))?;
-            let as_index = next_non_comment(tokens, table)
-                .ok_or_else(|| missing("transition AS is missing"))?;
-            let alias = next_non_comment(tokens, as_index)
+            let after_table = next_non_comment(tokens, table)
                 .ok_or_else(|| missing("transition alias is missing"))?;
-            if tokens[table].kind != Token::Table || tokens[as_index].kind != Token::As {
+            let alias = if tokens[after_table].kind == Token::As {
+                next_non_comment(tokens, after_table)
+                    .ok_or_else(|| missing("transition alias is missing"))?
+            } else {
+                after_table
+            };
+            if tokens[table].kind != Token::Table {
                 return Err(missing("trigger transition grammar disagrees with its AST"));
             }
             identifiers.push(alias);

@@ -407,6 +407,11 @@ the diagnostic covers its enclosing statement, starting at its first SQL token
 rather than attached leading comments. Skipped-statement messages use that same
 SQL statement line.
 
+Unsupported procedural SQL, including SELECT/RETURNING INTO children, retains
+`syntax.unsupported` and its SQL-leaf range. Default mode preserves that leaf
+while formatting the enclosing routine layout; strict mode keeps the complete
+document unchanged.
+
 Coordinates refer to the source the user can act on:
 
 - `check` and `diff` refer to the original input;

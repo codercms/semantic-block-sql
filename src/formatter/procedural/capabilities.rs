@@ -1,16 +1,12 @@
 //! Source capabilities proven by the pinned PL/pgSQL parser, not SQL keywords.
 use serde_json::Value;
 
-use super::super::{FormatDiagnostic, FormatOptions, SourceRange, tokens::tokenize};
+use super::super::{Diagnostic, FormatDiagnostic, FormatOptions, SourceRange, tokens::tokenize};
 use super::ir::{BodyNodeKind, RoutineBody};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum LeafCapability {
-    Into {
-        range: SourceRange,
-        prefix_tokens: usize,
-        strict: bool,
-    },
+    Into { range: SourceRange, strict: bool },
     TypeReference(SourceRange),
     Transaction,
 }
@@ -218,7 +214,6 @@ fn bind_sql(
     );
     Ok(Some(Some(LeafCapability::Into {
         range: SourceRange::new(removed[0].start, end),
-        prefix_tokens: prefix,
         strict: spec.strict,
     })))
 }
@@ -227,7 +222,7 @@ pub(super) fn format(
     source: &str,
     capability: Option<&LeafCapability>,
     options: &FormatOptions,
-) -> Result<Option<String>, FormatDiagnostic> {
+) -> Result<Option<(String, Vec<Diagnostic>)>, FormatDiagnostic> {
     let Some(capability) = capability else {
         return Ok(None);
     };
@@ -251,39 +246,65 @@ pub(super) fn format(
         LeafCapability::Transaction => {
             super::super::semantic_block::format_procedural_command(source, options)?
         }
-        LeafCapability::Into {
-            range,
-            prefix_tokens,
-            strict,
-        } => {
+        LeafCapability::Into { range, strict } => {
             let sql = format!("{} {}", &source[..range.start], &source[range.end..]);
             let formatted = super::super::format_sql(&sql, options)?;
-            if formatted.diagnostics.iter().any(|diagnostic| {
+            let child_diagnostics = formatted
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| !diagnostic.fix_available)
+                .cloned()
+                .map(|mut diagnostic| {
+                    let map = |offset: usize| {
+                        if offset <= range.start {
+                            offset
+                        } else {
+                            offset + range.end - range.start - 1
+                        }
+                    };
+                    diagnostic.source_range = SourceRange::new(
+                        map(diagnostic.source_range.start),
+                        map(diagnostic.source_range.end),
+                    );
+                    diagnostic
+                })
+                .collect::<Vec<_>>();
+            if child_diagnostics.iter().any(|diagnostic| {
                 matches!(
                     diagnostic.rule_id.as_str(),
                     "syntax.unsupported" | "format.statement_skipped"
                 )
             }) {
-                return Err(ownership("INTO SQL child is outside reviewed syntax"));
+                return Ok(Some((source.to_owned(), child_diagnostics)));
             }
+            // Normalize the same parser-owned SQL before binding its insertion
+            // boundary: allowed multiword aliases may change token cardinality.
+            let normalized = super::super::type_aliases::normalize(&sql, options, &[])?;
+            let boundary = normalized.map_boundary(range.start)?;
+            let prefix_tokens = significant(&normalized.output)?
+                .iter()
+                .take_while(|token| token.end <= boundary)
+                .count();
             let tokens = significant(&formatted.output)?;
-            if tokens.len() != significant(&sql)?.len() {
+            if tokens.len() != significant(&normalized.output)?.len() {
                 return Err(ownership("SQL token cardinality changed around INTO"));
             }
             let clause_tokens = significant(&source[range.start..range.end])?;
+            let owned_clause_tokens = tokenize(&source[range.start..range.end])?;
+            let trailing_lines = owned_clause_tokens.last().map_or(0, |token| {
+                source[range.start + token.end..range.end]
+                    .bytes()
+                    .filter(|&byte| byte == b'\n')
+                    .count()
+            });
             let target_start = clause_tokens[usize::from(*strict) + 1].start;
             let target = &source[range.start + target_start..range.end];
-            let target = super::format_query_fragment(&format!("SELECT {target}"), options)?;
-            let target = target
-                .strip_prefix("SELECT")
-                .ok_or_else(|| ownership("target adapter lost SELECT"))?
-                .trim_start();
             let mut prefix = source[range.start..range.start + target_start].to_owned();
             for token in clause_tokens.iter().take(usize::from(*strict) + 1).rev() {
                 prefix.replace_range(token.start..token.end, &token.text.to_ascii_uppercase());
             }
-            let clause = format!("{prefix}{target}");
-            let insert = tokens.get(*prefix_tokens).map_or_else(
+            let clause = format_into_targets(&prefix, target, options)?;
+            let insert = tokens.get(prefix_tokens).map_or_else(
                 || {
                     formatted
                         .output
@@ -299,19 +320,86 @@ pub(super) fn format(
                 .lines()
                 .last()
                 .map_or(0, |line| line.len() - line.trim_start().len());
-            format!(
+            let clause = clause.trim_end();
+            let clause_tokens = tokenize(clause)?;
+            let ends_line_comment = clause_tokens
+                .last()
+                .is_some_and(|token| token.text.starts_with("--"));
+            let output = format!(
                 "{before}\n{}{clause}{}{}",
                 " ".repeat(indent),
-                if after.starts_with(';') || after.is_empty() {
-                    ""
+                if trailing_lines > 0 || ends_line_comment {
+                    "\n".repeat(trailing_lines.max(1))
+                } else if after.starts_with(';') || after.is_empty() {
+                    String::new()
                 } else {
-                    "\n"
+                    "\n".to_owned()
                 },
                 after
-            )
+            );
+            return Ok(Some((output, child_diagnostics)));
         }
     };
-    Ok(Some(output))
+    Ok(Some((output, Vec::new())))
+}
+
+/// Targets use the canonical SQL list planner without flattening physical lines.
+/// The PL-owned introducer retains its own comments and exact target boundary.
+fn format_into_targets(
+    prefix: &str,
+    target: &str,
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
+    let prefix_tokens = tokenize(prefix)?;
+    let authored_lines = prefix_tokens.last().map_or(0, |token| {
+        prefix[token.end..]
+            .bytes()
+            .filter(|&byte| byte == b'\n')
+            .count()
+    });
+    let prefix = super::super::semantic_block::format_procedural_command(prefix, options)?;
+    let prefix = prefix.trim_end();
+    let tokens = tokenize(prefix)?;
+    let ends_comment = tokens
+        .last()
+        .is_some_and(|token| token.text.starts_with("--"));
+    let mut target_options = options.clone();
+    target_options.semicolon_policy = super::super::SemicolonPolicy::Omit;
+    let extra = if ends_comment || authored_lines > 0 {
+        0
+    } else {
+        prefix
+            .lines()
+            .last()
+            .map_or(0, |line| line.chars().count())
+            .saturating_sub("SELECT".len())
+    };
+    target_options.soft_line_width = options.soft_line_width.saturating_sub(extra).max(1);
+    target_options.hard_line_width = options
+        .hard_line_width
+        .saturating_sub(extra)
+        .max(target_options.soft_line_width);
+    // A synthetic terminator follows a physical newline, so a final -- comment
+    // cannot consume it. Only this terminator is omitted by the SQL adapter.
+    let adapted = format!("SELECT {target}\n;");
+    let formatted = super::super::format_sql(&adapted, &target_options)?;
+    let output = formatted
+        .output
+        .strip_prefix("SELECT")
+        .ok_or_else(|| ownership("target adapter lost SELECT"))?;
+    let separator = if output.starts_with('\n') || ends_comment || authored_lines > 0 {
+        "\n".repeat(authored_lines.max(1))
+    } else {
+        " ".to_owned()
+    };
+    Ok(format!(
+        "{prefix}{separator}{}",
+        if output.starts_with('\n') {
+            output.trim_start_matches('\n')
+        } else {
+            output.trim_start()
+        }
+    ))
 }
 
 fn ownership(message: &str) -> FormatDiagnostic {

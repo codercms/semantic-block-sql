@@ -1247,3 +1247,16 @@ Inner warnings map exact token identity and occurrence back to source bytes;
 optional type aliases do not invalidate surrounding token counts. Unprovable
 provenance retains the enclosing token range. Ordinary dollar literals retain
 literal ownership, and multiline comment fragments exclude CRLF terminators.
+
+### Independent review requirement resolution
+
+The seven independent-review reproductions are formatter defects within reviewed
+syntax, not new grammar requests. Comment attachment and blank boundaries take
+precedence over routine statement splitting and procedural target compactness.
+Header normalization must never consume locations from a different source frame.
+Routine header decisions use the shared group policy; both SQL body spellings
+share token-aware assembly/indentation. Unsupported procedural SQL children keep
+their diagnostic identity and bounded leaf range rather than becoming routine
+ownership failures. Default mode can format the enclosing procedural layout while
+preserving the unsupported SQL leaf exactly; strict mode returns the original
+complete document. The core specification remains authoritative.

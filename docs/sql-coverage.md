@@ -319,3 +319,13 @@ adapters, comparing canonical output, unsupported/skipped diagnostics, semantic
 equivalence where applicable, and idempotence. Permanent Go and Rust project
 goldens have the same decoded SQL corpus, including migrations and PL/pgSQL.
 This expands host integration evidence without adding PostgreSQL capabilities.
+
+## Independent review combination coverage
+
+[Review combination fixtures](../tests/review_combinations.rs) cover SQL header
+comment-whitespace normalization across RETURN/atomic/dollar bodies, inline and
+final body comments, atomic multiline literals, CTE plus derived VALUES owners,
+optional transition-table AS, procedural INTO alias expansion/contraction and
+modifiers, comment termination, target groups/widths/blank boundaries, and
+unsupported-child identity/ranges under default and strict policies. A VALUES
+subquery-element negative fixture retains that unreviewed boundary.

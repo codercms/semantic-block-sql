@@ -8,7 +8,7 @@ use crate::formatter::ownership::{
 };
 use crate::formatter::tokens::is_query_clause_start;
 
-/// Match parser-owned VALUES relations as counted groups within each statement.
+/// Match each parser-owned VALUES relation through its first-row provenance.
 /// Only a parenthesis whose first significant token is VALUES can own a derived
 /// relation; INSERT VALUES and partition-bound syntax cannot claim this role.
 pub(super) fn bind_values_relations(
@@ -43,35 +43,35 @@ pub(super) fn bind_values_relations(
             if tokens[keyword].kind != Token::Values {
                 continue;
             }
-            candidates.push(super::values::bind(
-                tokens,
-                structure,
-                keyword,
-                close,
-                Some((open, close)),
-            )?);
+            let values =
+                super::values::bind(tokens, structure, keyword, close, Some((open, close)))?;
+            candidates.push(values);
         }
-        let mut actual_counts = candidates
-            .iter()
-            .map(|values| super::values::capability(values, tokens, structure))
-            .collect::<Vec<_>>();
-        let mut expected_counts = expected.iter().map(|spec| spec.values).collect::<Vec<_>>();
-        let key = |spec: &crate::formatter::ownership::ValuesSpec| {
-            (
-                spec.rows,
-                spec.order_items,
-                spec.has_limit_count,
-                spec.has_limit_offset,
-            )
-        };
-        actual_counts.sort_unstable_by_key(key);
-        expected_counts.sort_unstable_by_key(key);
-        if actual_counts != expected_counts {
-            return Err(FormatDiagnostic::Ownership(format!(
-                "VALUES relation ownership in statement {statement_index} expected row counts {expected_counts:?}, found {actual_counts:?}"
-            )));
+        let mut claimed = HashSet::new();
+        for spec in expected {
+            let (index, values) = candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, values)| {
+                    let (open, close) = values.rows[0];
+                    tokens[open].start < spec.anchor && spec.anchor < tokens[close].end
+                })
+                .min_by_key(|(_, values)| {
+                    let (open, close) = values.rows[0];
+                    close - open
+                })
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("VALUES relation anchor has no owned row".into())
+                })?;
+            if !claimed.insert(index)
+                || super::values::capability(values, tokens, structure) != spec.values
+            {
+                return Err(FormatDiagnostic::Ownership(
+                    "VALUES relation provenance disagrees with its AST".into(),
+                ));
+            }
+            result.push(values.clone());
         }
-        result.extend(candidates);
     }
     Ok(result)
 }

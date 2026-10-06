@@ -1,9 +1,9 @@
 # 0.3.0 formatter coverage and regression report
 
-The migration coverage work adds **107 tests** relative to the main branch after
+The migration coverage work adds **122 tests** relative to the main branch after
 the authored-layout fix. The original 36 regression/desired-support cases and
 all 22 follow-up migration cases are green. The complete local suite passes
-**454 tests** across 57 all-target test invocations, including Go/Rust SQL parity.
+**469 tests** across 58 all-target test invocations, including Go/Rust SQL parity.
 
 Fixtures use invented schema, object, parameter, and literal names. Production
 SQL and domains were not copied into the repository. Private audits ran on local
@@ -71,3 +71,26 @@ protected-token equivalence and byte idempotence remain mandatory. No formatter
 safety gate was weakened, and no dependencies or parser-backend revisions were
 added. The application version is 0.3.0; the optimized Windows build is verified
 separately from the test build.
+
+## Independent review follow-up
+
+The independent review at 9640ff9 found seven reproducible defects not exercised
+by the initial feature fixtures. [Fifteen combination tests](../tests/review_combinations.rs)
+now cover those defects and neighboring comment, literal, grouping, width,
+configuration and unsupported-policy boundaries.
+
+| Review finding | Fix |
+| --- | --- |
+| Header whitespace normalization consumed stale AST offsets | Bind header layout before normalization and reparse the complete laid-out declaration before location-owned casing; RETURN, atomic and dollar forms are covered. |
+| Atomic/dollar splitting detached trailing inline comments | A shared body assembler owns same-line trailing comments before splitting and preserves standalone/blank groups. |
+| VALUES CTE wrappers collided with derived relations | Each derived relation retains a first-row AST anchor; bind its unique enclosing owner and verify its capability. |
+| Alias token-count changes broke procedural INTO | Map the insertion boundary through exact parser-owned alias edits before binding formatted SQL. Expansion, contraction, modifiers and RETURNING are covered. |
+| INTO target formatting flattened line comments | Use the canonical target-list planner without joining lines; retain introducer/target comment termination, blank boundaries and comma breakpoints. |
+| Transition-table aliases incorrectly required AS | Bind the parser-accepted optional AS spelling without inserting or deleting syntax. |
+| Unsupported INTO children became generic routine failures | Return the child diagnostic identity with its removed-span coordinates restored, then shift through the SQL leaf and routine frames; default/strict controls pass. |
+
+The two architecture concerns are also addressed: atomic and dollar bodies share
+width, statement/gap and token-aware indentation, and routine header/list/literal
+expansion uses LayoutGroup::decide. A related atomic multiline-literal regression
+is covered. Unsupported VALUES subquery elements remain an explicit negative
+boundary rather than gaining accidental support.

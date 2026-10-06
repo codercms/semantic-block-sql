@@ -242,8 +242,8 @@ fn format_leaf(
         .saturating_sub(indent_width)
         .max(nested_options.soft_line_width);
     nested_options.semicolon_policy = super::SemicolonPolicy::Preserve;
-    if let Some(output) = capabilities::format(text, capability, &nested_options)? {
-        return Ok((output, Vec::new()));
+    if let Some(formatted) = capabilities::format(text, capability, &nested_options)? {
+        return Ok(formatted);
     }
     if kind == ir::BodyNodeKind::Sql {
         let formatted = super::format_sql(text, &nested_options)?;

@@ -297,6 +297,22 @@ fn collect_query_specs(
             validate_values_select(query)?;
             values_relations.push(ValuesRelationSpec {
                 statement_index,
+                anchor: query
+                    .values_lists
+                    .first()
+                    .and_then(|row| row.node.as_ref())
+                    .and_then(|row| {
+                        let NodeEnum::List(row) = row else {
+                            return None;
+                        };
+                        row.items
+                            .iter()
+                            .filter_map(|item| {
+                                item.node.as_ref().and_then(first_expression_location)
+                            })
+                            .min()
+                    })
+                    .ok_or("unlocated VALUES derived relation")?,
                 values: values_spec(query),
             });
         }

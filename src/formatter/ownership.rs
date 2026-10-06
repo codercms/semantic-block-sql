@@ -59,6 +59,8 @@ pub(super) struct ValuesSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ValuesRelationSpec {
     pub statement_index: usize,
+    /// Byte location of an expression in the first row of this RangeSubselect.
+    pub anchor: usize,
     pub values: ValuesSpec,
 }
 

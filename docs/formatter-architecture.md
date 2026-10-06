@@ -755,3 +755,17 @@ Routine headers bind their original AST locations before any whitespace
 normalization. The complete declaration is reparsed after header layout so
 location-owned casing uses the new source frame. Header, signature-list and
 external-literal expansion use the shared LayoutGroup::decide policy.
+
+VALUES derived relations retain the first-row expression anchor from their
+RangeSubselect provenance. Binding chooses the smallest enclosing first-row
+owner and verifies its exact capability and unique claim; CTE bodies cannot
+satisfy a derived-relation count accidentally.
+
+The procedural INTO adapter maps its insertion boundary through exact
+parser-owned type-alias edit ranges before binding canonical SQL tokens. Target
+lists use the canonical SQL list planner without joining physical lines;
+introducer/target comments and blank boundaries remain explicit. Child
+unsupported/skipped diagnostics are returned with the removed INTO span mapped
+back into leaf source coordinates, then shifted through the procedural node and
+routine-body frames. Strict-policy and complete-file atomicity remain owned by
+the facade.

@@ -1636,10 +1636,10 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Reproduce all seven reported issues with invented fixtures.
 - [x] Add an atomic multiline-literal regression for the duplicated body renderer.
 - [x] Rebind normalized routine header locations and unify body assembly.
-- [ ] Bind VALUES relations by AST provenance and accept optional transition AS.
-- [ ] Restore procedural INTO through mapped boundaries; preserve comments and child diagnostics.
+- [x] Bind VALUES relations by AST provenance and accept optional transition AS.
+- [x] Restore procedural INTO through mapped boundaries; preserve comments and child diagnostics.
 - [x] Route routine header expansion through the shared layout policy.
-- [ ] Run full gates and repeat private-copy audits; update the PR and installed binary.
+- [x] Run full gates and repeat private-copy audits; update the PR and installed binary.
 
 ### SQL routine ownership and assembly review batch
 
@@ -1651,3 +1651,23 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   external routine targets pass; five other review regressions remain pending.
 - Header/list/literal expansion uses LayoutGroup::decide. No parser, dependency,
   fallback, or safety exemption was added.
+
+### VALUES/trigger/procedural ownership review batch
+
+- [x] Bind derived VALUES from AST first-row anchors with unique ownership and
+  capability verification; keep unreviewed neighboring syntax unsupported.
+- [x] Bind optional transition AS without altering the authored spelling.
+- [x] Remove stale INTO ordinal metadata; retain exact alias edit ranges and map
+  the insertion boundary before canonical SQL token binding.
+- [x] Keep the canonical target-list planner, line-comment terminators, authored
+  comma groups and blank boundaries; include STRICT prefix width in budgets.
+- [x] Return child diagnostic identity with leaf coordinates restored through
+  the removed INTO span; test default/strict and Unicode/CRLF frames.
+- [x] Pass all 469 tests across 58 targets and all five required engineering gates.
+- [x] Verify fresh private copies: zero unsupported/skipped/errors, clean check,
+  byte-identical repeat fmt, 873 preserved header gaps and eight correctly located
+  permitted indivisible-width warnings.
+- [x] Rebuild/install 0.3.0 on PATH with a matching hash and update PR #49.
+- [x] Self-review semantic preservation, module/ownership boundaries, idempotence,
+  comments/groups, diagnostic frames, atomicity, dependencies and dead code.
+  No parser/fallback/dependency or safety exemption was added.
