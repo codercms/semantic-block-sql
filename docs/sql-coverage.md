@@ -401,4 +401,4 @@ and displayed indentation. Synthetic fixtures exercise inclusive soft boundaries
 across SELECT, NOT MATERIALIZED CTEs, INSERT, UPDATE FROM, DELETE USING and SQL
 routines with the opener preference enabled/disabled. Root inline authored groups,
 comment attachment, blank gaps, structural equivalence and repeated fmt/check
-are covered; no PostgreSQL syntax capability changes in this batch.
+are covered; no PostgreSQL syntax capability changes are introduced.

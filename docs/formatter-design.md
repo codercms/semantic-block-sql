@@ -1323,12 +1323,11 @@ CHECK and grammar-specific query/list wrappers keep their existing policies.
 
 ### Complete JOIN header width
 
-The explicit request to expand the remaining long JOIN ON regression permits
-splitting an otherwise compact one-line JOIN predicate when its complete
-rendered owner line exceeds soft width. Measure the JOIN header, ON, predicate
-and contextual display indentation together; predicate-only width is incorrect.
-Preserve authored multiline predicate groups that fit hard width, plus comments
-and blank gaps. This is a reviewed JOIN-specific readability preference, not a
+A compact one-line JOIN predicate splits when its complete rendered owner line
+exceeds soft width. Measure the JOIN header, ON, predicate and contextual
+display indentation together; predicate-only width is incorrect. Preserve
+authored multiline predicate groups that fit hard width, plus comments and
+blank gaps. This is a reviewed JOIN-specific readability preference, not a
 soft-width violation or a new PostgreSQL capability.
 
 Retain compact JOIN candidates during structural Boolean classification. After
