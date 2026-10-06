@@ -16,13 +16,15 @@ pub(super) mod equivalence;
 pub use equivalence::validate_equivalent;
 
 use super::ownership::{
-    AliasSpec, AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec, ConflictActionSpec,
-    ConflictSpec, CreateIndexSpec, CreateTableElementSpec, CreateTableSpec, CteStatementSpec,
-    DeleteSpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec,
-    MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec, RelationItemSpec,
-    RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec,
-    SelectSpec, StatementSpec, SupportedDocument, UpdateSpec, UtilityStatementKind, ValuesSpec,
-    ViewCheckSpec, ViewSpec, source_statement,
+    AggregateSignatureSpec, AliasSpec, AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec,
+    ArrayListSpec, ConflictActionSpec, ConflictSpec, CreateIndexSpec, CreateTableElementSpec,
+    CreateTableSpec, CteStatementSpec, DeleteSpec, ForeignKeyAction, ForeignKeySpec,
+    FunctionCallSpec, IdentitySpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec,
+    MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec,
+    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
+    RelationListSpec, SelectSpec, SequenceOptionKind, SequenceSpec, StatementSpec,
+    SupportedDocument, TriggerSpec, TriggerTiming, UpdateSpec, UtilityStatementKind,
+    ValuesRelationSpec, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -71,6 +73,10 @@ pub(super) fn parse_supported_postgresql(
     }
 
     let mut queries = Vec::new();
+    let mut values_relations = Vec::new();
+    let mut function_calls = Vec::new();
+    let source_tokens = super::tokens::tokenize(source)?;
+    let mut arrays = Vec::new();
     for (statement_index, raw) in parsed.protobuf.stmts.iter().enumerate() {
         let root = raw
             .stmt
@@ -81,17 +87,30 @@ pub(super) fn parse_supported_postgresql(
                 start: 0,
                 end: source.len(),
             })?;
-        collect_query_specs(root, statement_index, &mut queries).map_err(|feature| {
-            FormatDiagnostic::UnsupportedSyntax {
-                feature: feature.into(),
-                start: 0,
-                end: source.len(),
-            }
+        collect_query_specs(
+            root,
+            statement_index,
+            &mut queries,
+            &mut values_relations,
+            &source_tokens,
+            &mut function_calls,
+            &mut arrays,
+        )
+        .map_err(|feature| FormatDiagnostic::UnsupportedSyntax {
+            feature: feature.into(),
+            start: 0,
+            end: source.len(),
         })?;
     }
     queries.sort_by_key(|query| (query.statement_index, query.anchor.unwrap_or(usize::MAX)));
 
-    Ok(SupportedDocument::with_queries(statements, queries))
+    Ok(SupportedDocument::with_queries(
+        statements,
+        queries,
+        values_relations,
+        function_calls,
+        arrays,
+    ))
 }
 
 /// Walk every reviewed PostgreSQL child field that semblock depends on.
@@ -116,6 +135,31 @@ where
     F: for<'a> FnMut(NodeRef<'a>, Context) -> Result<(), &'static str>,
 {
     match node {
+        NodeRef::CreateStmt(statement) => walk_nodes(&statement.table_elts, visitor)?,
+        NodeRef::AlterTableStmt(statement) => walk_nodes(&statement.cmds, visitor)?,
+        NodeRef::AlterTableCmd(action) => walk_optional_node(action.def.as_deref(), visitor)?,
+        NodeRef::ColumnDef(column) => {
+            walk_optional_node(column.raw_default.as_deref(), visitor)?;
+            walk_nodes(&column.constraints, visitor)?;
+        }
+        NodeRef::CreateDomainStmt(statement) => walk_nodes(&statement.constraints, visitor)?,
+        NodeRef::CreateTrigStmt(statement) => {
+            walk_optional_node(statement.when_clause.as_deref(), visitor)?
+        }
+        NodeRef::CreatePolicyStmt(statement) => {
+            walk_optional_node(statement.qual.as_deref(), visitor)?;
+            walk_optional_node(statement.with_check.as_deref(), visitor)?;
+        }
+        NodeRef::AlterPolicyStmt(statement) => {
+            walk_optional_node(statement.qual.as_deref(), visitor)?;
+            walk_optional_node(statement.with_check.as_deref(), visitor)?;
+        }
+        NodeRef::AArrayExpr(array) => walk_nodes(&array.elements, visitor)?,
+        NodeRef::Constraint(constraint) => {
+            walk_optional_node(constraint.raw_expr.as_deref(), visitor)?;
+            walk_optional_node(constraint.where_clause.as_deref(), visitor)?;
+            walk_nodes(&constraint.exclusions, visitor)?;
+        }
         NodeRef::SelectStmt(select) => {
             walk_nodes(&select.distinct_clause, visitor)?;
             walk_nodes(&select.window_clause, visitor)?;
@@ -188,13 +232,145 @@ fn collect_query_specs(
     root: &NodeEnum,
     statement_index: usize,
     queries: &mut Vec<QuerySpec>,
+    values_relations: &mut Vec<ValuesRelationSpec>,
+    source_tokens: &[super::tokens::SqlToken<'_>],
+    function_calls: &mut Vec<FunctionCallSpec>,
+    arrays: &mut Vec<ArrayListSpec>,
 ) -> Result<(), &'static str> {
     walk_complete_tree(root, &mut |node, _| {
+        if let NodeRef::AArrayExpr(array) = node {
+            arrays.push(ArrayListSpec {
+                location: usize::try_from(array.location)
+                    .map_err(|_| "unlocated array constructor")?,
+                elements: array.elements.len(),
+            });
+        }
+        if let NodeRef::FuncCall(call) = node {
+            match pg_query::protobuf::CoercionForm::try_from(call.funcformat) {
+                Ok(pg_query::protobuf::CoercionForm::CoerceExplicitCall) if call.location >= 0 => {
+                    let location = usize::try_from(call.location)
+                        .map_err(|_| "unlocated explicit function call")?;
+                    let name = string_nodes(&call.funcname, "function call name")?;
+                    let keyword = source_tokens
+                        .iter()
+                        .find(|token| token.start == location)
+                        .map(|token| token.kind);
+                    let operator_escape = match (name.as_slice(), keyword) {
+                        (
+                            [schema, function],
+                            Some(
+                                keyword @ (pg_query::protobuf::Token::Like
+                                | pg_query::protobuf::Token::Ilike),
+                            ),
+                        ) if schema == "pg_catalog" && function == "like_escape" => Some(keyword),
+                        ([schema, function], Some(pg_query::protobuf::Token::Similar))
+                            if schema == "pg_catalog" && function == "similar_to_escape" =>
+                        {
+                            Some(pg_query::protobuf::Token::Similar)
+                        }
+                        _ => None,
+                    };
+                    function_calls.push(match operator_escape {
+                        Some(keyword) => FunctionCallSpec::OperatorEscape { location, keyword },
+                        None => FunctionCallSpec::Named {
+                            location,
+                            arguments: function_argument_spec(call, &name),
+                            name,
+                        },
+                    });
+                }
+                // PostgreSQL synthesizes unlocated helper calls for LIKE /
+                // SIMILAR escapes. They have no authored call-name token.
+                Ok(
+                    pg_query::protobuf::CoercionForm::CoerceExplicitCall
+                    | pg_query::protobuf::CoercionForm::CoerceSqlSyntax,
+                ) => {}
+                _ => return Err("unreviewed function call coercion form"),
+            }
+        }
         if let NodeRef::SelectStmt(select) = node {
             push_query_spec(select, statement_index, queries)?;
         }
+        if let NodeRef::RangeSubselect(source) = node
+            && let Some(NodeEnum::SelectStmt(query)) = source
+                .subquery
+                .as_deref()
+                .and_then(|node| node.node.as_ref())
+            && is_values_select_shape(query)
+        {
+            validate_values_select(query)?;
+            values_relations.push(ValuesRelationSpec {
+                statement_index,
+                anchor: query
+                    .values_lists
+                    .first()
+                    .and_then(|row| row.node.as_ref())
+                    .and_then(|row| {
+                        let NodeEnum::List(row) = row else {
+                            return None;
+                        };
+                        row.items
+                            .iter()
+                            .filter_map(|item| {
+                                item.node.as_ref().and_then(first_expression_location)
+                            })
+                            .min()
+                    })
+                    .ok_or("unlocated VALUES derived relation")?,
+                values: values_spec(query),
+            });
+        }
         Ok(())
     })
+}
+
+fn function_argument_spec(
+    call: &pg_query::protobuf::FuncCall,
+    name: &[String],
+) -> super::ownership::FunctionArgumentSpec {
+    use super::ownership::FunctionArgumentSpec;
+    let function = match name {
+        [function] => function.as_str(),
+        [schema, function] if schema == "pg_catalog" => function.as_str(),
+        _ => return FunctionArgumentSpec::Ordinary,
+    };
+    if call.func_variadic
+        || call.agg_star
+        || call.agg_within_group
+        || call
+            .args
+            .iter()
+            .any(|arg| matches!(arg.node.as_ref(), Some(NodeEnum::NamedArgExpr(_))))
+    {
+        return FunctionArgumentSpec::Ordinary;
+    }
+    let pairs = match function {
+        "json_build_object" | "jsonb_build_object"
+            if !call.args.is_empty()
+                && call.args.len() % 2 == 0
+                && call.agg_order.is_empty()
+                && !call.agg_distinct =>
+        {
+            call.args.len() / 2
+        }
+        "json_object_agg"
+        | "jsonb_object_agg"
+        | "json_object_agg_strict"
+        | "jsonb_object_agg_strict"
+        | "json_object_agg_unique"
+        | "jsonb_object_agg_unique"
+        | "json_object_agg_unique_strict"
+        | "jsonb_object_agg_unique_strict"
+            if call.args.len() == 2 =>
+        {
+            1
+        }
+        _ => return FunctionArgumentSpec::Ordinary,
+    };
+    FunctionArgumentSpec::KeyValuePairs {
+        pairs,
+        order_items: call.agg_order.len(),
+    }
 }
 
 fn push_query_spec(
@@ -262,6 +438,10 @@ fn validated_nested_cte_specs(node: &NodeEnum) -> Result<Vec<CteStatementSpec>, 
             .and_then(|query| query.node.as_ref())
             .ok_or("empty common table expression")?;
         let spec = match query {
+            NodeEnum::SelectStmt(select) if is_values_select_shape(select) => {
+                validate_values_select(select)?;
+                StatementSpec::Values(values_spec(select))
+            }
             NodeEnum::SelectStmt(select) => {
                 StatementSpec::Select(validate_select(select, with_clause.recursive)?)
             }
@@ -291,9 +471,7 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
     match node {
         NodeEnum::SelectStmt(select) if is_values_select_shape(select) => {
             validate_values_select(select)?;
-            Ok(StatementSpec::Values(ValuesSpec {
-                rows: select.values_lists.len(),
-            }))
+            Ok(StatementSpec::Values(values_spec(select)))
         }
         NodeEnum::SelectStmt(select) => Ok(StatementSpec::Select(validate_select(select, false)?)),
         NodeEnum::InsertStmt(insert) => {
@@ -325,6 +503,25 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
             Ok(StatementSpec::CreateTable(validate_create_table(create)?))
         }
         NodeEnum::IndexStmt(index) => Ok(StatementSpec::CreateIndex(validate_create_index(index)?)),
+        NodeEnum::AlterTableStmt(alter)
+            if ObjectType::try_from(alter.objtype).unwrap_or(ObjectType::Undefined)
+                == ObjectType::ObjectIndex =>
+        {
+            validate_index_attachment(alter)?;
+            Ok(StatementSpec::Utility(
+                UtilityStatementKind::AttachIndexPartition,
+            ))
+        }
+        NodeEnum::VariableSetStmt(setting) => {
+            validate_session_setting(setting)?;
+            Ok(StatementSpec::Utility(UtilityStatementKind::Set))
+        }
+        NodeEnum::DefineStmt(aggregate)
+            if ObjectType::try_from(aggregate.kind).unwrap_or(ObjectType::Undefined)
+                == ObjectType::ObjectAggregate =>
+        {
+            Ok(StatementSpec::Utility(validate_aggregate(aggregate)?))
+        }
         NodeEnum::AlterTableStmt(alter) => {
             Ok(StatementSpec::AlterTable(validate_alter_table(alter)?))
         }
@@ -368,21 +565,21 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
                 validate_column_def(column)?;
             }
             Ok(StatementSpec::Utility(
-                UtilityStatementKind::CreateCompositeType,
+                UtilityStatementKind::CreateCompositeType {
+                    fields: statement.coldeflist.len(),
+                },
             ))
         }
         NodeEnum::CreateDomainStmt(statement) => {
             validate_domain(statement)?;
             Ok(StatementSpec::Utility(UtilityStatementKind::CreateDomain))
         }
-        NodeEnum::CreateSeqStmt(statement) => {
-            validate_sequence(statement)?;
-            Ok(StatementSpec::Utility(UtilityStatementKind::CreateSequence))
-        }
-        NodeEnum::CreateTrigStmt(statement) => {
-            validate_trigger(statement)?;
-            Ok(StatementSpec::Utility(UtilityStatementKind::CreateTrigger))
-        }
+        NodeEnum::CreateSeqStmt(statement) => Ok(StatementSpec::Utility(
+            UtilityStatementKind::CreateSequence(validate_sequence(statement)?),
+        )),
+        NodeEnum::CreateTrigStmt(statement) => Ok(StatementSpec::Utility(
+            UtilityStatementKind::CreateTrigger(validate_trigger(statement)?),
+        )),
         NodeEnum::CreatePolicyStmt(statement) => {
             validate_policy(statement)?;
             Ok(StatementSpec::Utility(UtilityStatementKind::CreatePolicy))
@@ -554,6 +751,130 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
         NodeEnum::DoStmt(_) => Err("DO block"),
         _ => Err("unimplemented PostgreSQL statement family"),
     }
+}
+
+fn validate_session_setting(
+    setting: &pg_query::protobuf::VariableSetStmt,
+) -> Result<(), &'static str> {
+    use pg_query::protobuf::VariableSetKind;
+    let kind = VariableSetKind::try_from(setting.kind).unwrap_or(VariableSetKind::Undefined);
+    if setting.name.is_empty()
+        || !matches!(
+            kind,
+            VariableSetKind::VarSetValue
+                | VariableSetKind::VarSetDefault
+                | VariableSetKind::VarSetCurrent
+        )
+    {
+        return Err("unreviewed session setting form");
+    }
+    if setting
+        .args
+        .iter()
+        .any(|argument| !matches!(argument.node.as_ref(), Some(NodeEnum::AConst(_))))
+    {
+        return Err("unreviewed session setting value");
+    }
+    Ok(())
+}
+
+fn validate_index_attachment(alter: &AlterTableStmt) -> Result<(), &'static str> {
+    if alter.relation.is_none() || alter.missing_ok || alter.cmds.len() != 1 {
+        return Err("unreviewed ALTER INDEX attachment shape");
+    }
+    let Some(NodeEnum::AlterTableCmd(command)) = alter.cmds[0].node.as_ref() else {
+        return Err("unrecognized ALTER INDEX action");
+    };
+    if AlterTableType::try_from(command.subtype).unwrap_or(AlterTableType::Undefined)
+        != AlterTableType::AtAttachPartition
+        || command.missing_ok
+        || command.recurse
+    {
+        return Err("unreviewed ALTER INDEX action");
+    }
+    let Some(NodeEnum::PartitionCmd(partition)) =
+        command.def.as_deref().and_then(|node| node.node.as_ref())
+    else {
+        return Err("ALTER INDEX attachment without partition ownership");
+    };
+    if partition.name.is_none() || partition.bound.is_some() || partition.concurrent {
+        return Err("unreviewed index partition attachment");
+    }
+    Ok(())
+}
+
+fn validate_aggregate(
+    aggregate: &pg_query::protobuf::DefineStmt,
+) -> Result<UtilityStatementKind, &'static str> {
+    if aggregate.oldstyle || aggregate.defnames.is_empty() || aggregate.if_not_exists {
+        return Err("unreviewed aggregate definition form");
+    }
+    let [parameters, ordered] = aggregate.args.as_slice() else {
+        return Err("aggregate without signature ownership");
+    };
+    let (signature, parameters) = match parameters.node.as_ref() {
+        None => (AggregateSignatureSpec::Star, &[][..]),
+        Some(NodeEnum::List(parameters)) => (
+            AggregateSignatureSpec::Parameters {
+                count: parameters.items.len(),
+            },
+            parameters.items.as_slice(),
+        ),
+        _ => return Err("unrecognized aggregate signature"),
+    };
+    if !matches!(ordered.node.as_ref(), Some(NodeEnum::Integer(value)) if value.ival == -1) {
+        return Err("ordered-set aggregate signature");
+    }
+    for parameter in parameters {
+        let Some(NodeEnum::FunctionParameter(parameter)) = parameter.node.as_ref() else {
+            return Err("unrecognized aggregate parameter");
+        };
+        if parameter.arg_type.is_none()
+            || parameter.defexpr.is_some()
+            || !matches!(
+                pg_query::protobuf::FunctionParameterMode::try_from(parameter.mode),
+                Ok(pg_query::protobuf::FunctionParameterMode::FuncParamIn
+                    | pg_query::protobuf::FunctionParameterMode::FuncParamDefault)
+            )
+        {
+            return Err("unreviewed aggregate parameter shape");
+        }
+    }
+    validate_def_elements(&aggregate.definition, "aggregate option")?;
+    for option in &aggregate.definition {
+        let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
+            return Err("unrecognized aggregate option");
+        };
+        if !matches!(
+            option.defname.as_str(),
+            "sfunc"
+                | "stype"
+                | "sspace"
+                | "finalfunc"
+                | "finalfunc_extra"
+                | "finalfunc_modify"
+                | "combinefunc"
+                | "serialfunc"
+                | "deserialfunc"
+                | "initcond"
+                | "msfunc"
+                | "minvfunc"
+                | "mstype"
+                | "msspace"
+                | "mfinalfunc"
+                | "mfinalfunc_extra"
+                | "mfinalfunc_modify"
+                | "minitcond"
+                | "sortop"
+                | "parallel"
+        ) {
+            return Err("unreviewed aggregate option");
+        }
+    }
+    Ok(UtilityStatementKind::CreateAggregate {
+        signature,
+        options: aggregate.definition.len(),
+    })
 }
 
 fn validate_transaction(statement: &TransactionStmt) -> Result<UtilityStatementKind, &'static str> {
@@ -823,35 +1144,85 @@ fn validate_domain(statement: &CreateDomainStmt) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn validate_sequence(statement: &CreateSeqStmt) -> Result<(), &'static str> {
+fn validate_sequence(statement: &CreateSeqStmt) -> Result<SequenceSpec, &'static str> {
     if statement.sequence.is_none() || statement.for_identity {
         return Err("unreviewed CREATE SEQUENCE form");
     }
-    for option in &statement.options {
+    validate_sequence_options(&statement.options, false)
+}
+
+fn validate_sequence_options(
+    source_options: &[Node],
+    identity: bool,
+) -> Result<SequenceSpec, &'static str> {
+    let mut options = [None; 9];
+    if source_options.len() > options.len() {
+        return Err("too many sequence options");
+    }
+    for (slot, option) in options.iter_mut().zip(source_options) {
         let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
             return Err("unrecognized sequence option");
         };
-        if !matches!(
-            option.defname.as_str(),
-            "as" | "increment" | "minvalue" | "maxvalue" | "start" | "cache" | "cycle" | "owned_by"
-        ) {
-            return Err("unreviewed sequence option");
-        }
+        let kind = match option.defname.as_str() {
+            "as" => SequenceOptionKind::As,
+            "increment" => SequenceOptionKind::Increment,
+            "minvalue" => SequenceOptionKind::MinValue,
+            "maxvalue" => SequenceOptionKind::MaxValue,
+            "start" => SequenceOptionKind::Start,
+            "cache" => SequenceOptionKind::Cache,
+            "cycle" => SequenceOptionKind::Cycle,
+            "owned_by" => SequenceOptionKind::OwnedBy,
+            "sequence_name" if identity => SequenceOptionKind::SequenceName,
+            _ => return Err("unreviewed sequence option"),
+        };
+        *slot = Some((
+            kind,
+            usize::try_from(option.location).map_err(|_| "unlocated sequence option")?,
+        ));
     }
-    Ok(())
+    Ok(SequenceSpec { options })
 }
 
-fn validate_trigger(statement: &CreateTrigStmt) -> Result<(), &'static str> {
+fn validate_trigger(statement: &CreateTrigStmt) -> Result<TriggerSpec, &'static str> {
     if statement.relation.is_none() || statement.funcname.is_empty() {
         return Err("incomplete CREATE TRIGGER");
     }
-    if !statement.transition_rels.is_empty() {
-        return Err("transition tables in CREATE TRIGGER");
+    let mut old_table = false;
+    let mut new_table = false;
+    for transition in &statement.transition_rels {
+        let Some(NodeEnum::TriggerTransition(transition)) = transition.node.as_ref() else {
+            return Err("unrecognized trigger transition relation");
+        };
+        if !transition.is_table || transition.name.is_empty() {
+            return Err("unreviewed trigger transition relation");
+        }
+        let slot = if transition.is_new {
+            &mut new_table
+        } else {
+            &mut old_table
+        };
+        if *slot {
+            return Err("duplicate trigger transition relation");
+        }
+        *slot = true;
     }
     if let Some(expression) = statement.when_clause.as_deref() {
         validate_ddl_expression(expression)?;
     }
-    Ok(())
+    Ok(TriggerSpec {
+        // PostgreSQL's trigger timing bit flags: BEFORE=2, INSTEAD=64,
+        // AFTER=0. These are part of the pinned PostgreSQL AST contract.
+        timing: match statement.timing {
+            0 => TriggerTiming::After,
+            2 => TriggerTiming::Before,
+            64 => TriggerTiming::InsteadOf,
+            _ => return Err("unreviewed trigger timing"),
+        },
+        old_table,
+        new_table,
+        columns: statement.columns.len(),
+        has_when: statement.when_clause.is_some(),
+    })
 }
 
 fn validate_policy(statement: &CreatePolicyStmt) -> Result<(), &'static str> {
@@ -895,9 +1266,12 @@ fn validate_view(view: &ViewStmt) -> Result<ViewSpec, &'static str> {
         Some(NodeEnum::SelectStmt(query)) => validate_select(query, false)?,
         _ => return Err("CREATE VIEW without a SELECT query"),
     };
-    if query.has_with {
-        return Err("CREATE VIEW query with WITH clause");
-    }
+    let ctes = validated_nested_cte_specs(
+        view.query
+            .as_deref()
+            .and_then(|query| query.node.as_ref())
+            .ok_or("CREATE VIEW without a query")?,
+    )?;
     let check = match ViewCheckOption::try_from(view.with_check_option)
         .unwrap_or(ViewCheckOption::Undefined)
     {
@@ -912,6 +1286,7 @@ fn validate_view(view: &ViewStmt) -> Result<ViewSpec, &'static str> {
         options: view.options.len(),
         check,
         query,
+        ctes,
     })
 }
 
@@ -954,9 +1329,13 @@ fn validate_materialized_view(
         Some(NodeEnum::SelectStmt(query)) => validate_select(query, false)?,
         _ => return Err("CREATE MATERIALIZED VIEW without a SELECT query"),
     };
-    if query.has_with {
-        return Err("materialized-view query with WITH clause");
-    }
+    let ctes = validated_nested_cte_specs(
+        create
+            .query
+            .as_deref()
+            .and_then(|query| query.node.as_ref())
+            .ok_or("CREATE MATERIALIZED VIEW without a query")?,
+    )?;
     Ok(MaterializedViewSpec {
         if_not_exists: create.if_not_exists,
         aliases: into.col_names.len(),
@@ -965,6 +1344,7 @@ fn validate_materialized_view(
         has_tablespace: !into.table_space_name.is_empty(),
         skip_data: into.skip_data,
         query,
+        ctes,
     })
 }
 
@@ -999,6 +1379,15 @@ fn validate_values_select(select: &SelectStmt) -> Result<(), &'static str> {
         }
     }
     Ok(())
+}
+
+fn values_spec(select: &SelectStmt) -> ValuesSpec {
+    ValuesSpec {
+        rows: select.values_lists.len(),
+        order_items: select.sort_clause.len(),
+        has_limit_count: select.limit_count.is_some(),
+        has_limit_offset: select.limit_offset.is_some(),
+    }
 }
 
 fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'static str> {
@@ -1060,6 +1449,7 @@ fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'stati
                 }
                 elements.push(CreateTableElementSpec::Column {
                     check_constraints: column_check_constraint_count(column),
+                    identity: column_identity_spec(column)?,
                 });
             }
             Some(NodeEnum::Constraint(constraint)) if !typed_table => {
@@ -1321,6 +1711,24 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
             group,
             relation_options,
             check_constraints,
+            identity: match command.def.as_deref().and_then(|node| node.node.as_ref()) {
+                Some(NodeEnum::Constraint(constraint)) => identity_spec(constraint)?,
+                _ => None,
+            },
+            foreign_key: match command.def.as_deref().and_then(|node| node.node.as_ref()) {
+                Some(NodeEnum::Constraint(constraint))
+                    if ConstrType::try_from(constraint.contype)
+                        == Ok(ConstrType::ConstrForeign) =>
+                {
+                    Some(ForeignKeySpec {
+                        keys: constraint.fk_attrs.len(),
+                        referenced_keys: constraint.pk_attrs.len(),
+                        update_action: foreign_key_action(&constraint.fk_upd_action)?,
+                        delete_action: foreign_key_action(&constraint.fk_del_action)?,
+                    })
+                }
+                _ => None,
+            },
         });
     }
 
@@ -1328,6 +1736,17 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
         if_exists: alter.missing_ok,
         actions,
     })
+}
+
+fn foreign_key_action(value: &str) -> Result<ForeignKeyAction, &'static str> {
+    match value {
+        "a" => Ok(ForeignKeyAction::NoAction),
+        "r" => Ok(ForeignKeyAction::Restrict),
+        "c" => Ok(ForeignKeyAction::Cascade),
+        "n" => Ok(ForeignKeyAction::SetNull),
+        "d" => Ok(ForeignKeyAction::SetDefault),
+        _ => Err("unreviewed foreign key action"),
+    }
 }
 
 fn alter_action_group(subtype: AlterTableType) -> Result<AlterTableActionGroup, &'static str> {
@@ -1421,6 +1840,35 @@ fn validate_constraint(constraint: &Constraint) -> Result<(), &'static str> {
 
 fn constraint_is_check(constraint: &Constraint) -> bool {
     ConstrType::try_from(constraint.contype).is_ok_and(|kind| kind == ConstrType::ConstrCheck)
+}
+
+fn identity_spec(constraint: &Constraint) -> Result<Option<IdentitySpec>, &'static str> {
+    if ConstrType::try_from(constraint.contype) != Ok(ConstrType::ConstrIdentity) {
+        return Ok(None);
+    }
+    if !matches!(constraint.generated_when.as_str(), "a" | "d") {
+        return Err("unreviewed identity generation mode");
+    }
+    Ok(Some(IdentitySpec {
+        location: usize::try_from(constraint.location).map_err(|_| "unlocated identity clause")?,
+        sequence: validate_sequence_options(&constraint.options, true)?,
+    }))
+}
+
+fn column_identity_spec(column: &ColumnDef) -> Result<Option<IdentitySpec>, &'static str> {
+    let mut identity = None;
+    for constraint in &column.constraints {
+        let Some(NodeEnum::Constraint(constraint)) = constraint.node.as_ref() else {
+            return Err("unrecognized column constraint");
+        };
+        if let Some(spec) = identity_spec(constraint)? {
+            if identity.is_some() {
+                return Err("multiple column identity clauses");
+            }
+            identity = Some(spec);
+        }
+    }
+    Ok(identity)
 }
 
 fn column_check_constraint_count(column: &ColumnDef) -> usize {
@@ -1614,6 +2062,12 @@ fn validate_insert(insert: &InsertStmt) -> Result<InsertSpec, &'static str> {
 
             if !select.values_lists.is_empty() {
                 validate_select_fields(select, true)?;
+                if !select.sort_clause.is_empty()
+                    || select.limit_count.is_some()
+                    || select.limit_offset.is_some()
+                {
+                    return Err("INSERT VALUES query suffix");
+                }
                 if SetOperation::try_from(select.op).unwrap_or(SetOperation::Undefined)
                     != SetOperation::SetopNone
                     || select.larg.is_some()
@@ -1793,9 +2247,15 @@ fn validate_relation_source(
                 Some(NodeEnum::SelectStmt(query)) => query,
                 _ => return Err(feature),
             };
-            let _ = validate_select(query, false)?;
+            let kind = if is_values_select_shape(query) {
+                validate_values_select(query)?;
+                RelationItemSpec::Values
+            } else {
+                let _ = validate_select(query, false)?;
+                RelationItemSpec::Subquery
+            };
             push_alias(&mut result.identifiers, source.alias.as_ref())?;
-            Ok(RelationItemSpec::Subquery)
+            Ok(kind)
         }
         Some(NodeEnum::RangeFunction(source)) => {
             validate_alias_columns(source.alias.as_ref(), "function alias column list")?;
@@ -2117,6 +2577,9 @@ fn validate_with_clause(with_clause: &pg_query::protobuf::WithClause) -> Result<
             .and_then(|query| query.node.as_ref())
             .ok_or("empty common table expression")?;
         match query {
+            NodeEnum::SelectStmt(select) if is_values_select_shape(select) => {
+                validate_values_select(select)?;
+            }
             NodeEnum::SelectStmt(select) => {
                 let _ = validate_select(select, with_clause.recursive)?;
             }
@@ -2321,9 +2784,78 @@ fn is_values_select_shape(select: &SelectStmt) -> bool {
         && select.where_clause.is_none()
         && select.group_clause.is_empty()
         && select.having_clause.is_none()
-        && select.sort_clause.is_empty()
-        && select.limit_offset.is_none()
-        && select.limit_count.is_none()
+}
+
+/// Localize a rejected VALUES shape using its parser-owned first expression.
+/// The location must lie in a structural VALUES wrapper; otherwise retain the
+/// enclosing statement range rather than guessing a keyword occurrence.
+fn unsupported_values_range(source: &str, raw: &RawStmt, feature: &str) -> Option<(usize, usize)> {
+    let root = raw.stmt.as_deref()?.node.as_ref()?;
+    let mut anchors = Vec::new();
+    walk_complete_tree(root, &mut |node, _| {
+        if let NodeRef::SelectStmt(query) = node
+            && !query.values_lists.is_empty()
+            && validate_select(query, false).err() == Some(feature)
+            && let Some(NodeEnum::List(row)) = query.values_lists[0].node.as_ref()
+            && let Some(expression) = row.items.first().and_then(|node| node.node.as_ref())
+            && let Some(anchor) = first_expression_location(expression)
+        {
+            anchors.push(anchor);
+        }
+        Ok(())
+    })
+    .ok()?;
+    if anchors.is_empty() {
+        return None;
+    }
+    let tokens = super::tokens::tokenize(source).ok()?;
+    let structure = super::structure::TokenStructure::new(&tokens);
+    structure
+        .parenthesis_pairs()
+        .iter()
+        .filter_map(|(open, close)| {
+            let keyword = (*open + 1..*close).find(|index| !tokens[*index].is_comment())?;
+            if tokens[keyword].kind != pg_query::protobuf::Token::Values {
+                return None;
+            }
+            let first_row = (keyword + 1..*close).find(|index| !tokens[*index].is_comment())?;
+            if tokens[first_row].kind != pg_query::protobuf::Token::Ascii40 {
+                return None;
+            }
+            let row_close = structure.matching_parenthesis(first_row)?;
+            anchors
+                .iter()
+                .any(|anchor| tokens[first_row].start <= *anchor && *anchor < tokens[row_close].end)
+                .then_some((tokens[keyword].start, tokens[*close].start))
+        })
+        .min_by_key(|(start, _)| *start)
+}
+
+fn first_expression_location(expression: &NodeEnum) -> Option<usize> {
+    expression
+        .nodes()
+        .into_iter()
+        .filter_map(|(node, _, _, _)| {
+            let location = match node {
+                NodeRef::AConst(value) => value.location,
+                NodeRef::ColumnRef(value) => value.location,
+                NodeRef::ParamRef(value) => value.location,
+                NodeRef::FuncCall(value) => value.location,
+                NodeRef::TypeCast(value) => value.location,
+                NodeRef::AExpr(value) => value.location,
+                NodeRef::BoolExpr(value) => value.location,
+                NodeRef::CaseExpr(value) => value.location,
+                NodeRef::CoalesceExpr(value) => value.location,
+                NodeRef::MinMaxExpr(value) => value.location,
+                NodeRef::RowExpr(value) => value.location,
+                NodeRef::AArrayExpr(value) => value.location,
+                NodeRef::SubLink(value) => value.location,
+                NodeRef::SetToDefault(value) => value.location,
+                _ => return None,
+            };
+            usize::try_from(location).ok()
+        })
+        .min()
 }
 
 fn unsupported(source: &str, raw: &RawStmt, feature: &'static str) -> FormatDiagnostic {
@@ -2339,6 +2871,7 @@ fn unsupported(source: &str, raw: &RawStmt, feature: &'static str) -> FormatDiag
     if source.as_bytes().get(end) == Some(&b';') {
         end += 1;
     }
+    let (start, end) = unsupported_values_range(source, raw, feature).unwrap_or((start, end));
     FormatDiagnostic::UnsupportedSyntax {
         feature: feature.into(),
         start,

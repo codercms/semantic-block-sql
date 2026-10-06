@@ -32,10 +32,49 @@ pub(super) struct QuerySpec {
     pub select: SelectSpec,
 }
 
+/// An explicit call name located by the PostgreSQL AST. SQL-standard special
+/// expression syntax retains its separate grammar-owned rendering path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum FunctionCallSpec {
+    Named {
+        location: usize,
+        name: Vec<String>,
+        arguments: FunctionArgumentSpec,
+    },
+    OperatorEscape {
+        location: usize,
+        keyword: Token,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FunctionArgumentSpec {
+    Ordinary,
+    KeyValuePairs { pairs: usize, order_items: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ArrayListSpec {
+    pub location: usize,
+    pub elements: usize,
+}
+
 /// Top-level VALUES capabilities proven by PostgreSQL AST validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ValuesSpec {
     pub rows: usize,
+    pub order_items: usize,
+    pub has_limit_count: bool,
+    pub has_limit_offset: bool,
+}
+
+/// One parser-owned VALUES derived relation, scoped to its top-level statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ValuesRelationSpec {
+    pub statement_index: usize,
+    /// Byte location of an expression in the first row of this RangeSubselect.
+    pub anchor: usize,
+    pub values: ValuesSpec,
 }
 
 /// INSERT source shape accepted by the validator.
@@ -100,6 +139,7 @@ pub(super) enum RelationIdentifierSpec {
 pub(super) enum RelationItemSpec {
     Relation,
     Subquery,
+    Values,
     Function,
     RowsFrom,
     TableSample,
@@ -212,6 +252,7 @@ pub(super) struct ViewSpec {
     pub options: usize,
     pub check: ViewCheckSpec,
     pub query: SelectSpec,
+    pub ctes: Vec<CteStatementSpec>,
 }
 
 /// Exact CREATE MATERIALIZED VIEW capabilities proven by PostgreSQL AST
@@ -225,14 +266,20 @@ pub(super) struct MaterializedViewSpec {
     pub has_tablespace: bool,
     pub skip_data: bool,
     pub query: SelectSpec,
+    pub ctes: Vec<CteStatementSpec>,
 }
 
 /// CREATE TABLE element kind used to preserve the authored order while still
 /// enforcing the column/constraint boundary in layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CreateTableElementSpec {
-    Column { check_constraints: usize },
-    Constraint { is_check: bool },
+    Column {
+        check_constraints: usize,
+        identity: Option<IdentitySpec>,
+    },
+    Constraint {
+        is_check: bool,
+    },
 }
 
 impl CreateTableElementSpec {
@@ -242,8 +289,17 @@ impl CreateTableElementSpec {
 
     pub fn check_constraints(self) -> usize {
         match self {
-            Self::Column { check_constraints } => check_constraints,
+            Self::Column {
+                check_constraints, ..
+            } => check_constraints,
             Self::Constraint { is_check } => usize::from(is_check),
+        }
+    }
+
+    pub fn identity(self) -> Option<IdentitySpec> {
+        match self {
+            Self::Column { identity, .. } => identity,
+            Self::Constraint { .. } => None,
         }
     }
 }
@@ -292,6 +348,65 @@ pub(super) struct AlterTableActionSpec {
     pub group: AlterTableActionGroup,
     pub relation_options: Option<usize>,
     pub check_constraints: usize,
+    pub foreign_key: Option<ForeignKeySpec>,
+    pub identity: Option<IdentitySpec>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ForeignKeySpec {
+    pub keys: usize,
+    pub referenced_keys: usize,
+    pub update_action: ForeignKeyAction,
+    pub delete_action: ForeignKeyAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ForeignKeyAction {
+    NoAction,
+    Restrict,
+    Cascade,
+    SetNull,
+    SetDefault,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SequenceOptionKind {
+    As,
+    Increment,
+    MinValue,
+    MaxValue,
+    Start,
+    Cache,
+    Cycle,
+    OwnedBy,
+    SequenceName,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SequenceSpec {
+    pub options: [Option<(SequenceOptionKind, usize)>; 9],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct IdentitySpec {
+    pub location: usize,
+    pub sequence: SequenceSpec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TriggerSpec {
+    pub timing: TriggerTiming,
+    pub old_table: bool,
+    pub new_table: bool,
+    pub columns: usize,
+    pub has_when: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TriggerTiming {
+    Before,
+    After,
+    InsteadOf,
 }
 
 /// Exact ALTER TABLE capabilities proven by PostgreSQL AST validation.
@@ -299,6 +414,13 @@ pub(super) struct AlterTableActionSpec {
 pub(super) struct AlterTableSpec {
     pub if_exists: bool,
     pub actions: Vec<AlterTableActionSpec>,
+}
+
+/// Parser-proven aggregate input signature; star is not an empty argument list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AggregateSignatureSpec {
+    Star,
+    Parameters { count: usize },
 }
 
 /// Reviewed top-level migration/utility statement family.
@@ -314,10 +436,18 @@ pub(super) enum UtilityStatementKind {
     RevokeRole,
     Comment,
     CreateEnum,
-    CreateCompositeType,
+    CreateCompositeType {
+        fields: usize,
+    },
+    CreateAggregate {
+        signature: AggregateSignatureSpec,
+        options: usize,
+    },
+    Set,
+    AttachIndexPartition,
     CreateDomain,
-    CreateSequence,
-    CreateTrigger,
+    CreateSequence(SequenceSpec),
+    CreateTrigger(TriggerSpec),
     CreatePolicy,
     Copy,
     Call,
@@ -350,6 +480,7 @@ impl UtilityStatementKind {
             Self::Grant | Self::GrantRole => Token::Grant,
             Self::Revoke | Self::RevokeRole => Token::Revoke,
             Self::Comment => Token::Comment,
+            Self::Set => Token::Set,
             Self::Copy => Token::Copy,
             Self::Call => Token::Call,
             Self::Explain => Token::Explain,
@@ -358,16 +489,18 @@ impl UtilityStatementKind {
             Self::RefreshMaterializedView => Token::Refresh,
             Self::Listen => Token::Listen,
             Self::Notify => Token::Notify,
-            Self::AlterType
+            Self::AttachIndexPartition
+            | Self::AlterType
             | Self::AlterDomain
             | Self::AlterPolicy
             | Self::AlterSequence
             | Self::RenameObject => Token::Alter,
             Self::CreateEnum
-            | Self::CreateCompositeType
+            | Self::CreateCompositeType { .. }
+            | Self::CreateAggregate { .. }
             | Self::CreateDomain
-            | Self::CreateSequence
-            | Self::CreateTrigger
+            | Self::CreateSequence(_)
+            | Self::CreateTrigger(_)
             | Self::CreatePolicy
             | Self::CreateExtension
             | Self::CreateRule
@@ -390,10 +523,13 @@ impl UtilityStatementKind {
             Self::RevokeRole => "REVOKE ROLE",
             Self::Comment => "COMMENT ON",
             Self::CreateEnum => "CREATE TYPE AS ENUM",
-            Self::CreateCompositeType => "CREATE TYPE AS",
+            Self::CreateCompositeType { .. } => "CREATE TYPE AS",
+            Self::CreateAggregate { .. } => "CREATE AGGREGATE",
+            Self::Set => "SET",
+            Self::AttachIndexPartition => "ALTER INDEX ATTACH PARTITION",
             Self::CreateDomain => "CREATE DOMAIN",
-            Self::CreateSequence => "CREATE SEQUENCE",
-            Self::CreateTrigger => "CREATE TRIGGER",
+            Self::CreateSequence(_) => "CREATE SEQUENCE",
+            Self::CreateTrigger(_) => "CREATE TRIGGER",
             Self::CreatePolicy => "CREATE POLICY",
             Self::Copy => "COPY",
             Self::Call => "CALL",
@@ -516,6 +652,9 @@ pub(super) struct CteStatementSpec {
 pub(super) struct SupportedDocument {
     statements: Vec<SourceStatement>,
     queries: Vec<QuerySpec>,
+    values_relations: Vec<ValuesRelationSpec>,
+    function_calls: Vec<FunctionCallSpec>,
+    arrays: Vec<ArrayListSpec>,
 }
 
 impl SupportedDocument {
@@ -524,13 +663,25 @@ impl SupportedDocument {
         Self {
             statements,
             queries: Vec::new(),
+            values_relations: Vec::new(),
+            function_calls: Vec::new(),
+            arrays: Vec::new(),
         }
     }
 
-    pub fn with_queries(statements: Vec<SourceStatement>, queries: Vec<QuerySpec>) -> Self {
+    pub fn with_queries(
+        statements: Vec<SourceStatement>,
+        queries: Vec<QuerySpec>,
+        values_relations: Vec<ValuesRelationSpec>,
+        function_calls: Vec<FunctionCallSpec>,
+        arrays: Vec<ArrayListSpec>,
+    ) -> Self {
         Self {
             statements,
             queries,
+            values_relations,
+            function_calls,
+            arrays,
         }
     }
 
@@ -538,8 +689,20 @@ impl SupportedDocument {
         &self.statements
     }
 
+    pub fn values_relations(&self) -> &[ValuesRelationSpec] {
+        &self.values_relations
+    }
+
     pub fn queries(&self) -> &[QuerySpec] {
         &self.queries
+    }
+
+    pub fn function_calls(&self) -> &[FunctionCallSpec] {
+        &self.function_calls
+    }
+
+    pub fn arrays(&self) -> &[ArrayListSpec] {
+        &self.arrays
     }
 }
 

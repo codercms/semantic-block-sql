@@ -76,6 +76,25 @@ impl TypeAliasFamily {
 pub(super) struct NormalizedAliases {
     pub output: String,
     pub diagnostics: Vec<Diagnostic>,
+    edits: Vec<(SourceRange, usize)>,
+}
+
+impl NormalizedAliases {
+    /// Map an unchanged ownership boundary through exact parser-owned edits.
+    pub fn map_boundary(&self, offset: usize) -> Result<usize, FormatDiagnostic> {
+        let mut mapped = offset;
+        for &(range, length) in &self.edits {
+            if range.start < offset && offset < range.end {
+                return Err(FormatDiagnostic::Ownership(
+                    "ownership boundary intersects a type alias".into(),
+                ));
+            }
+            if range.end <= offset {
+                mapped = mapped - (range.end - range.start) + length;
+            }
+        }
+        Ok(mapped)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +114,7 @@ pub(super) fn normalize(
         return Ok(NormalizedAliases {
             output: source.to_owned(),
             diagnostics: Vec::new(),
+            edits: Vec::new(),
         });
     }
 
@@ -114,6 +134,25 @@ pub(super) fn normalize(
             options,
             &relative_ranges(opaque_ranges, region.payload_end, source.len()),
         )?;
+        let mut edits = prefix.edits;
+        edits.extend(header.edits.into_iter().map(|(range, length)| {
+            (
+                SourceRange::new(
+                    range.start + region.header_start,
+                    range.end + region.header_start,
+                ),
+                length,
+            )
+        }));
+        edits.extend(suffix.edits.into_iter().map(|(range, length)| {
+            (
+                SourceRange::new(
+                    range.start + region.payload_end,
+                    range.end + region.payload_end,
+                ),
+                length,
+            )
+        }));
         let mut diagnostics = prefix.diagnostics;
         diagnostics.extend(
             header
@@ -136,6 +175,7 @@ pub(super) fn normalize(
                 suffix.output
             ),
             diagnostics,
+            edits,
         });
     }
 
@@ -145,6 +185,7 @@ pub(super) fn normalize(
             return Ok(NormalizedAliases {
                 output: source.to_owned(),
                 diagnostics: Vec::new(),
+                edits: Vec::new(),
             });
         }
     };
@@ -206,6 +247,10 @@ pub(super) fn normalize(
     pg_query::parse(&output)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
 
+    let edits = replacements
+        .iter()
+        .map(|replacement| (replacement.source_range, replacement.preferred.len()))
+        .collect();
     let diagnostics = replacements
         .into_iter()
         .map(|replacement| Diagnostic {
@@ -224,6 +269,7 @@ pub(super) fn normalize(
     Ok(NormalizedAliases {
         output,
         diagnostics,
+        edits,
     })
 }
 

@@ -1,7 +1,10 @@
 mod diagnostics;
+mod external_routine;
 mod layout_ir;
 mod ownership;
 mod procedural;
+mod result;
+mod routine_header;
 mod semantic_block;
 mod sql_standard_routine;
 mod structure;
@@ -11,6 +14,7 @@ mod validation;
 
 use std::collections::BTreeMap;
 
+use result::FormattedContent;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -246,6 +250,10 @@ struct StatementFormatError {
 impl StatementFormatError {
     fn shifted(mut self, offset: usize) -> Self {
         self.source_range = self.source_range.map(|range| range.shifted(offset));
+        if let FormatDiagnostic::UnsupportedSyntax { start, end, .. } = &mut self.diagnostic {
+            *start += offset;
+            *end += offset;
+        }
         self
     }
 }
@@ -270,8 +278,21 @@ impl From<validation::equivalence::EquivalenceError> for StatementFormatError {
 
 /// Formats one or more complete PostgreSQL statements without touching files.
 pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql, FormatDiagnostic> {
+    let content = format_sql_content(source, options)?;
+    Ok(FormattedSql {
+        changed: content.output != source,
+        output: content.output,
+        warnings: content.warnings,
+        diagnostics: content.diagnostics,
+    })
+}
+
+fn format_sql_content(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<FormattedContent, FormatDiagnostic> {
     options.validate()?;
-    let first = format_document_once(source, options)?;
+    let mut first = format_document_once(source, options)?;
     if options.unsupported_policy == UnsupportedPolicy::Error
         && first.diagnostics.iter().any(|diagnostic| {
             diagnostic.severity == Severity::Error
@@ -281,12 +302,9 @@ pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql,
                 )
         })
     {
-        return Ok(FormattedSql {
-            output: source.to_owned(),
-            changed: false,
-            warnings: first.warnings,
-            diagnostics: first.diagnostics,
-        });
+        first.output = source.to_owned();
+        first.opaque_output_ranges = first.opaque_source_ranges.clone();
+        return Ok(first);
     }
 
     let second = format_document_once(&first.output, options)?;
@@ -299,7 +317,7 @@ pub fn format_sql(source: &str, options: &FormatOptions) -> Result<FormattedSql,
 fn format_document_once(
     source: &str,
     options: &FormatOptions,
-) -> Result<FormattedSql, FormatDiagnostic> {
+) -> Result<FormattedContent, FormatDiagnostic> {
     let content = format_document_content(source, options)?;
     let base_output = content.output;
     let source_aliases = type_aliases::normalize(source, options, &content.opaque_source_ranges)?;
@@ -334,25 +352,19 @@ fn format_document_once(
         options,
     )?);
 
-    Ok(FormattedSql {
-        changed: output != source,
+    Ok(FormattedContent {
         output,
         warnings,
         diagnostics,
+        opaque_source_ranges,
+        opaque_output_ranges: final_opaque_output_ranges,
     })
-}
-
-struct DocumentContent {
-    output: String,
-    diagnostics: Vec<Diagnostic>,
-    opaque_source_ranges: Vec<SourceRange>,
-    opaque_output_ranges: Vec<SourceRange>,
 }
 
 fn format_document_content(
     source: &str,
     options: &FormatOptions,
-) -> Result<DocumentContent, FormatDiagnostic> {
+) -> Result<FormattedContent, FormatDiagnostic> {
     format_document_content_at(source, options, 0)
 }
 
@@ -360,7 +372,7 @@ fn format_document_content_at(
     source: &str,
     options: &FormatOptions,
     source_line_offset: usize,
-) -> Result<DocumentContent, FormatDiagnostic> {
+) -> Result<FormattedContent, FormatDiagnostic> {
     let Some(region) = find_copy_stdin_region(source)? else {
         return format_regular_document_content(source, options, source_line_offset);
     };
@@ -435,7 +447,8 @@ fn format_document_content_at(
     output.push_str(&header.output);
     output.push_str(payload);
     output.push_str(&suffix.output);
-    Ok(DocumentContent {
+    Ok(FormattedContent {
+        warnings: Vec::new(),
         output,
         diagnostics,
         opaque_source_ranges,
@@ -447,7 +460,7 @@ fn format_regular_document_content(
     source: &str,
     options: &FormatOptions,
     source_line_offset: usize,
-) -> Result<DocumentContent, FormatDiagnostic> {
+) -> Result<FormattedContent, FormatDiagnostic> {
     let parsed = pg_query::parse(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
     let split = pg_query::split_with_parser(source)
@@ -455,7 +468,8 @@ fn format_regular_document_content(
     if parsed.protobuf.stmts.is_empty() {
         let formatted =
             format_supported_statement(source, options).map_err(|error| error.diagnostic)?;
-        return Ok(DocumentContent {
+        return Ok(FormattedContent {
+            warnings: Vec::new(),
             output: formatted.output,
             diagnostics: Vec::new(),
             opaque_source_ranges: Vec::new(),
@@ -486,6 +500,18 @@ fn format_regular_document_content(
         let routine = is_routine_statement(raw);
         match format_statement_once(statement, raw, options) {
             Ok(formatted) => {
+                opaque_source_ranges.extend(
+                    formatted
+                        .opaque_source_ranges
+                        .iter()
+                        .map(|range| range.shifted(start)),
+                );
+                opaque_output_ranges.extend(
+                    formatted
+                        .opaque_output_ranges
+                        .iter()
+                        .map(|range| range.shifted(statement_output_start)),
+                );
                 output.push_str(&formatted.output);
                 if routine {
                     diagnostics.extend(
@@ -532,7 +558,8 @@ fn format_regular_document_content(
         cursor = end;
     }
     output.push_str(&normalize_document_gap(&source[cursor..], true));
-    Ok(DocumentContent {
+    Ok(FormattedContent {
+        warnings: Vec::new(),
         output,
         diagnostics,
         opaque_source_ranges,
@@ -752,17 +779,28 @@ fn format_statement_once(
     source: &str,
     raw: &pg_query::protobuf::RawStmt,
     options: &FormatOptions,
-) -> Result<FormattedSql, StatementFormatError> {
+) -> Result<FormattedContent, StatementFormatError> {
     if is_routine_statement(raw) {
         if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(statement)) =
             raw.stmt.as_deref().and_then(|node| node.node.as_ref())
-            && statement.sql_body.is_some()
+            && statement.options.iter().any(|node| {
+                matches!(node.node.as_ref(), Some(pg_query::protobuf::node::Node::DefElem(option))
+                    if option.defname == "language" && routine_header::option_string(option).is_some_and(|value| matches!(value.as_str(), "c" | "internal")))
+            }) {
+            return external_routine::format_single_routine(source, options).map(Into::into);
+        }
+        if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(statement)) =
+            raw.stmt.as_deref().and_then(|node| node.node.as_ref())
+            && (statement.sql_body.is_some() || statement.options.iter().any(|node| {
+                matches!(node.node.as_ref(), Some(pg_query::protobuf::node::Node::DefElem(option))
+                    if option.defname == "language" && routine_header::option_string(option).as_deref() == Some("sql"))
+            }))
         {
-            return sql_standard_routine::format_single_routine(source, statement, options);
+            return sql_standard_routine::format_single_routine(source, options).map(Into::into);
         }
         return procedural::format_single_routine(source, options).map_err(Into::into);
     }
-    format_supported_statement(source, options)
+    format_supported_statement(source, options).map(Into::into)
 }
 
 fn format_supported_statement(

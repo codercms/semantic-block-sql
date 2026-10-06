@@ -1,0 +1,222 @@
+mod support;
+
+fn assert_supported(source: &str) {
+    let result = semblock::format_sql(source, &semblock::FormatOptions::default()).unwrap();
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.fix_available),
+        "{:?}",
+        result.diagnostics
+    );
+    assert!(
+        result
+            .output
+            .lines()
+            .all(|line| line.chars().count() <= 160)
+    );
+    support::assert_sql_layout_only(&result.output, &result.output);
+}
+
+#[test]
+fn identity_sequence_options_have_their_own_layout() {
+    let source = "ALTER TABLE sample_schema.sample_rows ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (\n    SEQUENCE NAME sample_schema.sample_rows_identifier_sequence\n    START WITH 1\n    INCREMENT BY 1\n    NO MINVALUE\n    NO MAXVALUE\n    CACHE 1\n);";
+    assert_supported(source);
+}
+
+#[test]
+fn array_subquery_targets_bind_their_select_ownership() {
+    assert_supported(
+        "CREATE FUNCTION sample_array(input_value jsonb) RETURNS text[] LANGUAGE SQL BEGIN ATOMIC\nSELECT CASE WHEN input_value = 'null'::jsonb THEN NULL::text[] ELSE ARRAY(SELECT value FROM jsonb_array_elements_text(input_value) AS source(value)) END;\nEND;",
+    );
+}
+
+#[test]
+fn relation_aliases_can_share_their_function_name_without_as() {
+    assert_supported(
+        "SELECT ARRAY(SELECT sample_elements.value FROM sample_elements('[]'::jsonb) sample_elements(value));",
+    );
+    assert_supported(
+        "WITH seed AS MATERIALIZED (SELECT source.id FROM jsonb_to_recordset('[]'::jsonb) source(id integer, label text)) SELECT id FROM seed;",
+    );
+}
+
+#[test]
+fn composite_function_relation_definitions_bind_with_cte_queries() {
+    assert_supported(
+        "WITH seed AS MATERIALIZED (SELECT source.id, source.label FROM jsonb_to_recordset('[]'::jsonb) AS source(id integer, label text)) SELECT id FROM seed;",
+    );
+}
+
+#[test]
+fn nested_function_arguments_keep_breakable_lines_within_width() {
+    let expression = (0..20).fold("input_value".to_owned(), |value, index| {
+        format!("replace(\n{value},\n'old_{index}', 'new_{index}')")
+    });
+    assert_supported(&format!(
+        "CREATE FUNCTION sample_replace(input_value text) RETURNS text LANGUAGE SQL AS $$\nSELECT {expression};\n$$;"
+    ));
+}
+
+#[test]
+fn keyword_function_names_and_generated_escape_helpers_have_distinct_owners() {
+    for name in [
+        "replace",
+        "left",
+        "right",
+        "language",
+        "returns",
+        "sample_schema.replace",
+        "sample_schema.\"SELECT\"",
+    ] {
+        let source = format!(
+            "SELECT {name}(\n    'first value',\n\n    -- retained argument group\n    'second value'\n);"
+        );
+        assert_supported(&source);
+    }
+    assert_supported(
+        "SELECT label LIKE 'a%' ESCAPE '!', label ILIKE 'b%' ESCAPE '!', label SIMILAR TO '(a|b)%' ESCAPE '!' FROM sample_rows;",
+    );
+    assert_supported("SELECT pg_catalog.similar_to_escape('a%', '!');");
+}
+
+#[test]
+fn commented_function_names_still_own_their_argument_lists() {
+    let value = "sample_value_".repeat(5);
+    assert_supported(&format!(
+        "SELECT replace /* retained call comment */ ('{value}', '{value}', '{value}');"
+    ));
+}
+
+#[test]
+fn procedural_parameter_type_references_preserve_semantics() {
+    assert_supported(
+        "CREATE FUNCTION sample_stream(anyarray) RETURNS SETOF anyarray LANGUAGE plpgsql AS $$\nDECLARE\n    part $1%TYPE;\nBEGIN\n    FOREACH part SLICE 1 IN ARRAY $1 LOOP\n        RETURN NEXT part;\n    END LOOP;\n    RETURN;\nEND;\n$$;",
+    );
+}
+
+#[test]
+fn procedural_into_targets_are_separate_from_sql_tables() {
+    assert_supported(
+        "DO $$\nDECLARE\n    sample_id integer;\n    sample_label text;\nBEGIN\n    SELECT id FROM sample_rows WHERE enabled INTO STRICT sample_id;\n    SELECT id, label INTO sample_id, sample_label FROM sample_rows;\n    INSERT INTO sample_rows (id) VALUES (1) RETURNING id INTO sample_id;\nEND;\n$$;",
+    );
+}
+
+#[test]
+fn procedural_into_comments_and_branch_queries_keep_their_owners() {
+    let source = "DO $$ DECLARE sample_id integer; sample_label text; BEGIN IF TRUE THEN SELECT id INTO /* retained target comment */ STRICT sample_id FROM sample_rows; ELSIF FALSE THEN SELECT id, label FROM sample_rows INTO sample_id, sample_label; ELSE SELECT id INTO sample_id FROM sample_rows; END IF; END; $$;";
+    assert_supported(source);
+    let result = semblock::format_sql(source, &semblock::FormatOptions::default()).unwrap();
+    assert!(result.output.contains("/* retained target comment */"));
+    assert_supported(
+        "DO $$ DECLARE sample_id integer; BEGIN WITH seed AS (SELECT 1 AS id) SELECT id FROM seed INTO sample_id; END; $$;",
+    );
+}
+
+#[test]
+fn procedural_type_references_keep_spelling_and_modulo_expressions() {
+    assert_supported(
+        "DO $$ DECLARE part sample_rows.id%type; row_value sample_rows%ROWTYPE; n integer DEFAULT 7 % 3; BEGIN part := n; END; $$;",
+    );
+}
+
+#[test]
+fn outer_not_exists_does_not_own_inner_query_connectors() {
+    assert_supported(
+        "WITH changed AS (\n    UPDATE sample_rows\n    SET enabled = TRUE\n    FROM sample_seed\n    WHERE NOT EXISTS (SELECT 1 FROM sample_details d WHERE d.kind = $1 AND d.id = sample_seed.id)\n    RETURNING id\n)\nSELECT 1;",
+    );
+}
+
+#[test]
+fn case_results_include_their_when_then_prefix_in_width_budget() {
+    assert_supported(
+        "SELECT * FROM (SELECT * FROM (SELECT CASE WHEN (array_length(seed.sample_identifiers, 1) > 5) THEN (('prefix_value'::text || ((array_length(seed.sample_identifiers, 1) - 5))::text) || 'suffix_value'::text) ELSE NULL END AS label FROM sample_rows seed) AS inner_rows) AS outer_rows;",
+    );
+}
+
+#[test]
+fn procedural_transaction_nodes_have_reviewed_ownership() {
+    assert_supported(
+        "CREATE PROCEDURE sample_work() LANGUAGE plpgsql AS $$\nBEGIN\n    COMMIT;\n    ROLLBACK;\n    COMMIT AND CHAIN;\n    ROLLBACK AND NO CHAIN;\nEND;\n$$;",
+    );
+    assert_supported(
+        "DO $$ BEGIN COMMIT -- retained transaction comment\nAND CHAIN; ROLLBACK /* retained block comment */ AND NO CHAIN; END; $$;",
+    );
+}
+
+#[test]
+fn values_relation_order_and_limit_suffixes_are_owned() {
+    assert_supported(
+        "SELECT source.id FROM (VALUES (3), (1), (2) ORDER BY 1 LIMIT 2 OFFSET 1) AS source(id);",
+    );
+}
+
+#[test]
+fn external_language_declarations_preserve_body_literals() {
+    assert_supported(
+        "CREATE FUNCTION sample_extension(integer) RETURNS text LANGUAGE C IMMUTABLE STRICT AS '$libdir/sample_extension', 'sample_entry';",
+    );
+}
+
+#[test]
+fn parenthesized_join_trees_own_long_on_predicates() {
+    assert_supported(
+        "SELECT a.id FROM ((sample_rows a JOIN sample_details d ON (((a.sample_reference_identifier_one = d.sample_reference_identifier_one) AND (a.sample_reference_identifier_two = d.sample_reference_identifier_two)))));",
+    );
+}
+
+#[test]
+fn array_element_groups_expand_in_predicates_and_case_conditions() {
+    let values = (1..=4)
+        .map(|index| format!("'state_{index}'::sample_schema.sample_status_type"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_supported(&format!(
+        "SELECT id FROM sample_rows WHERE status = ANY (ARRAY[{values}]);"
+    ));
+    assert_supported(&format!(
+        "SELECT CASE WHEN status = ANY (ARRAY[{values}]) THEN 1 ELSE 2 END FROM sample_rows;"
+    ));
+}
+
+#[test]
+fn array_constructors_keep_nested_arrays_and_subscripts_distinct() {
+    assert_supported("SELECT ARRAY[[1,2],[3,4]], sample_values[1:2] FROM sample_rows;");
+    assert_supported("SELECT ARRAY[\n    1,\n\n    -- retained element group\n    2\n];");
+}
+
+#[test]
+fn check_array_elements_and_nested_unsupported_expressions_are_traversed() {
+    let values = (1..=3)
+        .map(|index| format!("'state_{index}'::sample_schema.sample_long_status_type"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_supported(&format!(
+        "CREATE TABLE sample_rows (status text, CHECK (status = ANY (ARRAY[{values}])));"
+    ));
+    let source = "SELECT ARRAY[json_value(payload, '$.id')] FROM sample_rows;";
+    let result = semblock::format_sql_result(source, &semblock::FormatOptions::default());
+    assert_eq!(result.output, source);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
+    );
+}
+
+#[test]
+fn named_check_constraints_include_their_prefix_in_width_budget() {
+    let name = "sample_".repeat(8);
+    assert_supported(&format!(
+        "CREATE TABLE sample_rows (status text, reason text, CONSTRAINT {name}check CHECK (((status != 'blocked'::sample_schema.sample_status_type) OR (reason IS NOT NULL))));"
+    ));
+}
+
+#[test]
+fn lateral_column_definitions_include_their_relation_header_in_width_budget() {
+    assert_supported(
+        "SELECT result.id FROM (SELECT result.id FROM (SELECT base.id FROM sample_rows base CROSS JOIN LATERAL sample_recordset(base.payload) source(sample_id integer, sample_kind text, sample_label text, sample_created_at timestamp with time zone, sample_payload jsonb)) result) result;",
+    );
+}

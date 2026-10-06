@@ -10,6 +10,8 @@ It understands PostgreSQL structure instead of formatting by keyword heuristics,
 - **Preserves intent** — authored multiline groups, comments, and semantic block boundaries stay meaningful.
 - **Fail-safe** — unsupported or ambiguous statements remain byte-identical by default.
 - **SQL + Go + Rust** — formats `.sql` files and complete PostgreSQL queries inside Go and Rust strings, including Rust `const` values and reviewed SQLx macros.
+- **Migration coverage** — reviewed SQL/PL routines, sequence and identity options, transition-table triggers, and VALUES-backed queries share the canonical formatter.
+- **Readable JSON objects** — expanded JSON builders and object aggregates keep keys beside their values where widths and comment boundaries allow.
 - **Repository-friendly** — recursive discovery, `.gitignore`, `.semblockignore`, staged files, and `--changed-since`.
 - **Deterministic** — successful rewrites pass semantic-equivalence and byte-idempotence safety gates.
 
@@ -46,7 +48,7 @@ JOIN b ON
 </tr>
 </table>
 
-Authored grouping is intentional: if you split a predicate into logical branches, semblock keeps that structure instead of collapsing it merely because the result would fit on one line.
+Authored grouping is intentional: compliant multiline clauses and logical branches keep their structure even when they would fit on one line. Blank lines after comments and dump headers remain group boundaries.
 
 ### Semantic blocks
 
@@ -200,9 +202,11 @@ For stdin, staged-file semantics, exit codes, directives, configuration, and oth
 - tables and partitions, indexes, views, materialized views, types, domains, sequences, triggers, policies, and reviewed `ALTER` forms;
 - migration and operational statements such as `COPY`, `CALL`, `EXPLAIN`, `VACUUM`, `ANALYZE`, `REFRESH MATERIALIZED VIEW`, `GRANT`, `REVOKE`, and `COMMENT ON`;
 - PostgreSQL operators and expressions including JSON/JSONB, JSONPath, `hstore`, arrays, ranges, full-text search, regex, and network operators;
-- substantial PL/pgSQL support including declarations, conditionals, loops, exception handlers, dynamic `EXECUTE`, cursors, and `RETURN QUERY`.
+- SQL routines with dollar-quoted, inline RETURN, or multi-statement atomic bodies, plus protected C/internal declarations;
+- substantial PL/pgSQL support including datatype references, procedural `INTO`, transaction control, conditionals, loops, exception handlers, dynamic `EXECUTE`, cursors, and `RETURN QUERY`.
 
 Some valid PostgreSQL syntax is intentionally outside the reviewed capability set. See [PostgreSQL coverage](docs/sql-coverage.md) for the detailed boundary and known unsupported areas.
+The [0.3.0 coverage report](docs/coverage-improvements-0.3.0.md) lists the added fixtures, formatter fixes, and validation results.
 
 ## Fail-safe by default
 

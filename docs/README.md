@@ -6,6 +6,7 @@ This index separates user documentation, current contributor documentation, and 
 
 - [User guide](user-guide.md) — CLI workflows, Git selection, Go/Rust source, directives, configuration, diagnostics, and exit codes.
 - [PostgreSQL coverage](sql-coverage.md) — fixture-backed statement/expression coverage and known unsupported boundaries.
+- [0.3.0 coverage and regression report](coverage-improvements-0.3.0.md) — added capabilities, fixed bugs, fixtures, and migration verification.
 - [Release builds](release-builds.md) — supported release targets, runtime baselines, and artifact workflow.
 
 ## Product and formatting contract

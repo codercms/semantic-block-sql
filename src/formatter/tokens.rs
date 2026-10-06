@@ -10,6 +10,7 @@ pub(super) enum TokenRole {
     #[default]
     Unowned,
     Identifier,
+    FunctionName,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

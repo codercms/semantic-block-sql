@@ -99,6 +99,12 @@ For `SELECT`, `RETURNING`, `SET`, `VALUES`, `ORDER BY`, `GROUP BY`, function arg
 
 Several layouts may be valid. Do not replace one valid authored grouping with another solely by preference.
 
+For reviewed JSON object builders and object aggregates, prefer key/value pairs
+as list units: keep each key beside its value when safe, including regrouping
+ordinary breaks within a pair. Preserve comments, blank boundaries and authored
+groups between pairs. Expand long or nested values independently. The machine
+contract and exact reviewed call forms are defined in core specification §10.1.
+
 ## Comments
 
 - Preserve comment text and syntax.

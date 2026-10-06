@@ -16,6 +16,16 @@ stays together. Authored blank boundaries in reviewed table, index, view,
 materialized-view, and ALTER layouts are retained alongside mandatory nesting
 and action-group separation.
 
+Expanded `json_build_object`/`jsonb_build_object` calls prefer a key and its value
+on the same line. The same rule applies to `json_object_agg`/`jsonb_object_agg`
+and their strict/unique variants. Existing separate argument lines may regroup
+within a pair; comments, blank lines and authored groups between pairs remain
+boundaries. A long pair may split safely, while nested values expand below their
+opening expression. Short inline calls remain compact. Exact names are recognized
+unqualified or under `pg_catalog`; other schemas, explicit VARIADIC, named
+arguments and odd-arity builders retain ordinary argument layout. No runtime
+function resolution or argument repair is performed.
+
 Format files in place:
 
 ```bash
@@ -100,6 +110,11 @@ By default:
 When a skipped-statement failure has a trusted token location, its diagnostic
 points to that exact cause while the complete statement is still preserved.
 Failures without a reliable location use the complete statement range.
+
+The same policy applies to PL/pgSQL routines: a body or header width failure
+preserves the complete routine while independent SQL statements continue under
+the default policy. Embedded SQL warnings remain visible, and strict mode
+preserves the complete document on unsupported or skipped routine content.
 
 Trailing Unicode whitespace on any physical comment line is ordinary fixable
 `spacing.trailing_whitespace`; it is removed without changing comment
@@ -392,6 +407,27 @@ query.sql:1:1 (bytes 0-6): error[casing.keyword]: SQL keyword or grammar constru
 ```
 
 CLI diagnostics use one-based `line:column` locations followed by a half-open UTF-8 byte range.
+Indivisible-token width warnings inside reviewed SQL/PL routine bodies identify
+the inner token, including on repeated `fmt` runs. Multiline comment warnings
+identify the overlong source line; CRLF terminators are excluded from its range.
+
+Unsupported syntax points to a parser-located construct when a bounded source
+range can be proven, including rejected VALUES derived-table shapes. Otherwise
+the diagnostic covers its enclosing statement, starting at its first SQL token
+rather than attached leading comments. Skipped-statement messages use that same
+SQL statement line.
+
+Unsupported procedural SQL, including SELECT/RETURNING INTO children, retains
+`syntax.unsupported` and its SQL-leaf range. Default mode preserves that leaf
+while formatting the enclosing routine layout; strict mode keeps the complete
+document unchanged.
+
+Preserved SQL leaves retain internal whitespace and comment termination, including
+multiline INTO queries. They are excluded from procedural indentation and style
+rewrites so repeated formatting keeps the same leaf and diagnostic identity.
+They are also excluded from hard-width validation: an authored over-width
+unsupported leaf retains `syntax.unsupported`, while supported sibling statements
+continue to wrap or report legitimate indivisible-token width warnings.
 
 Coordinates refer to the source the user can act on:
 

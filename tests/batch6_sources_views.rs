@@ -133,8 +133,8 @@ fn comments_remain_attached_across_source_and_view_boundaries() {
 fn neighboring_unowned_source_and_view_shapes_remain_unchanged() {
     for source in [
         "UPDATE items SET title = source.title FROM source_items source JOIN batches batch USING (batch_id) AS matched WHERE items.id = source.item_id;",
-        "CREATE VIEW v AS WITH source AS (SELECT 1 AS id) SELECT id FROM source;",
-        "CREATE MATERIALIZED VIEW mv AS WITH source AS (SELECT 1 AS id) SELECT id FROM source WITH DATA;",
+        "CREATE VIEW v AS WITH source AS (SELECT json_value(payload, '$.id') AS id FROM items) SELECT id FROM source;",
+        "CREATE MATERIALIZED VIEW mv AS WITH source AS (SELECT json_value(payload, '$.id') AS id FROM items) SELECT id FROM source WITH DATA;",
         "CREATE TABLE copy AS SELECT id FROM items;",
     ] {
         let formatted = format_sql_result(source, &FormatOptions::default());

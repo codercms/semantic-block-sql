@@ -1,7 +1,7 @@
 mod support;
 
 use pretty_assertions::assert_eq;
-use semblock::{FormatOptions, Severity, UnsupportedPolicy, format_sql};
+use semblock::{FormatOptions, UnsupportedPolicy, format_sql};
 use support::assert_sql_layout_only as assert_fixture;
 
 #[test]
@@ -90,24 +90,29 @@ fn formats_assert_and_return_query() {
 }
 
 #[test]
-fn preserves_unsupported_transaction_control_while_formatting_siblings() {
+fn formats_reviewed_transaction_control_and_siblings() {
     let source =
         "CREATE PROCEDURE p() LANGUAGE plpgsql AS $$ BEGIN perform 1; COMMIT; perform 2; END; $$;";
     let expected = "CREATE PROCEDURE p() LANGUAGE plpgsql AS $$\nBEGIN\n    PERFORM 1;\n    COMMIT;\n    PERFORM 2;\nEND;\n$$;";
     let result = format_sql(source, &FormatOptions::default()).expect("format succeeds");
     assert_eq!(result.output, expected);
-    assert!(result.diagnostics.iter().any(|diagnostic| {
-        diagnostic.rule_id == "syntax.unsupported" && diagnostic.severity == Severity::Warning
-    }));
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.fix_available)
+    );
 
     let strict = FormatOptions {
         unsupported_policy: UnsupportedPolicy::Error,
         ..FormatOptions::default()
     };
     let result = format_sql(source, &strict).expect("strict policy returns a result");
-    assert_eq!(result.output, source);
-    assert!(!result.changed);
-    assert!(result.diagnostics.iter().any(|diagnostic| {
-        diagnostic.rule_id == "syntax.unsupported" && diagnostic.severity == Severity::Error
-    }));
+    assert_eq!(result.output, expected);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.fix_available)
+    );
 }

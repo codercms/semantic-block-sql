@@ -2,11 +2,11 @@ use pg_query::protobuf::Token;
 
 use super::*;
 use crate::formatter::ownership::{
-    AliasSpec, AlterTableSpec, ConflictActionSpec, CreateIndexSpec, CreateTableSpec,
-    CteStatementSpec, DeleteSpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec,
-    MergeActionSpec, MergeSpec, OverrideSpec, RelationIdentifierSpec, RelationItemSpec,
-    RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec,
-    SelectSpec, StatementTokens, UpdateSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
+    AggregateSignatureSpec, AliasSpec, AlterTableSpec, ConflictActionSpec, CreateIndexSpec,
+    CreateTableSpec, CteStatementSpec, DeleteSpec, InsertSourceSpec, InsertSpec,
+    MaterializedViewSpec, MergeActionSpec, MergeSpec, OverrideSpec, RelationIdentifierSpec,
+    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
+    RelationListSpec, SelectSpec, StatementTokens, UpdateSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
 };
 use crate::formatter::tokens::{
     is_join_start, is_query_clause_start, next_non_comment, previous_non_comment,
@@ -24,7 +24,8 @@ pub(super) fn bind_body_start(
     );
     (statement.range.start..statement.range.end)
         .filter(|index| {
-            tokens[*index].kind == expected
+            (tokens[*index].kind == expected
+                || (expected == Token::Analyze && tokens[*index].kind == Token::Analyse))
                 && (depths[*index] == statement.base_depth || wrapped_set_operation)
         })
         .min_by_key(|index| depths[*index])
@@ -178,6 +179,115 @@ pub(super) fn verify_select_shape(
     Ok(())
 }
 
+/// The AST proves a SELECT body; AS owns its first significant token, including
+/// a WITH prefix or a parenthesized set-operation branch.
+fn bind_view_query_start(
+    tokens: &[SqlToken<'_>],
+    as_index: usize,
+    end: usize,
+) -> Result<usize, FormatDiagnostic> {
+    (as_index + 1..end)
+        .find(|index| !tokens[*index].is_comment())
+        .filter(|index| {
+            matches!(
+                tokens[*index].kind,
+                Token::Select | Token::With | Token::Ascii40
+            )
+        })
+        .ok_or_else(|| FormatDiagnostic::Ownership("view AS has no owned SELECT body".into()))
+}
+
+pub(super) fn bind_utility(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: &StatementTokens,
+    kind: UtilityStatementKind,
+) -> Result<UtilityBlock, FormatDiagnostic> {
+    let expected_lists = match kind {
+        UtilityStatementKind::CreateCompositeType { fields } => vec![fields],
+        UtilityStatementKind::CreateAggregate { signature, options } => vec![
+            match signature {
+                AggregateSignatureSpec::Star => 1,
+                AggregateSignatureSpec::Parameters { count } => count,
+            },
+            options,
+        ],
+        _ => Vec::new(),
+    };
+    let mut lists = [None; 2];
+    if !expected_lists.is_empty() {
+        let owned = (statement.range.start..statement.range.end)
+            .filter(|index| {
+                structure.depth(*index) == statement.base_depth
+                    && tokens[*index].kind == Token::Ascii40
+            })
+            .collect::<Vec<_>>();
+        require_count(
+            kind.family_name(),
+            "owned list count",
+            owned.len(),
+            expected_lists.len(),
+        )?;
+        for ((slot, open), expected) in lists.iter_mut().zip(owned).zip(expected_lists) {
+            let close = structure
+                .matching_parenthesis(open)
+                .ok_or_else(|| FormatDiagnostic::Ownership("utility list is unclosed".into()))?;
+            require_count(
+                kind.family_name(),
+                "list item count",
+                parenthesized_item_count(tokens, structure, open)?,
+                expected,
+            )?;
+            *slot = Some((open, close));
+        }
+    }
+    if matches!(
+        kind,
+        UtilityStatementKind::CreateAggregate {
+            signature: AggregateSignatureSpec::Star,
+            ..
+        }
+    ) {
+        let (open, close) = lists[0].expect("aggregate signature is bound");
+        let contents = tokens[open + 1..close]
+            .iter()
+            .filter(|token| !token.is_comment())
+            .collect::<Vec<_>>();
+        if contents.len() != 1 || contents[0].kind != Token::Ascii42 {
+            return Err(FormatDiagnostic::Ownership(
+                "aggregate star signature disagrees with the AST".into(),
+            ));
+        }
+    }
+    let (clauses, identifier_tokens) = match kind {
+        UtilityStatementKind::CreateSequence(spec) => (
+            super::migration_ddl::bind_sequence(
+                tokens,
+                structure,
+                statement.range,
+                statement.base_depth,
+                spec,
+            )?,
+            Vec::new(),
+        ),
+        UtilityStatementKind::CreateTrigger(spec) => {
+            super::migration_ddl::bind_trigger(tokens, structure, statement, spec)?
+        }
+        _ => (Vec::new(), Vec::new()),
+    };
+    Ok(UtilityBlock {
+        span: TokenSpan {
+            start: statement.range.start,
+            end: statement.range.end,
+            base_depth: statement.base_depth,
+        },
+        kind,
+        lists,
+        clauses,
+        identifier_tokens,
+    })
+}
+
 pub(super) fn bind_view(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
@@ -205,8 +315,7 @@ pub(super) fn bind_view(
     )?;
     let as_index = find_kind(tokens, depths, view + 1, end, base_depth, Token::As)
         .ok_or_else(|| FormatDiagnostic::Ownership("CREATE VIEW has no AS clause".into()))?;
-    let query_start = find_kind(tokens, depths, as_index + 1, end, base_depth, Token::Select)
-        .ok_or_else(|| FormatDiagnostic::Ownership("CREATE VIEW has no SELECT query".into()))?;
+    let query_start = bind_view_query_start(tokens, as_index, end)?;
     let check_option = (query_start + 1..end).rev().find(|index| {
         depths[*index] == base_depth
             && tokens[*index].kind == Token::With
@@ -343,10 +452,7 @@ pub(super) fn bind_materialized_view(
         find_kind(tokens, depths, view + 1, end, base_depth, Token::As).ok_or_else(|| {
             FormatDiagnostic::Ownership("CREATE MATERIALIZED VIEW has no AS clause".into())
         })?;
-    let query_start = find_kind(tokens, depths, as_index + 1, end, base_depth, Token::Select)
-        .ok_or_else(|| {
-            FormatDiagnostic::Ownership("CREATE MATERIALIZED VIEW has no SELECT query".into())
-        })?;
+    let query_start = bind_view_query_start(tokens, as_index, end)?;
     let data_clause = (query_start + 1..end).rev().find(|index| {
         depths[*index] == base_depth
             && tokens[*index].kind == Token::With
@@ -460,29 +566,13 @@ pub(super) fn bind_values(
     body_start: usize,
     spec: &ValuesSpec,
 ) -> Result<ValuesBlock, FormatDiagnostic> {
-    let rows = (body_start + 1..statement.range.end)
-        .filter(|index| {
-            structure.depth(*index) == statement.base_depth && tokens[*index].kind == Token::Ascii40
-        })
-        .map(|open| {
-            structure
-                .matching_parenthesis(open)
-                .map(|close| (open, close))
-                .ok_or_else(|| {
-                    FormatDiagnostic::Ownership("VALUES row has no closing parenthesis".into())
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    require_count("VALUES", "row count", rows.len(), spec.rows)?;
-    Ok(ValuesBlock {
-        span: TokenSpan {
-            start: statement.range.start,
-            end: statement.range.end,
-            base_depth: statement.base_depth,
-        },
-        keyword: body_start,
-        rows,
-    })
+    let values = super::values::bind(tokens, structure, body_start, statement.range.end, None)?;
+    if super::values::capability(&values, tokens, structure) != *spec {
+        return Err(FormatDiagnostic::Ownership(
+            "VALUES row/suffix ownership differs from AST".into(),
+        ));
+    }
+    Ok(values)
 }
 
 pub(super) fn bind_create_table(
@@ -611,6 +701,18 @@ pub(super) fn bind_create_table(
                     range,
                     kind,
                     checks,
+                    identity: kind
+                        .identity()
+                        .map(|spec| {
+                            super::migration_ddl::bind_identity(
+                                tokens,
+                                structure,
+                                range,
+                                base + 1,
+                                spec,
+                            )
+                        })
+                        .transpose()?,
                 })
             })
             .collect::<Result<Vec<_>, FormatDiagnostic>>()?;
@@ -911,7 +1013,20 @@ pub(super) fn bind_alter_table(
             Ok(AlterTableAction {
                 range,
                 group: action.group,
+                identity: action
+                    .identity
+                    .map(|spec| {
+                        super::migration_ddl::bind_identity(tokens, structure, range, base, spec)
+                    })
+                    .transpose()?,
                 relation_options,
+                foreign_key_clauses: action
+                    .foreign_key
+                    .map(|spec| {
+                        super::migration_ddl::bind_foreign_key(tokens, structure, range, base, spec)
+                    })
+                    .transpose()?
+                    .unwrap_or_default(),
                 checks: bind_check_predicates(
                     tokens,
                     structure,
@@ -1842,6 +1957,8 @@ pub(super) fn bind_relation_source(
             .any(|start| item.start <= *start && *start < item.end);
         let contains_select =
             (item.start..item.end).any(|index| tokens[index].kind == Token::Select);
+        let contains_values =
+            (item.start..item.end).any(|index| tokens[index].kind == Token::Values);
         let contains_rows_from = (item.start..item.end).any(|index| {
             tokens[index].kind == Token::Rows
                 && tokens
@@ -1855,6 +1972,7 @@ pub(super) fn bind_relation_source(
         let agrees = match expected {
             RelationItemSpec::Join => contains_join,
             RelationItemSpec::Subquery => contains_select && !contains_join,
+            RelationItemSpec::Values => contains_values && !contains_join,
             RelationItemSpec::RowsFrom => contains_rows_from && !contains_join,
             RelationItemSpec::TableSample => contains_table_sample && !contains_join,
             RelationItemSpec::Function => {
@@ -1946,21 +2064,27 @@ pub(super) fn bind_relation_source(
         )));
     }
 
-    let wrappers = items
+    // Retain every structural wrapper around an AST-owned relation JOIN, not
+    // just the outer item wrapper. Query and VALUES wrappers own no JOIN from
+    // this relation list and are planned by their own typed blocks.
+    let mut wrappers = structure
+        .parenthesis_pairs()
         .iter()
-        .zip(&spec.items)
-        .filter_map(|(item, kind)| {
-            if *kind != RelationItemSpec::Join || tokens[item.start].kind != Token::Ascii40 {
-                return None;
-            }
-            structure
-                .matching_parenthesis(item.start)
-                .filter(|close| *close < item.end)
-                .map(|close| (item.start, close, depths[item.start] + 1))
+        .filter(|(open, close)| {
+            items
+                .iter()
+                .any(|item| item.start <= **open && **close < item.end)
         })
-        .collect();
+        .filter(|(open, close)| {
+            joins
+                .iter()
+                .any(|join| **open < join.start && join.start < **close)
+        })
+        .map(|(open, close)| (*open, *close, depths[*open] + 1))
+        .collect::<Vec<_>>();
+    wrappers.sort_by_key(|(open, _, _)| *open);
 
-    let identifier_tokens =
+    let identifiers =
         bind_relation_identifiers(tokens, structure, range, &spec.identifiers, owner)?;
 
     Ok(RelationSourceBlock {
@@ -1971,8 +2095,14 @@ pub(super) fn bind_relation_source(
         joins,
         wrappers,
         base_depth,
-        identifier_tokens,
+        identifier_tokens: identifiers.tokens,
+        definition_lists: identifiers.definitions,
     })
+}
+
+struct RelationIdentifierBindings {
+    tokens: Vec<usize>,
+    definitions: Vec<(usize, usize)>,
 }
 
 fn bind_relation_identifiers(
@@ -1981,10 +2111,11 @@ fn bind_relation_identifiers(
     range: TokenRange,
     expected: &[RelationIdentifierSpec],
     owner: &str,
-) -> Result<Vec<usize>, FormatDiagnostic> {
+) -> Result<RelationIdentifierBindings, FormatDiagnostic> {
     let mut result = Vec::new();
+    let mut definitions = Vec::new();
     let mut cursor = range.start;
-    for identifier in expected {
+    for (position, identifier) in expected.iter().enumerate() {
         match identifier {
             RelationIdentifierSpec::Name(name) => {
                 let index = bind_expected_name(tokens, cursor, range.end, name, owner)?;
@@ -1995,7 +2126,16 @@ fn bind_relation_identifiers(
                 let index = (cursor..range.end)
                     .find(|index| {
                         token_matches_identifier(&tokens[*index], &alias.name)
-                            && is_relation_alias_boundary(tokens, *index, range.end, alias)
+                            && is_relation_alias_boundary(
+                                tokens,
+                                *index,
+                                range.end,
+                                alias,
+                                matches!(
+                                    expected.get(position + 1),
+                                    Some(RelationIdentifierSpec::ColumnDefinitions(_))
+                                ),
+                            )
                     })
                     .ok_or_else(|| {
                         FormatDiagnostic::Ownership(format!(
@@ -2040,11 +2180,20 @@ fn bind_relation_identifiers(
                 result.extend(bind_parenthesized_names(
                     tokens, structure, open, columns, owner,
                 )?);
+                definitions.push((
+                    open,
+                    structure.matching_parenthesis(open).ok_or_else(|| {
+                        FormatDiagnostic::Ownership("column-definition list is unclosed".into())
+                    })?,
+                ));
                 cursor = structure.matching_parenthesis(open).unwrap_or(open) + 1;
             }
         }
     }
-    Ok(result)
+    Ok(RelationIdentifierBindings {
+        tokens: result,
+        definitions,
+    })
 }
 
 fn is_relation_alias_boundary(
@@ -2052,7 +2201,11 @@ fn is_relation_alias_boundary(
     index: usize,
     end: usize,
     alias: &AliasSpec,
+    has_column_definitions: bool,
 ) -> bool {
+    if tokens[index].role == crate::formatter::tokens::TokenRole::FunctionName {
+        return false;
+    }
     if previous_non_comment(tokens, index)
         .is_some_and(|previous| tokens[previous].kind == Token::Ascii46)
     {
@@ -2066,7 +2219,7 @@ fn is_relation_alias_boundary(
     let Some(next) = next_non_comment(tokens, index).filter(|next| *next < end) else {
         return true;
     };
-    (tokens[next].kind == Token::Ascii40 && !alias.columns.is_empty())
+    (tokens[next].kind == Token::Ascii40 && (!alias.columns.is_empty() || has_column_definitions))
         || tokens[next].kind == Token::Ascii44
         || tokens[next].kind == Token::Ascii59
         || tokens[next].kind == Token::On
@@ -2198,7 +2351,7 @@ fn bind_expected_name(
         })
 }
 
-fn token_matches_identifier(token: &SqlToken<'_>, expected: &str) -> bool {
+pub(super) fn token_matches_identifier(token: &SqlToken<'_>, expected: &str) -> bool {
     if let Some(quoted) = token
         .text
         .strip_prefix('"')

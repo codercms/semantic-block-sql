@@ -1,6 +1,6 @@
 # Semantic Block SQL — `fmt` / `check` Core Specification
 
-Version: 1.0
+Version: 1.1
 
 ## 1. Scope
 
@@ -199,7 +199,8 @@ The formatter must preserve an existing authored layout when it:
 - remains within the hard limit where safely breakable;
 - keeps nesting and boolean precedence readable.
 
-Do not replace one valid grouping with another solely to canonicalize appearance.
+Do not replace one valid grouping with another solely to canonicalize appearance,
+except for the reviewed JSON key/value grouping preference in section 10.1.
 
 ## 6. Rule precedence
 
@@ -310,6 +311,34 @@ Rules:
 - split at safe item boundaries if it exceeds the hard limit;
 - if a long one-line list must expand and has no authored groups, emit one item per line;
 - never infer business-semantic groups.
+
+### 10.1 JSON object key/value groups
+
+For reviewed ordinary calls to `json_build_object` and `jsonb_build_object`,
+alternating key/value arguments form a layout unit. The same preference applies
+to the single key/value pair of `json_object_agg` and `jsonb_object_agg`, including
+their `_strict`, `_unique`, and `_unique_strict` variants.
+
+- Keep short inline calls compact.
+- When a call expands, prefer a key and its value on the same physical line.
+  Existing separate argument lines may be regrouped within a pair.
+- Preserve authored grouping between pairs, including multiple pairs on an
+  authored line when they fit the hard limit. Expansion of an unauthored list
+  uses one pair per line rather than one argument per line.
+- Comments and blank lines remain hard boundaries, including inside a pair.
+- A pair may exceed soft width while fitting hard width. If it cannot safely
+  fit, split at its argument comma or expand the value through its own planner.
+  A multiline value may begin beside its key while its children expand below.
+- Preserve aggregate ORDER BY, DISTINCT, FILTER, and OVER ownership and syntax;
+  sort expressions are not key/value arguments.
+- Recognize the exact reviewed names unqualified or under `pg_catalog`,
+  including exact lowercase quoted names. Do not apply this preference to
+  other schema-qualified functions or differently cased quoted names.
+- Explicit VARIADIC, named-argument, odd-arity builder, and unreviewed call forms
+  retain ordinary argument layout. Do not repair or infer their runtime values.
+
+This is a documented formatting preference for known argument roles, not
+inferred business grouping or permission to cross comment/blank boundaries.
 
 ## 11. Comments
 
@@ -488,6 +517,10 @@ When protected non-SQL regions are provided:
 ## 14. `check` behavior
 
 `check` reports non-compliance with mandatory rules.
+
+The reviewed JSON pair preference in section 10.1 produces fixable list-grouping
+diagnostics when a key/value break can be safely regrouped. Authored groups
+between pairs and preserved hard boundaries do not produce such diagnostics.
 
 It must not report:
 

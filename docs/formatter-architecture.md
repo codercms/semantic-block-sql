@@ -36,13 +36,26 @@ src/formatter/
 ├── layout_ir.rs                layout types and document-level dispatch
 ├── layout_ir/
 │   ├── statement.rs            statement-family token binding and shape checks
-│   └── query.rs                SELECT, WITH, predicate, and set-operation binding
+│   ├── query.rs                SELECT, WITH, predicate, and set-operation binding
+│   ├── values.rs               counted VALUES rows and query suffix binding
+│   ├── arrays.rs               constructor element groups, distinct from subscripts
+│   ├── function_calls.rs       AST-owned names, call parentheses, escape helpers
+│   └── migration_ddl.rs        sequence, identity, trigger, and foreign-key clauses
+├── routine_header.rs           shared signatures, options, and literal arguments
+├── sql_standard_routine.rs     SQL RETURN, atomic, and dollar-body adapters
+├── external_routine.rs         protected C/internal declaration adapter
+├── procedural/
+│   ├── mod.rs                  PL parser validation and canonical SQL leaf adapters
+│   ├── ir.rs                   procedural control and source-span ownership
+│   ├── capabilities.rs         parser-owned INTO, datatype, and transaction binding
+│   └── layout.rs               procedural indentation and body rendering
 ├── semantic_block.rs           planning orchestration and query/expression rules
 ├── semantic_block/
 │   ├── statements.rs           INSERT/UPDATE/DELETE/MERGE planners
 │   ├── ddl.rs                  VALUES and DDL planners
 │   ├── expressions.rs          typed owned-expression range derivation
 │   ├── lists.rs                shared list and parenthesized-argument planning
+│   ├── groups.rs               authored/compact/expanded group policy
 │   └── render.rs               casing, spacing, and token rendering
 ├── tokens.rs                   exact scanner tokens and authored gaps
 └── diagnostics.rs              rule diagnostics and source ranges
@@ -342,6 +355,11 @@ A wrapped query's visual indent is one level below the planned indent of its
 opening parenthesis, with its typed `QueryBlock` indent as the fallback before
 the parent has been planned. This keeps CTE, derived-relation, scalar-subquery,
 and deeper nested wrappers on the same rule without inferring syntax globally.
+Wrapper fallback indentation retains each descendant's relative delimiter
+depth rather than assigning one indent to the complete subtree. Query clauses
+also plan their own typed relation sources, including nested parenthesized join
+trees. A relation wrapper supplies opening/closing breaks without overwriting
+indentation owned by child SELECT lists or queries.
 
 Every statement, query, and keyword-list planner receives one immutable
 `PlanningContext` containing the token slice, depth index, CASE analysis,
@@ -446,6 +464,17 @@ A formatting result is accepted only when all gates pass:
 
 No file is partially rewritten. The CLI plans every project rewrite before the
 first atomic replacement.
+
+PL/pgSQL SQL leaves dispatch through `BodyNodeKind::Sql` rather than a second
+keyword-prefix list. Leaf safety diagnostics retain their source spans; body
+style diagnostics compare the actual framed body layout before optional type
+alias changes. Alias-enabled style projection reuses the body formatter with
+alias preferences cleared, so changed token kinds/cardinality cannot corrupt
+style token alignment. Internal statement semicolons remain syntax-owned.
+Routine bodies and complete routine output pass width validation before the
+document accepts them. The document width gate measures protected multiline
+tokens by their physical-line fragments; a short multiline comment cannot
+exempt an otherwise breakable line solely because it occurs beyond the limit.
 
 ## Adding PostgreSQL syntax
 
@@ -667,3 +696,122 @@ formats Rust itself, expands macros, runs the compiler, or writes files.
 preservation, whole-source idempotence, diagnostic ranges, and an actual
 compiled literal/runtime-value check. `tests/rust_cli.rs` covers discovery,
 configuration, stdin, Git selection, and project-wide no-write failures.
+
+
+### View query owners
+
+View capability records retain the recursively validated CTE specifications.
+Their bound AS query span enqueues a SELECT owner in the existing statement
+work queue, so CTE bodies use the same binder and planners as standalone SQL.
+Set-operation binding uses that span rather than the CREATE header or the
+view check/data suffix. Parenthesized branches retain their structural owners.
+
+
+### Utility list ownership
+
+Aggregate signatures distinguish the parser's star marker from parameter lists.
+Aggregate option counts and composite field counts are carried by the exhaustive
+utility enum. Binding verifies the corresponding top-level list ranges and item
+counts once, then the existing parenthesized-list planner consumes those ranges.
+Settings and index attachments have explicit validators and utility variants;
+ordered-set aggregates and unrelated index actions still fail closed.
+
+
+### VALUES derived relations
+
+Completed AST traversal retains one VALUES relation capability per RangeSubselect,
+scoped to its top-level statement. Binding matches structural VALUES wrappers as
+counted groups and verifies row cardinalities before emitting typed ValuesBlocks.
+INSERT row sources remain with their existing INSERT owner. Derived wrappers and
+rows reuse the canonical VALUES/list planners; row width excludes preceding rows.
+Every wrapper around an AST-owned relation JOIN is retained independently.
+
+Rejected VALUES shapes use their parser-owned first expression location to bind
+a structural VALUES wrapper for diagnostics. If that provenance cannot be proven,
+the diagnostic retains its enclosing statement range. No text keyword guess is
+used to manufacture a source location.
+
+
+### SQL-standard body statement ownership
+
+A closed body specification distinguishes atomic statement lists from inline
+RETURN bodies, with a parser-proven SQL/RETURN kind for each child. Binding verifies
+semicolon cardinality within the body span. SQL children use the canonical engine;
+RETURN children replace only their owned keyword with the equal-length SELECT
+adapter, then restore it before whole-routine AST/protected-token validation.
+The body budget includes its four-space framing indentation. Authored groups and
+comments are preserved, and nested unsupported ranges are shifted into the
+routine's coordinates without permitting a partial routine rewrite.
+
+## JSON argument grouping
+
+Reviewed function names and AST argument/aggregate cardinalities produce a closed
+FunctionArgumentSpec variant. The function-call binder verifies pair counts and
+binds aggregate ORDER BY separately from actual arguments before producing the
+corresponding FunctionArgumentLayout. ParenthesizedList carries that ownership
+to the shared list planner; routine signatures and other lists remain ordinary.
+The planner coalesces a compatible key/value unit at the hard-width budget,
+retains child expansion and all comment/blank boundaries, then reuses authored
+group splitting. The keyword-list planner accepts an owned prefix range so an
+aggregate ORDER BY budget includes both keywords without changing existing
+single-keyword callers. No renderer function-name lookup is used.
+
+## Routine body and header ownership
+
+SQL atomic and dollar bodies share one statement assembler. Parser-proven
+statement boundaries retain same-line trailing comments with the preceding
+statement before canonical formatting. Both body spellings use the same nested
+width budget and token-aware indentation; continuation bytes inside multiline
+literals are never indented.
+
+Routine headers bind their original AST locations before any whitespace
+normalization. The complete declaration is reparsed after header layout so
+location-owned casing uses the new source frame. Header, signature-list and
+external-literal expansion use the shared LayoutGroup::decide policy.
+
+VALUES derived relations retain the first-row expression anchor from their
+RangeSubselect provenance. Binding chooses the smallest enclosing first-row
+owner and verifies its exact capability and unique claim; CTE bodies cannot
+satisfy a derived-relation count accidentally.
+
+The procedural INTO adapter maps its insertion boundary through exact
+parser-owned type-alias edit ranges before binding canonical SQL tokens. Target
+lists use the canonical SQL list planner without joining physical lines;
+introducer/target comments and blank boundaries remain explicit. Child
+unsupported/skipped diagnostics are returned with the removed INTO span mapped
+back into leaf source coordinates, then shifted through the procedural node and
+routine-body frames. Strict-policy and complete-file atomicity remain owned by
+the facade.
+
+Procedural rendering carries unsupported or safety-skipped SQL leaves as typed
+protected source spans rather than ordinary lines. Their internal indentation,
+line endings, blank lines and attached comments bypass trimming and frame
+indentation; their authored leading line prefix is retained. Inline leaves gain
+contextual indentation only outside that protected span. Style diagnostics also
+exclude these spans, while child diagnostic identities and source ranges remain
+intact. Aggregate ORDER BY owners receive contextual indentation over the complete
+clause before the shared compact/expanded sort-list planner runs, including
+comments inside the prefix and before sort expressions.
+
+The procedural body result retains separate protected source and output ranges.
+Output ranges are recorded while assembling the rendered bytes, shifted through
+the newly laid-out routine header, and forwarded through the shared internal
+FormattedContent opaque-range fields. Body, routine and document width validation
+exclude only those leaves; supported siblings still undergo width enforcement.
+The public formatter result and the shared width policy are unchanged.
+
+`result.rs` owns the internal `FormattedContent` result shared by document and
+routine adapters: output, diagnostics, width warnings and protected source/output
+ranges. The canonical formatter retains this metadata through its existing gates;
+the public API projects it into the unchanged `FormattedSql` result. Procedural
+leaf adapters return an exhaustive `LeafOutcome::Formatted` or `Preserved` with
+diagnostics alongside it. Protection comes from owned source spans rather than
+diagnostic ID strings, and layout consumes that typed outcome directly.
+
+`routine_header` owns `OuterTokenOwnership`, its shared AST-backed constructor,
+option decoding, declaration locations and outer token normalization. SQL,
+external-language and PL/pgSQL routines use the same location constructor after
+parsing in their current source frame. Procedural formatting owns body validation,
+leaf adaptation and rendering; other routine modules no longer depend on it for
+generic declaration helpers. The SQL adapters' duplicate ownership construction
+and language-location helper are removed.

@@ -1,9 +1,24 @@
 # Durable implementation checklist
 
-Status: **Runnable CLI PoC complete; PostgreSQL statement coverage expanding**
+## JSON key/value layout batch
+
+- [x] Resolve the authored-group/one-argument conflict in core section 10.1 and
+  record the latest explicit project requirement in formatter-design.md.
+- [x] Add invented red fixtures for builders, aggregate families, comments,
+  widths, nested values, ordered aggregates, and ordinary-call controls.
+- [x] Carry reviewed pair/aggregate capabilities through typed call ownership.
+- [x] Reuse shared list/width planning and turn all new fixtures green.
+- [x] Update coverage, architecture, README/guide as needed; run full gates.
+- [x] Re-audit private copies, install the fresh binary, and update the PR.
+
+Status: **0.3.0 migration coverage and JSON key/value layout complete**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
+
+The [0.3.0 coverage report](coverage-improvements-0.3.0.md) records the current
+verified outcome. Earlier batch notes retain historical red-test counts and
+audit findings; those counts do not describe the final implementation.
 
 ## Authored SELECT clause layout regression batch
 
@@ -1238,3 +1253,501 @@ indentation. No PostgreSQL formatter-core source or existing user files change.
 - [x] Verify the CLI version and complete the required repository gates.
 - [x] Build the optimized release locally and verify installation through the existing user PATH.
 - [x] Review staged scope with GitNexus, commit and push to PR #47.
+
+## Synthetic layout regression tests (intentionally red)
+
+- [x] Add twelve active regression tests using only invented SQL, generic
+  identifiers, and constants; include no production queries, paths, or domains.
+- [x] Reproduce deeper derived-query indentation, SELECT item/clause alignment,
+  authored blank/comment groups, and grouped lateral-source indentation.
+- [x] Reproduce procedural WITH layout for SELECT, INSERT, UPDATE, and DELETE,
+  including a collapse beyond the hard width.
+- [x] Reproduce safely breakable FUNCTION and PROCEDURE header failures.
+- [x] Require statement-level routine width handling under default and strict
+  policy, independently of the WITH and header regressions.
+- [x] Confirm all twelve tests fail against the unchanged formatter; no ignores
+  or expected-panic annotations hide the failures.
+- [ ] Fix the formatter and turn the regression target green in a later batch.
+
+Run `cargo test --locked --test synthetic_layout_regressions` to reproduce.
+This tests-only batch deliberately leaves the formatter, support classification,
+application version, and installed executable unchanged. Existing SQL assertion
+helpers enforce golden layout, semantic equivalence where applicable,
+idempotence, and clean checks once the fixes land. Long headers assert width and
+semantics without requiring an arbitrary canonical header layout.
+
+## Second synthetic coverage pass (intentionally red)
+
+- [x] Retry formatting fresh local copies after the first tests-only batch;
+  production source files remain unchanged and outside the repository.
+- [x] Audit statements independently so document-level fatal failures do not
+  hide unsupported syntax or statement safety skips.
+- [x] Add 24 desired-support tests after explicit user direction to cover both
+  unsupported syntax and formatter bugs.
+- [x] Cover settings, aggregate definitions, index attachment, SQL routine
+  body forms/options, procedural RAISE options/ELSIF/RETURN NEXT, VALUES-backed
+  views, CTE-backed views/materialized views, wrapped materialized-view set
+  operation branches, and trigger transition tables.
+- [x] Cover optional final procedural END semicolons, `=` assignment, static
+  procedural ANALYSE/TRUNCATE, and composite type/foreign key/sequence/trigger
+  width failures.
+- [x] Prove every synthetic example parses as PostgreSQL and all 24 tests fail
+  for unsupported, ownership, parse-adapter, or layout reasons on today's engine.
+- [x] Keep generated identifiers within PostgreSQL's 63-byte limit, with only
+  generic sample names and constants; copy no production query or domain.
+- [x] Document the pending support requirement without changing current support
+  claims; reconcile older rejection tests when each capability is implemented.
+- [x] Implement the pending capabilities through reviewed typed ownership and
+  turn both new test targets green in subsequent batches.
+
+The local second audit found two document-fatal width errors, 85 unsupported
+statements, and 28 safety-skipped statements. The latter comprise 21 width
+failures, three optional-END-semicolon failures, two procedural ownership
+alignment failures, one SQL RETURN adapter failure, and one materialized-view
+query binding failure. Representative grammar shapes are covered by the new
+tests; the production audit and queries remain in local temporary storage only.
+
+## Application version batch
+
+- [x] Bump the application and lockfile package version from 0.2.0 to 0.3.0.
+- [x] Build and verify the optimized executable through the existing user PATH.
+
+This version includes the synthetic regression coverage; the intentionally red
+tests track pending formatter fixes and do not imply those fixes have shipped.
+
+## Nested query ownership layout implementation
+
+- [x] Use the opening parent's planned line indent consistently for query lists
+  and clauses; preserve relative depth in wrapper fallback indentation.
+- [x] Plan relation sources for every typed query, including nested grouped
+  lateral sources; remove the relation wrapper's blanket child-indent override.
+- [x] Turn all three nested-query regression tests green with semantic equality,
+  authored comment/blank grouping, clean checks, and idempotence.
+- [x] Run formatting, locked Clippy, Rustdoc, diff hygiene, and all test targets;
+  all existing targets pass, with only the 33 remaining new red cases failing.
+- [x] Review shared SELECT/DML/MERGE call paths, dead code, and dependency scope;
+  no new dependencies, keyword scans, or production examples are introduced.
+
+## Procedural SQL ownership and routine safety implementation
+
+- [x] Route typed SQL leaves, including WITH, through the canonical formatter;
+  preserve internal semicolons and propagate nested safety diagnostics.
+- [x] Compare styles against the framed body and keep optional alias changes
+  out of style token alignment; preserve blank lines without trailing spaces.
+- [x] Review parser categories for ELSIF, RAISE options, and RETURN NEXT.
+- [x] Share depth-bounded `:=`/`=` ownership with rendering and PL/pgSQL
+  equivalence normalization; accept the parser-valid optional final END semicolon.
+- [x] Route static ANALYZE/ANALYSE/TRUNCATE through the SQL owner and bind both
+  PostgreSQL ANALYZE scanner spellings.
+- [x] Validate routine width before document assembly and measure multiline
+  protected token fragments without excusing short multiline comments.
+- [x] Turn fourteen additional red cases green; seventeen of the original 36
+  cases now pass, with nineteen pending routine header/SQL/DDL cases.
+- [x] Add five synthetic controls for comments/blank groups, nested diagnostic
+  ranges/default/strict policies, quoted targets, indivisible literals, and
+  still-unsupported procedural parser nodes.
+- [x] Verify the local schema copy can produce a diff without a document-fatal
+  width error; keep its source and diagnostics outside the repository.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. All existing
+  tests and the five new controls pass; only the nineteen remaining red cases fail.
+
+
+## View CTE and wrapped-query ownership implementation
+
+- [x] Retain parser-validated view CTE capabilities and enqueue their bounded
+  SELECT owner into the existing statement/CTE work queue.
+- [x] Bind AS to its actual query start and exclude CREATE headers and check/data
+  suffixes from set-operation owners, including wrapped branches.
+- [x] Turn three additional original red cases green; twenty of the original 36
+  now pass, with sixteen routine/DDL/VALUES cases pending.
+- [x] Cover nested CTEs, comments, options, aliases, and query suffixes with two
+  additional synthetic controls; preserve unreviewed-expression boundaries.
+- [x] Run the full suite, then reconcile and rerun the three historical negative
+  fixture targets whose unsupported assumptions the new requirement supersedes.
+  Those targets and all other existing targets pass; the two desired-coverage
+  targets retain only the sixteen remaining expected red cases.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene; review semantic
+  preservation, exhaustive ownership, comments, idempotence, diagnostics, and
+  dependency/dead-code scope. No dependencies or production SQL were added.
+- [x] Repeat formatting on the private schema copy without document-fatal errors;
+  keep all private source and diff artifacts in temporary storage.
+
+
+## Migration utility ownership implementation
+
+- [x] Review SET values/default/current forms, ordinary aggregate definitions,
+  and ALTER INDEX partition attachment through explicit utility variants.
+- [x] Bind aggregate signature/option and composite-field lists against AST
+  cardinality and reuse the shared list planner; distinguish star signatures.
+- [x] Turn four additional original red cases green; twenty-four of the original
+  36 now pass, with twelve remaining routine/DDL/VALUES cases pending.
+- [x] Add five fixture-backed controls for aggregate options and grouping,
+  session/local settings, attachments, and adjacent unsupported forms.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. Full all-target
+  testing passes every existing target and new control target; only the twelve
+  intentionally pending cases in the two desired-coverage targets remain red.
+- [x] Review semantics, parser/IR/layout boundaries, comments, idempotence,
+  diagnostics, atomicity, dependencies, and dead code. No dependencies added.
+- [x] Re-audit the private schema copy: 37 unsupported units, 27 safety skips,
+  no fatal errors. All source and audit artifacts remain outside the repository.
+
+
+## VALUES derived relations and diagnostic locations
+
+- [x] Retain typed VALUES relation capabilities from RangeSubselect nodes;
+  verify structural wrapper/row cardinality within each owning statement.
+- [x] Reuse VALUES row and parenthesized-list planners, retain derived-table
+  wrappers, and measure each row without including preceding rows.
+- [x] Retain every wrapper around parser-owned relation JOINs rather than only
+  the outer item wrapper, preserving readable VALUES/lateral nesting.
+- [x] Locate rejected VALUES shapes from parser-proven expression locations;
+  retain the whole-statement fallback when no bounded location is available.
+- [x] Add seven synthetic controls spanning SELECT/view, UPDATE/DELETE/MERGE,
+  INSERT SELECT, repeated/nested sources, comments/groups, wrapper/row layouts,
+  and API/CLI line-column-byte locations with CRLF and UTF-8 prefixes.
+- [x] Turn the original VALUES-source desired-support case green; twenty-five
+  of the original 36 now pass, with eleven unrelated cases still pending.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. Full all-target
+  testing passes all existing and new controls; only the eleven pending cases
+  in the two desired-coverage targets fail.
+- [x] Format/check a fresh private input copy without warnings; confirm the
+  original path can produce a diff without warnings, without rewriting it.
+- [x] Rebuild and install the current optimized 0.3.0 on the user PATH; verify
+  matching hashes, private-copy clean check, and installed CLI diagnostic offsets.
+- [x] Review semantic equivalence, ownership boundaries, idempotence, authored
+  groups/comments, diagnostics, atomicity, dependencies, and dead code. No new
+  dependencies or private SQL/domain fixtures were added.
+
+
+## Dump-comment diagnostic anchors
+
+- [x] Reproduce unsupported and skipped-statement warnings anchored to leading
+  dump comment blocks rather than SQL syntax, including repeated file fmt runs.
+- [x] Locate the first non-comment scanner token in fallback diagnostic ranges;
+  keep rewrite/opaque spans and trusted cause ranges unchanged.
+- [x] Adjust skipped-statement message lines to the same SQL token anchor.
+- [x] Add a synthetic CLI regression spanning check/diff and repeated fmt,
+  preceding layout changes, line/block comments, Unicode, and CRLF input/output.
+- [x] Verify the private schema copy: no unsupported/skipped warnings remain
+  anchored to comment blocks. Reported examples move from 1367 to 1371 and from
+  1421 to 1425, matching their actual SQL statement starts.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. The full suite
+  passes existing targets and diagnostic controls; the same eleven pending
+  routine/DDL cases in the two desired-coverage targets remain red.
+- [x] Review diagnostic provenance, input/output coordinates, comments,
+  idempotence, semantic/rewrite boundaries, atomicity, and dependencies/dead code.
+  No formatting/layout behavior or dependency changes were introduced.
+- [x] Rebuild/install optimized 0.3.0 on PATH and verify matching hashes and the
+  installed CLI's syntax-token location. Keep all private files outside the repo.
+
+
+## Authored blank lines after comments
+
+- [x] Reproduce loss of blank lines between dump comment headers and CREATE
+  INDEX statements with a synthetic two-index fixture.
+- [x] Retain the following token's authored newline count when ending comments
+  in the shared emitter; keep existing comment attachment/indentation rules.
+- [x] Cover line/block comments, multiple blank lines, and inline/query comments
+  using semantic equivalence, idempotence, and clean-check assertions.
+- [x] Format the private original Git schema snapshot and verify all 873 dump
+  header gaps retain their original counts; keep its SQL outside the repository.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. Full all-target
+  testing passes all existing and new controls; the same eleven pending cases
+  in the two desired-coverage targets remain red.
+- [x] Rebuild/install optimized 0.3.0 on PATH, verify matching hashes and an
+  installed-CLI blank-line smoke test.
+- [x] Review semantics, authored groups/comments, idempotence, diagnostics,
+  atomicity, module boundaries, dependencies, and dead code. No dependencies,
+  ownership-model expansions, or private domain fixtures were added.
+
+
+## SQL-standard multi-statement and RETURN implementation
+
+- [x] Model atomic statement lists and inline RETURN with closed AST body kinds;
+  verify statement cardinality in the token-bound body span.
+- [x] Route SELECT/DML through the canonical formatter and RETURN expressions
+  through an equal-length SELECT adapter, restoring the keyword before gates.
+- [x] Review all three PARALLEL modes and preserve authored inline/body groups,
+  comments, and indentation-aware width budgets.
+- [x] Shift nested unsupported ranges together with located safety errors;
+  retain whole-routine default/strict atomicity.
+- [x] Turn four original red cases green; twenty-nine of the original 36 now
+  pass, with seven remaining dollar-body/header/DDL cases.
+- [x] Cover body grouping, PARALLEL modes, all reviewed DML kinds, authored
+  inline RETURN boundaries, and local nested-unsupported/strict diagnostics.
+- [x] Reconcile former multi-statement rejection fixtures with still-unreviewed
+  body statements. Pass formatting, locked Clippy, Rustdoc, and diff hygiene.
+- [x] Run all targets: existing/control targets pass; only the seven pending
+  cases in the two desired-coverage targets remain red.
+- [x] Re-audit the private schema copy: 22 unsupported statements and 29 safety
+  skips remain. Keep its source and diagnostic artifacts outside the repository.
+- [x] Review semantics, ownership/layout boundaries, idempotence, comments,
+  diagnostics, atomicity, dependencies, and dead code; no dependencies added.
+
+## Dollar-quoted SQL routine implementation
+
+- [x] Bind LANGUAGE SQL AS bodies to typed AST locations and decoded values;
+  preserve tags and route each statement through the canonical formatter.
+- [x] Validate embedded SQL separately from the unchanged outer literal;
+  preserve multiline protected tokens and whole-routine failure atomicity.
+- [x] Cover common routine options, both language/body clause orders, comments,
+  body groups, unsupported inner expressions, and unreviewed quoting.
+- [x] Reparse statement-local routine metadata; cover Unicode and preceding
+  statements so inline RETURN locations cannot inherit document offsets.
+- [x] Reconcile former SQL-body rejection tests with other routine languages.
+- [x] Thirty of the original 36 desired cases now pass; six header/DDL cases
+  remain. Focused controls, formatting, Clippy, Rustdoc, and diff hygiene pass.
+- [x] Repeat the private statement audit without placing private SQL in fixtures.
+- [x] Review semantics, ownership, comments/groups, idempotence, diagnostics,
+  atomicity, dependencies, and dead code; no dependencies added.
+
+## Shared routine header implementation
+
+- [x] Bind signatures and RETURNS TABLE lists to AST parameter counts; bind
+  option clause starts to AST locations and keep bodies outside header layout.
+- [x] Reuse the list planner and shared emitter; preserve identifier/type case,
+  defaults, comments, authored groups, and AS literal framing whitespace.
+- [x] Turn both original long routine header cases green (32 of 36 original
+  desired cases pass); cover SQL dollar/atomic/RETURN bodies and table results.
+- [x] Repeat the private audit: seven unsupported diagnostics and 28 statement
+  skips remain, including pending DDL and additional body-layout shapes.
+- [x] Run focused tests and all-target gates; remaining original red cases are
+  the four desired DDL cases. Review semantic preservation, module boundaries,
+  idempotence, comments, diagnostics, atomicity, dependencies, and dead code.
+
+## Reviewed migration DDL clause implementation
+
+- [x] Carry typed sequence-option locations, trigger timing/column/transition
+  capabilities, and foreign-key key counts/action kinds through ownership IR.
+- [x] Bind and verify clause boundaries; preserve order, authored gaps/comments,
+  and transition aliases before planning long DDL lines.
+- [x] Turn all four original DDL cases green: all 36 original desired-support
+  and regression cases now pass. Add nearby positive and unsupported controls.
+- [x] Run focused tests, full all-target testing, formatting, locked Clippy,
+  Rustdoc, and diff hygiene; review semantic preservation, module boundaries,
+  idempotence, comments/groups, diagnostics, atomicity, dependencies/dead code.
+- [x] Re-audit private schema copies; remaining issues include identity options,
+  nested query/call layout, procedural INTO/transaction nodes, and a VALUES
+  suffix. Keep all private source and output artifacts outside the repository.
+
+## Remaining migration audit coverage
+
+- [x] Add nine invented shape fixtures after the first complete coverage pass.
+- [x] Reproduce seven failures: identity option layout, deeply nested keyword
+  function calls, procedural parameter %TYPE, procedural INTO, transaction
+  nodes, VALUES suffixes, and external-language routine declarations.
+- [x] Keep array-subquery and recordset/CTE controls; further reductions are
+  required for the private ownership and procedural idempotence failures.
+- [x] Implement the remaining reviewed capabilities and make this target green.
+- [x] Repeat private formatting/check/idempotence audits and resolve remaining
+  safety skips before reporting the final coverage and updating the PR.
+
+## AST-owned function calls and relation alias binding
+
+- [x] Reproduce deep keyword-named call collapse and commented-call argument
+  overflow; record explicit call names through the completed AST traversal.
+- [x] Bind qualified/quoted names and parentheses; retain reviewed special SQL
+  grammar and model parser-generated escape helpers as explicit operator owners.
+- [x] Bind call-name roles before relations, excluding same-spelled call tokens
+  from aliases and recognizing AS-less recordset column-definition aliases.
+- [x] Cover keyword names, quote/qualification, comments, argument groups,
+  authored/generated helper calls, and both private ownership reductions.
+- [x] Keep all original 36 cases green; six remaining audit fixture failures
+  still require identity, procedural, VALUES suffix, and external routines.
+- [x] Run focused and full all-target tests plus formatter/Clippy/Rustdoc/diff
+  gates. Review semantics, typed ownership, idempotence, comments, diagnostics,
+  atomicity, dependencies, and dead code; no dependencies added.
+
+## Identity sequence-option implementation
+
+- [x] Bind identity introductions and sequence options to constraint/DefElem
+  locations within CREATE TABLE column and ALTER TABLE action spans.
+- [x] Reuse sequence validation/binding directly through owned ranges, including
+  SEQUENCE NAME, both generation modes, optional options, and authored groups.
+- [x] Make the identity audit fixture green; cover column/ALTER forms, negative
+  increments, bounds, cycles, comments, and blank option groups.
+- [x] Run focused/full all-target checks and formatting/Clippy/Rustdoc/diff
+  gates; five remaining audit fixture cases are still red.
+- [x] Re-audit private copies and review semantics, module boundaries,
+  idempotence, comments/groups, diagnostics, atomicity, dependencies/dead code.
+
+## Nested expression and relation group implementation
+
+- [x] Add red fixtures for nested ON predicates, wide array elements in
+  predicates/CASE, named CHECK prefixes, and LATERAL column-definition budgets.
+- [x] Replace the SELECT-only outer-depth ON scan with shared typed join owners.
+- [x] Bind array brackets/counts separately from subscripts; complete traversal
+  of array and DDL expression children and retain nested unsupported boundaries.
+- [x] Include function qualification and owned relation prefixes in list budgets;
+  preserve expanded child groups and final CASE/predicate array indentation.
+- [x] Cover nested arrays, comments, CHECK arrays, and existing layout/alias
+  controls; keep five procedural/VALUES/external audit cases explicitly red.
+- [x] Run focused/full gates and repeat private audits; review semantics,
+  ownership, idempotence, comments, diagnostics, atomicity, dependencies/dead code.
+
+## Procedural leaf capability implementation
+
+- [x] Bind static SQL to parser queries and restore procedural INTO/STRICT at
+  their authored token boundaries; preserve comments and repeated branch queries.
+- [x] Preserve parser-recorded datatype references and review transaction command
+  and chain metadata; keep unknown PL parser nodes unsupported.
+- [x] Cover SELECT/RETURNING INTO, CTE leaves, type/rowtype references, arithmetic
+  percent operators, and default/strict transaction policy.
+- [x] Run full gates and review semantics, ownership, idempotence, comments,
+  diagnostics, atomicity, dependencies, and dead code before committing.
+- [x] Resolve the remaining SQL-child idempotence failure: exclude contained
+  query connectors from an outer NOT EXISTS owner; add a synthetic reduction.
+
+## VALUES suffix implementation
+
+- [x] Bind row groups separately from suffix expression parentheses; verify
+  row/order counts and limit/offset capabilities for each source.
+- [x] Reuse list/clause planners and preserve row comments and authored groups.
+- [x] Cover standalone/derived ORDER, LIMIT/OFFSET/FETCH, repeated sources,
+  expression parentheses, and DML derived sources; retain explicit neighbors.
+- [x] Add a private-audit reduction for VALUES CTE bodies; carry the explicit
+  statement variant through ordinary, nested, materialized, and DML CTE owners.
+- [x] Re-audit newly enabled VALUES CTEs; reproduce and fix the CASE result
+  prefix width failure using a generic nested-query fixture.
+- [x] Run full gates, repeat private audits, and review safety/module boundaries,
+  idempotence, groups, diagnostics, atomicity, dependencies, and dead code.
+
+## External routine declaration implementation
+
+- [x] Add failing C/internal, body-argument, long-list, comment, and unknown-language
+  controls; bind exact AS literal cardinality without interpreting their contents.
+- [x] Reuse shared option validation and header layout, with protected AS argument
+  groups; reparse layout before location-owned casing/whitespace normalization.
+- [x] Make all 22 follow-up regression cases green without weakening safety gates.
+- [x] Run full gates, re-audit private copies, and review semantics, architecture,
+  idempotence, comments, diagnostics, atomicity, dependencies, and dead code.
+
+## Multiline warning coordinate implementation
+
+- [x] Reproduce routine-body warnings falling back to the entire file/line 1.
+- [x] Bind intersecting tokens and parser-owned routine literals; map inner token
+  identity/occurrence without depending on surrounding alias token cardinality.
+- [x] Cover SQL/PL bodies, repeated formatting, Unicode, CRLF, type aliases,
+  multiline comments, and ordinary dollar literal ownership.
+- [x] Run full gates and private file fmt/check/idempotence audits; review source
+  attribution, safety, module boundaries, comments, and dependency/dead-code status.
+
+## Final migration coverage verification and documentation
+
+- [x] Verify all 454 tests and required formatter/Clippy/Rustdoc/diff gates.
+- [x] Verify supplied copies and original Git snapshot: zero unsupported/skipped
+  statements, clean check exit status, and byte-identical repeated formatting.
+- [x] Verify all 873 original dump-header gaps and accurate indivisible warnings.
+- [x] Synchronize README, coverage, architecture, user guide, and design decisions;
+  record the detailed fixture/bug/audit report without private SQL or domains.
+- [x] Build and verify the optimized 0.3.0 Windows executable.
+
+## Independent review combination regressions
+
+- [x] Reproduce all seven reported issues with invented fixtures.
+- [x] Add an atomic multiline-literal regression for the duplicated body renderer.
+- [x] Rebind normalized routine header locations and unify body assembly.
+- [x] Bind VALUES relations by AST provenance and accept optional transition AS.
+- [x] Restore procedural INTO through mapped boundaries; preserve comments and child diagnostics.
+- [x] Route routine header expansion through the shared layout policy.
+- [x] Run full gates and repeat private-copy audits; update the PR and installed binary.
+
+### SQL routine ownership and assembly review batch
+
+- Header layout binds original parser locations before normalization; the complete
+  laid-out declaration is reparsed before casing uses new option locations.
+- Atomic and dollar bodies share width adjustment, statement/gap assembly,
+  trailing-inline-comment ownership, and token-aware indentation.
+- The atomic literal and header/comment regressions are green. Existing SQL and
+  external routine targets pass; five other review regressions remain pending.
+- Header/list/literal expansion uses LayoutGroup::decide. No parser, dependency,
+  fallback, or safety exemption was added.
+
+### VALUES/trigger/procedural ownership review batch
+
+- [x] Bind derived VALUES from AST first-row anchors with unique ownership and
+  capability verification; keep unreviewed neighboring syntax unsupported.
+- [x] Bind optional transition AS without altering the authored spelling.
+- [x] Remove stale INTO ordinal metadata; retain exact alias edit ranges and map
+  the insertion boundary before canonical SQL token binding.
+- [x] Keep the canonical target-list planner, line-comment terminators, authored
+  comma groups and blank boundaries; include STRICT prefix width in budgets.
+- [x] Return child diagnostic identity with leaf coordinates restored through
+  the removed INTO span; test default/strict and Unicode/CRLF frames.
+- [x] Pass all 469 tests across 58 targets and all five required engineering gates.
+- [x] Verify fresh private copies: zero unsupported/skipped/errors, clean check,
+  byte-identical repeat fmt, 873 preserved header gaps and eight correctly located
+  permitted indivisible-width warnings.
+- [x] Rebuild/install 0.3.0 on PATH with a matching hash and update PR #49.
+- [x] Self-review semantic preservation, module/ownership boundaries, idempotence,
+  comments/groups, diagnostic frames, atomicity, dependencies and dead code.
+  No parser/fallback/dependency or safety exemption was added.
+
+JSON pair batch verification: all 482 tests across 59 targets pass, including
+13 new pair fixtures and SQL/Go/Rust parity. Formatting, locked Clippy, Rustdoc
+and diff checks pass. Fresh private copies have no unsupported/skipped/errors,
+pass check and repeated fmt byte identity, retain all 873 header gaps and eight
+correctly located permitted width warnings. The optimized 0.3.0 is on PATH with
+a matching release hash and a paired-layout CLI smoke test; PR #49 is updated.
+Self-review covered semantic preservation, typed ownership/module boundaries,
+idempotence, comments/authored groups, diagnostics, atomicity, dependencies and
+dead code. No dependencies or safety exemptions were added.
+
+## Second independent review regressions
+
+- [x] Reproduce multiline unsupported procedural INTO diagnostic loss and JSON
+  aggregate ORDER BY comment-continuation indentation with red fixtures.
+- [x] Carry unsupported/skipped procedural leaves as protected source spans;
+  retain internal bytes, authored line prefixes and attached comments, and
+  exclude protected spans from style diagnostics.
+- [x] Set contextual indentation across the complete aggregate ORDER BY owner
+  before shared compact/expanded list planning.
+- [x] Pass all 484 tests across 59 targets and all five engineering gates;
+  private copies pass fmt/check and byte-identical repeat formatting with zero
+  unsupported/skipped/errors.
+- [x] Review semantics, typed source protection, ownership/module boundaries,
+  idempotence, comment attachment/groups, diagnostic ranges, strict atomicity,
+  dependencies and dead code. No dependency or safety exemption was added.
+- [x] Update PR #49 and install the fresh optimized 0.3.0 binary on PATH,
+  verifying PATH resolution and the matching release hash.
+
+## Protected procedural leaf width validation
+
+- [x] Add a red over-width unsupported-leaf fixture at 80/default 160 columns,
+  covering strict policy, CRLF, preceding SQL and supported sibling controls.
+- [x] Retain rendered protected output ranges, shift them through header layout
+  and document assembly, and reuse existing width validation exclusions.
+- [x] Run full gates and private-copy audits; self-review source protection,
+  diagnostic provenance, supported width enforcement and strict atomicity.
+- [x] Update PR #49 and install the fresh optimized 0.3.0 binary on PATH.
+
+Width follow-up verification: 485 tests across 59 targets pass, with one existing
+ignored test. All five required gates pass. Fresh private copies pass fmt/check
+and byte-identical repeat formatting with zero unsupported/skipped/errors.
+The PATH executable matches the optimized release hash. Self-review confirmed
+leaf-only exclusions, source/output coordinate frames, supported width checks,
+parse/equivalence/idempotence gates, strict atomicity, comments/groups, module
+boundaries and unchanged dependencies. No dead code or fallback was introduced.
+
+## Routine/result maintainability follow-up
+
+- [x] Replace diagnostic-string-based protection with exhaustive typed leaf
+  outcomes derived from canonical protected-source metadata.
+- [x] Move shared declaration ownership, option/location helpers and outer
+  normalization into routine_header; use one AST-backed ownership constructor.
+- [x] Move the private formatting result into a shared result module; keep
+  canonical metadata through existing safety gates and the public API unchanged.
+- [x] Remove duplicate ownership construction, the redundant language-location
+  helper and unused imports; pass focused routine and review regression targets.
+- [x] Run full gates and private-copy audits; complete architecture self-review.
+- [x] Prepare the coherent commit, rebuild/install 0.3.0 and rewrite PR #49 under
+  features, fixes and chores around the complete final implementation.
+
+Maintainability verification: all 485 tests across 59 targets and five engineering
+gates pass. Fresh private copies pass fmt/check and byte-identical repeat fmt;
+their outputs also match the previous validated build byte-for-byte, with zero
+unsupported/skipped/errors. The PATH binary matches the optimized release hash.
+Self-review checked typed outcomes, canonical metadata retention, declaration
+source frames, source/output ranges, comments/groups, safety/idempotence and
+strict atomicity. Public behavior, dependency surface and reviewed syntax remain
+unchanged. Existing fixtures validate behavior preservation for this refactor.

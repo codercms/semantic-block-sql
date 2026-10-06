@@ -89,9 +89,16 @@ impl LayoutPlan {
         }
     }
 
-    fn set_fallback_indent(&mut self, range: std::ops::Range<usize>, indent: usize) {
-        for slot in &mut self.token_indents[range] {
-            slot.get_or_insert(indent);
+    fn set_fallback_indent(
+        &mut self,
+        range: std::ops::Range<usize>,
+        depths: &[usize],
+        base_depth: usize,
+        indent: usize,
+    ) {
+        for index in range {
+            self.token_indents[index]
+                .get_or_insert(indent + depths[index].saturating_sub(base_depth));
         }
     }
 
@@ -107,19 +114,30 @@ impl LayoutPlan {
     }
 
     fn shift_indents(&mut self, range: std::ops::Range<usize>, levels: usize) {
-        if levels == 0 {
+        self.rebase_indents(range, 0, levels);
+    }
+
+    fn rebase_indents(&mut self, range: std::ops::Range<usize>, current: usize, desired: usize) {
+        if current == desired {
             return;
         }
+        let adjust = |indent: usize| {
+            if desired > current {
+                indent + desired - current
+            } else {
+                indent.saturating_sub(current - desired)
+            }
+        };
         for (index, line_break) in &mut self.before {
             if range.contains(index) {
-                line_break.indent += levels;
+                line_break.indent = adjust(line_break.indent);
             }
         }
         for indent in self.token_indents[range.clone()].iter_mut().flatten() {
-            *indent += levels;
+            *indent = adjust(*indent);
         }
         for offset in &mut self.indent_offsets[range] {
-            *offset += levels;
+            *offset = adjust(*offset);
         }
     }
 }
@@ -179,6 +197,7 @@ struct ParenthesizedList {
     close: usize,
     expanded: bool,
     base_indent: Option<usize>,
+    arguments: super::layout_ir::FunctionArgumentLayout,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -213,6 +232,9 @@ pub(super) fn format(
     for &index in layout.identifier_tokens() {
         tokens[index].role = TokenRole::Identifier;
     }
+    for call in layout.function_calls() {
+        tokens[call.name].role = TokenRole::FunctionName;
+    }
     let cases = case_ranges(&tokens, options);
     let selects = layout.selects().cloned().collect::<Vec<_>>();
     let inserts = layout.inserts().cloned().collect::<Vec<_>>();
@@ -225,7 +247,7 @@ pub(super) fn format(
     let create_tables = layout.create_tables().cloned().collect::<Vec<_>>();
     let create_indexes = layout.create_indexes().cloned().collect::<Vec<_>>();
     let alter_tables = layout.alter_tables().cloned().collect::<Vec<_>>();
-    let utilities = layout.utilities().copied().collect::<Vec<_>>();
+    let utilities = layout.utilities().cloned().collect::<Vec<_>>();
     let mut join_using_lists = layout
         .queries()
         .iter()
@@ -255,6 +277,53 @@ pub(super) fn format(
                     .filter_map(|join| join.using_open.map(|open| (open, depths[open])))
             }),
     );
+    let definition_headers = layout
+        .queries()
+        .iter()
+        .filter_map(|query| query.from.as_ref().map(|source| (source, query.indent)))
+        .chain(
+            updates
+                .iter()
+                .filter_map(|update| update.from.as_ref())
+                .map(|source| (source, source.base_depth)),
+        )
+        .chain(
+            deletes
+                .iter()
+                .filter_map(|delete| delete.using.as_ref())
+                .map(|source| (source, source.base_depth)),
+        )
+        .chain(
+            merges
+                .iter()
+                .map(|merge| (&merge.source, merge.source.base_depth)),
+        )
+        .flat_map(|(source, indent)| {
+            source.definition_lists.iter().map(move |&(open, _)| {
+                let prefix = source
+                    .joins
+                    .iter()
+                    .filter(|join| {
+                        join.start < open && join.predicate.is_none_or(|(on, _)| open < on)
+                    })
+                    .map(|join| join.start)
+                    .max()
+                    .or_else(|| {
+                        source
+                            .items
+                            .iter()
+                            .find(|item| item.start <= open && open < item.end)
+                            .map(|item| item.start)
+                    })
+                    .unwrap_or(source.range.start);
+                (
+                    open,
+                    prefix,
+                    indent + depths[open].saturating_sub(source.base_depth),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
     let parenthesized_lists = parenthesized_lists(
         &tokens,
         depths,
@@ -266,6 +335,9 @@ pub(super) fn format(
             join_using_lists: &join_using_lists,
             utilities: &utilities,
             values: &values,
+            arrays: layout.arrays(),
+            calls: layout.function_calls(),
+            definition_headers: &definition_headers,
         },
         options,
     );
@@ -291,7 +363,14 @@ pub(super) fn format(
             cases: &cases,
         },
     );
-    let boolean_ranges = boolean_ranges(&tokens, depths, &expression_ranges, parens, options);
+    let boolean_ranges = boolean_ranges(
+        &tokens,
+        depths,
+        &expression_ranges,
+        layout.queries(),
+        parens,
+        options,
+    );
     let mut plan = LayoutPlan::new(tokens.len());
 
     for span in layout.statement_spans().skip(1) {
@@ -347,7 +426,7 @@ pub(super) fn format(
     plan_views(&context, &views, &mut plan);
     plan_materialized_views(&context, &materialized_views, &mut plan);
     plan_values_statements(&context, &values, &mut plan);
-    plan_create_tables(&context, &create_tables, &mut plan);
+    plan_create_tables(&context, &create_tables, &boolean_ranges, &mut plan);
     plan_create_indexes(&context, &create_indexes, &mut plan);
     plan_alter_tables(&context, &alter_tables, &mut plan);
     plan_utility_statements(&context, &utilities, &mut plan);
@@ -378,10 +457,60 @@ pub(super) fn format(
     plan_set_operations(&context, layout.set_operations(), &mut plan);
     plan_cases(&tokens, depths, &cases, &mut plan);
     plan_booleans(&tokens, depths, &boolean_ranges, parens, options, &mut plan);
+    // Array constructors may live in CASE/predicate groups whose final parent
+    // line is planned after argument lists. Rebase the already-owned bracket
+    // subtree, including nested CASE/query groups, instead of replanning it.
+    for &(open, close) in layout.arrays() {
+        if let Some(current) = plan.before.get(&close).map(|line_break| line_break.indent) {
+            let desired = plan
+                .before
+                .iter()
+                .filter(|(index, _)| **index <= open)
+                .max_by_key(|(index, _)| **index)
+                .map_or(current, |(_, line_break)| line_break.indent);
+            plan.rebase_indents(open + 1..close + 1, current, desired);
+        }
+    }
+    plan_case_result_boundaries(&tokens, &expression_ranges, options, &mut plan);
     plan_expression_comment_continuations(&tokens, &expression_ranges, &mut plan);
     plan_ctes(&tokens, depths, layout.with_blocks(), &mut plan);
 
     let terminal_semicolon = terminal_semicolon_plan(&tokens, options.semicolon_policy);
+    Ok(render_plan(
+        &tokens,
+        depths,
+        &plan,
+        terminal_semicolon,
+        options,
+        source.ends_with('\n'),
+    ))
+}
+
+/// Emit a parser-confirmed procedural command without a SQL statement adapter.
+pub(super) fn format_procedural_command(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
+    let tokens = tokenize(source)?;
+    let structure = TokenStructure::new(&tokens);
+    Ok(render_plan(
+        &tokens,
+        structure.depths(),
+        &LayoutPlan::new(tokens.len()),
+        terminal_semicolon_plan(&tokens, SemicolonPolicy::Preserve),
+        options,
+        source.ends_with('\n'),
+    ))
+}
+
+fn render_plan(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    plan: &LayoutPlan,
+    terminal_semicolon: TerminalSemicolonPlan,
+    options: &FormatOptions,
+    ends_with_newline: bool,
+) -> String {
     let mut writer = Writer::new();
     let mut previous_index = None;
 
@@ -405,34 +534,143 @@ pub(super) fn format(
             writer.newline(lines, plan.indent_for(index, depths[index]));
         }
 
-        if needs_space(&tokens, previous_index, index) {
+        if needs_space(tokens, previous_index, index) {
             writer.space();
         }
-        writer.write(&render_token(&tokens, index, options));
+        writer.write(&render_token(tokens, index, options));
         if terminal_semicolon.insert_after == Some(index) {
             writer.write(";");
         }
 
         if token.is_comment() {
-            let next_starts_authored_line = tokens
+            let next_line_breaks = tokens
                 .get(index + 1)
-                .is_some_and(|next| next.line_breaks_before > 0);
-            if token.kind == Token::SqlComment || next_starts_authored_line {
+                .map_or(0, |next| next.line_breaks_before);
+            if token.kind == Token::SqlComment || next_line_breaks > 0 {
                 let indent = plan.indent_for(index, depths[index]);
-                writer.newline(1, indent);
+                writer.newline(next_line_breaks.max(1), indent);
             }
         }
 
         previous_index = Some(index);
     }
 
-    Ok(writer.finish(source.ends_with('\n')))
+    writer.finish(ends_with_newline)
 }
 
 fn query_indent(query: &QueryBlock, plan: &LayoutPlan) -> usize {
     query.wrapper.map_or(query.indent, |(open, _close)| {
-        plan.indent_for(open, query.indent.saturating_sub(1)) + 1
+        plan.line_indent_for(open, query.indent.saturating_sub(1)) + 1
     })
+}
+
+/// Render only a parser-bound routine declaration prefix. Its body is owned
+/// by the SQL/procedural adapter and never enters this whitespace planner.
+pub(super) fn format_routine_header(
+    source: &str,
+    owned_lists: &[(usize, usize)],
+    clause_starts: &[usize],
+    literal_arguments: &[usize],
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
+    let mut tokens = tokenize(source)?;
+    let structure = TokenStructure::new(&tokens);
+    let depths = structure.depths();
+    // Grammar casing has already been normalized by parser-owned locations.
+    // Header layout has no authority to recase identifiers or type names.
+    for token in &mut tokens {
+        token.role = TokenRole::Identifier;
+    }
+    let header_expands = LayoutGroup {
+        compact_line_width: source
+            .lines()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0),
+        structurally_complex: false,
+        hard_boundary: false,
+        force_expand: false,
+        compact_overflow_is_unavoidable: false,
+    }
+    .decide(options)
+        == GroupLayout::Expanded;
+    let lists = owned_lists
+        .iter()
+        .map(|&(open, close)| {
+            let authored = tokens[open + 1..close]
+                .iter()
+                .any(|token| token.line_breaks_before > 0);
+            ParenthesizedList {
+                open,
+                close,
+                expanded: open + 1 < close
+                    && LayoutGroup {
+                        compact_line_width: 0,
+                        structurally_complex: false,
+                        hard_boundary: has_hard_boundary(&tokens, open + 1, close),
+                        force_expand: authored || header_expands,
+                        compact_overflow_is_unavoidable: false,
+                    }
+                    .decide(options)
+                        == GroupLayout::Expanded,
+                base_indent: Some(0),
+                arguments: super::layout_ir::FunctionArgumentLayout::Ordinary,
+            }
+        })
+        .collect::<Vec<_>>();
+    if !header_expands && !lists.iter().any(|list| list.expanded) {
+        return Ok(source.to_owned());
+    }
+    let mut plan = LayoutPlan::new(tokens.len());
+    for (index, token) in tokens.iter().enumerate() {
+        if token.line_breaks_before > 0 {
+            plan.break_before(index, token.line_breaks_before, depths[index]);
+        }
+    }
+    plan_parenthesized_lists(&tokens, depths, &[], &lists, options, &mut plan);
+    for &index in clause_starts {
+        plan.break_before(index, tokens[index].line_breaks_before.max(1), 0);
+    }
+    if let (Some(&first), Some(&last)) = (literal_arguments.first(), literal_arguments.last()) {
+        let as_index = clause_starts
+            .iter()
+            .copied()
+            .find(|&index| index < first && tokens[index].kind == Token::As)
+            .ok_or_else(|| {
+                FormatDiagnostic::Ownership("external literals have no owned AS clause".into())
+            })?;
+        let width = compact_width(&tokens, as_index, last + 1, options);
+        if (LayoutGroup {
+            compact_line_width: width,
+            structurally_complex: false,
+            hard_boundary: has_hard_boundary(&tokens, as_index, last + 1),
+            force_expand: literal_arguments
+                .iter()
+                .any(|&index| tokens[index].line_breaks_before > 0),
+            compact_overflow_is_unavoidable: false,
+        })
+        .decide(options)
+            == GroupLayout::Expanded
+        {
+            for &index in literal_arguments {
+                plan.break_before(index, tokens[index].line_breaks_before.max(1), 1);
+            }
+        }
+    }
+    let mut output = render_plan(
+        &tokens,
+        depths,
+        &plan,
+        TerminalSemicolonPlan::default(),
+        options,
+        source.ends_with('\n'),
+    );
+    // Preserve the framing gap between AS and the literal owned by the body.
+    if let Some(last) = tokens.last() {
+        output.truncate(output.trim_end().len());
+        output.push_str(&source[last.end..]);
+    }
+    Ok(output)
 }
 
 pub(super) fn identifier_spellings(
@@ -581,12 +819,17 @@ pub(super) fn validate_hard_width_except(
                 .take_while(|character| *character == ' ')
                 .count();
             let indivisible = tokens.iter().any(|token| {
-                token.start >= line_start
-                    && token.end <= line_end
-                    && (indent + token.text.chars().count() > options.hard_line_width
-                        || (token.is_comment()
-                            && output[line_start..token.end].chars().count()
-                                > options.hard_line_width))
+                let start = token.start.max(line_start);
+                let end = token.end.min(line_end);
+                if start >= end {
+                    return false;
+                }
+                let token_indent = if token.start < line_start { 0 } else { indent };
+                token_indent + output[start..end].chars().count() > options.hard_line_width
+                    || (token.is_comment()
+                        && token.start >= line_start
+                        && token.end <= line_end
+                        && output[line_start..end].chars().count() > options.hard_line_width)
             });
             if indivisible {
                 warnings.push(FormatWarning::IndivisibleTokenExceedsHardWidth {
@@ -677,6 +920,9 @@ fn plan_query_clauses(
     for query in queries {
         let select = query.select;
         let base_depth = query.base_depth;
+        if let Some(source) = &query.from {
+            plan_relation_source(source, plan);
+        }
         let indent = query_indent(query, plan);
         let end = query.end;
         let has_join = query
@@ -735,7 +981,7 @@ fn plan_query_clauses(
 
         if let Some((_open, close)) = query.wrapper {
             plan.break_before(select, 1, indent);
-            plan.set_fallback_indent(select..close, indent);
+            plan.set_fallback_indent(select..close, depths, base_depth, indent);
             plan.break_before(close, 1, indent.saturating_sub(1));
         }
 
@@ -826,13 +1072,14 @@ fn boolean_ranges(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
     expressions: &[ExpressionRange],
+    queries: &[QueryBlock],
     parens: &HashMap<usize, usize>,
     options: &FormatOptions,
 ) -> Vec<BooleanRange> {
     let mut result = Vec::new();
 
     for expression in expressions {
-        let root_depth = boolean_root_depth(tokens, depths, parens, *expression);
+        let root_depth = boolean_root_depth(tokens, depths, parens, *expression, queries);
         let has_and = (expression.start..expression.end)
             .any(|candidate| tokens[candidate].kind == Token::And);
         let has_or =
@@ -906,6 +1153,7 @@ fn boolean_root_depth(
     depths: &[usize],
     parens: &HashMap<usize, usize>,
     range: ExpressionRange,
+    queries: &[QueryBlock],
 ) -> Option<usize> {
     let mut start = range.start;
     let mut end = range.end;
@@ -925,6 +1173,14 @@ fn boolean_root_depth(
     }
     let root_depth = depths[start];
     let first_connector_depth = (start..end)
+        .filter(|index| {
+            !queries.iter().any(|query| {
+                range.start <= query.select
+                    && query.end <= range.end
+                    && query.select <= *index
+                    && *index < query.end
+            })
+        })
         .filter(|index| matches!(tokens[*index].kind, Token::And | Token::Or))
         .map(|index| depths[index])
         .min()?;
@@ -951,6 +1207,7 @@ fn plan_booleans(
                 range.root_indent + plan.indent_offsets[range.start],
             )
             .max(range.root_indent + plan.indent_offsets[range.start]);
+
         if !matches!(
             range.kind,
             ExpressionOwnerKind::AssignmentValue
@@ -1072,6 +1329,43 @@ fn plan_booleans(
         }
         if let Some(close) = range.wrapper_close {
             plan.break_before(close, 1, root_indent.saturating_sub(1));
+        }
+    }
+}
+
+fn plan_case_result_boundaries(
+    tokens: &[SqlToken<'_>],
+    expressions: &[ExpressionRange],
+    options: &FormatOptions,
+    plan: &mut LayoutPlan,
+) {
+    for result in expressions
+        .iter()
+        .filter(|range| range.kind == ExpressionOwnerKind::CaseResult)
+    {
+        let Some((&line_start, line_break)) = plan
+            .before
+            .iter()
+            .filter(|(index, _)| **index <= result.start)
+            .max_by_key(|(index, _)| **index)
+        else {
+            continue;
+        };
+        if line_start == result.start {
+            continue;
+        }
+        let indent = line_break.indent;
+        let line_end = plan
+            .before
+            .keys()
+            .copied()
+            .filter(|index| result.start < *index && *index < result.end)
+            .min()
+            .unwrap_or(result.end);
+        if indent * INDENT_WIDTH + compact_width(tokens, line_start, line_end, options)
+            > options.hard_line_width
+        {
+            plan.break_before(result.start, 1, indent + 1);
         }
     }
 }

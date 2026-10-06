@@ -254,7 +254,6 @@ pub(super) fn plan_relation_source(source: &RelationSourceBlock, plan: &mut Layo
     }
     for &(open, close, inner_depth) in &source.wrappers {
         plan.break_before(open + 1, 1, inner_depth);
-        plan.set_indent(open + 1..close, inner_depth);
         plan.break_before(close, 1, inner_depth.saturating_sub(1));
     }
 }
@@ -404,6 +403,17 @@ pub(super) fn plan_utility_statements(
         let expanded = authored || width > context.options.soft_line_width;
 
         match utility.kind {
+            UtilityStatementKind::CreateSequence(_) | UtilityStatementKind::CreateTrigger(_)
+                if expanded =>
+            {
+                for &index in &utility.clauses {
+                    plan.break_before(
+                        index,
+                        context.tokens[index].line_breaks_before.max(1),
+                        span.base_depth,
+                    );
+                }
+            }
             UtilityStatementKind::Explain => {
                 if let Some(statement) = (span.start + 1..span.end).find(|index| {
                     context.depths[*index] == span.base_depth

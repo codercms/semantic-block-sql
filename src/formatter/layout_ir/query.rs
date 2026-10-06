@@ -6,7 +6,75 @@ use super::*;
 use crate::formatter::ownership::{
     QuerySpec, SelectSpec, StatementSpec, StatementTokens, ViewCheckSpec,
 };
-use crate::formatter::tokens::{is_join_start, is_query_clause_start};
+use crate::formatter::tokens::is_query_clause_start;
+
+/// Match each parser-owned VALUES relation through its first-row provenance.
+/// Only a parenthesis whose first significant token is VALUES can own a derived
+/// relation; INSERT VALUES and partition-bound syntax cannot claim this role.
+pub(super) fn bind_values_relations(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statements: &[StatementTokens],
+    specs: &[crate::formatter::ownership::ValuesRelationSpec],
+) -> Result<Vec<ValuesBlock>, FormatDiagnostic> {
+    let mut result = Vec::new();
+    for (statement_index, statement) in statements.iter().enumerate() {
+        let expected = specs
+            .iter()
+            .filter(|spec| spec.statement_index == statement_index)
+            .collect::<Vec<_>>();
+        if expected.is_empty() {
+            continue;
+        }
+        let mut candidates = Vec::new();
+        for open in statement.range.start..statement.range.end {
+            if tokens[open].kind != Token::Ascii40 {
+                continue;
+            }
+            let Some(close) = structure
+                .matching_parenthesis(open)
+                .filter(|close| *close < statement.range.end)
+            else {
+                continue;
+            };
+            let Some(keyword) = (open + 1..close).find(|index| !tokens[*index].is_comment()) else {
+                continue;
+            };
+            if tokens[keyword].kind != Token::Values {
+                continue;
+            }
+            let values =
+                super::values::bind(tokens, structure, keyword, close, Some((open, close)))?;
+            candidates.push(values);
+        }
+        let mut claimed = HashSet::new();
+        for spec in expected {
+            let (index, values) = candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, values)| {
+                    let (open, close) = values.rows[0];
+                    tokens[open].start < spec.anchor && spec.anchor < tokens[close].end
+                })
+                .min_by_key(|(_, values)| {
+                    let (open, close) = values.rows[0];
+                    close - open
+                })
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("VALUES relation anchor has no owned row".into())
+                })?;
+            if !claimed.insert(index)
+                || super::values::capability(values, tokens, structure) != spec.values
+            {
+                return Err(FormatDiagnostic::Ownership(
+                    "VALUES relation provenance disagrees with its AST".into(),
+                ));
+            }
+            result.push(values.clone());
+        }
+    }
+    Ok(result)
+}
 
 pub(super) fn bind_queries(
     tokens: &[SqlToken<'_>],
@@ -418,13 +486,23 @@ pub(super) fn bind_set_operations(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
     statements: &[StatementTokens],
+    layouts: &[StatementLayout],
     specs: &[QuerySpec],
 ) -> Result<Vec<SetOperationBlock>, FormatDiagnostic> {
     let depths = structure.depths();
     let mut owners = BTreeMap::<(usize, usize, usize), (Option<(usize, usize)>, Vec<usize>)>::new();
 
     for (statement_index, statement) in statements.iter().enumerate() {
-        for operator in statement.range.start..statement.range.end {
+        let query_range = match layouts.get(statement_index) {
+            Some(StatementLayout::View(view)) => {
+                view.query_start..view.check_option.unwrap_or(view.span.end)
+            }
+            Some(StatementLayout::MaterializedView(view)) => {
+                view.query_start..view.data_clause.unwrap_or(view.span.end)
+            }
+            _ => statement.range.start..statement.range.end,
+        };
+        for operator in query_range.clone() {
             if !matches!(
                 tokens[operator].kind,
                 Token::Union | Token::Intersect | Token::Except
@@ -442,7 +520,7 @@ pub(super) fn bind_set_operations(
                 .map(|(open, close)| (*open, *close));
             let (owner_start, raw_owner_end) = owner_wrapper
                 .map(|(open, close)| (open + 1, close))
-                .unwrap_or((statement.range.start, statement.range.end));
+                .unwrap_or((query_range.start, query_range.end));
             let owner_end = set_operation_owner_end(
                 tokens,
                 depths,
@@ -734,7 +812,7 @@ pub(super) fn bind_window_blocks(
     result
 }
 
-fn bind_query_clauses(
+pub(super) fn bind_query_clauses(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
     select: usize,
@@ -828,32 +906,8 @@ pub(super) fn bind_predicates(
                 query.indent,
             );
         }
-        for index in query.select + 1..query.end {
-            if depths[index] != query.base_depth
-                || tokens[index].kind != Token::On
-                || tokens
-                    .get(index + 1)
-                    .is_some_and(|next| next.kind == Token::Conflict)
-            {
-                continue;
-            }
-            let end = (index + 1..query.end)
-                .find(|candidate| {
-                    depths[*candidate] < query.base_depth
-                        || (depths[*candidate] == query.base_depth
-                            && (is_query_clause_start(tokens, *candidate)
-                                || is_join_start(tokens, *candidate)))
-                })
-                .unwrap_or(query.end);
-            push_predicate(
-                &mut result,
-                &mut seen,
-                PredicateKind::JoinOn,
-                index,
-                end,
-                query.base_depth,
-                query.indent,
-            );
+        if let Some(source) = &query.from {
+            push_relation_join_predicates(&mut result, &mut seen, source, query.indent);
         }
     }
 
@@ -887,7 +941,12 @@ pub(super) fn bind_predicates(
             }
             StatementLayout::Update(update) => {
                 if let Some(source) = &update.from {
-                    push_relation_join_predicates(&mut result, &mut seen, source);
+                    push_relation_join_predicates(
+                        &mut result,
+                        &mut seen,
+                        source,
+                        source.base_depth,
+                    );
                 }
                 if let Some(index) = update.where_clause {
                     push_predicate(
@@ -903,7 +962,12 @@ pub(super) fn bind_predicates(
             }
             StatementLayout::Delete(delete) => {
                 if let Some(source) = &delete.using {
-                    push_relation_join_predicates(&mut result, &mut seen, source);
+                    push_relation_join_predicates(
+                        &mut result,
+                        &mut seen,
+                        source,
+                        source.base_depth,
+                    );
                 }
                 if let Some(index) = delete.where_clause {
                     push_predicate(
@@ -918,7 +982,12 @@ pub(super) fn bind_predicates(
                 }
             }
             StatementLayout::Merge(merge) => {
-                push_relation_join_predicates(&mut result, &mut seen, &merge.source);
+                push_relation_join_predicates(
+                    &mut result,
+                    &mut seen,
+                    &merge.source,
+                    merge.source.base_depth,
+                );
                 push_predicate(
                     &mut result,
                     &mut seen,
@@ -1012,6 +1081,7 @@ fn push_relation_join_predicates(
     result: &mut Vec<PredicateBlock>,
     seen: &mut HashSet<usize>,
     source: &RelationSourceBlock,
+    owner_indent: usize,
 ) {
     for join in &source.joins {
         if let Some((introducer, end)) = join.predicate {
@@ -1021,8 +1091,8 @@ fn push_relation_join_predicates(
                 PredicateKind::JoinOn,
                 introducer,
                 end,
-                source.base_depth,
-                source.base_depth,
+                join.depth,
+                owner_indent + join.depth.saturating_sub(source.base_depth),
             );
         }
     }

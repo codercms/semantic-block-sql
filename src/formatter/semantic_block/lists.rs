@@ -10,6 +10,9 @@ pub(super) struct ParenthesizedListSources<'a> {
     pub join_using_lists: &'a [(usize, usize)],
     pub utilities: &'a [UtilityBlock],
     pub values: &'a [ValuesBlock],
+    pub arrays: &'a [(usize, usize)],
+    pub calls: &'a [crate::formatter::layout_ir::FunctionCallBlock],
+    pub definition_headers: &'a [(usize, usize, usize)],
 }
 
 pub(super) fn parenthesized_lists(
@@ -19,10 +22,10 @@ pub(super) fn parenthesized_lists(
     sources: ParenthesizedListSources<'_>,
     options: &FormatOptions,
 ) -> Vec<ParenthesizedList> {
-    let mut lists = Vec::new();
+    let mut lists: Vec<ParenthesizedList> = Vec::new();
 
     for (open, token) in tokens.iter().enumerate() {
-        if token.kind != Token::Ascii40
+        if !matches!(token.kind, Token::Ascii40 | Token::Ascii91)
             || !(is_function_call_open(tokens, open)
                 || is_insert_list_open(sources.inserts, open)
                 || is_merge_list_open(sources.merges, open)
@@ -31,11 +34,28 @@ pub(super) fn parenthesized_lists(
                     .iter()
                     .any(|(using_open, _)| *using_open == open)
                 || is_create_enum_list_open(tokens, sources.utilities, open)
-                || is_values_list_open(sources.values, open))
+                || sources.utilities.iter().any(|utility| {
+                    utility
+                        .lists
+                        .iter()
+                        .flatten()
+                        .any(|(list_open, _)| *list_open == open)
+                })
+                || is_values_list_open(sources.values, open)
+                || sources
+                    .definition_headers
+                    .iter()
+                    .any(|&(list, _, _)| list == open)
+                || sources.arrays.iter().any(|&(array, _)| array == open))
         {
             continue;
         }
-        let Some(&close) = parens.get(&open) else {
+        let Some(close) = parens.get(&open).copied().or_else(|| {
+            sources
+                .arrays
+                .iter()
+                .find_map(|&(array, close)| (array == open).then_some(close))
+        }) else {
             continue;
         };
         if open + 1 >= close {
@@ -56,34 +76,56 @@ pub(super) fn parenthesized_lists(
             || (open + 1..close)
                 .any(|index| tokens[index].kind == Token::Select && depths[index] > depths[open])
             || contains_mixed_boolean_item(tokens, depths, open + 1, close, inner_depth);
-        let compact_start = sources
-            .inserts
+        let definition_header = sources
+            .definition_headers
             .iter()
-            .find(|insert| insert.target_open == Some(open))
-            .map(|insert| insert.body_start)
-            .or_else(|| {
-                sources.merges.iter().find_map(|merge| {
-                    merge
-                        .branches
-                        .iter()
-                        .find_map(|branch| match branch.action {
-                            MergeAction::Insert {
-                                target_open,
-                                values_open,
-                                ..
-                            } if target_open == Some(open) || values_open == open => {
-                                Some(branch.start)
-                            }
-                            _ => None,
-                        })
-                })
+            .find(|&&(list, _, _)| list == open);
+        let compact_start = definition_header
+            .map(|&(_, prefix, _)| {
+                lists
+                    .iter()
+                    .filter(|list| list.expanded && prefix <= list.open && list.close < open)
+                    .map(|list| list.close)
+                    .max()
+                    .unwrap_or(prefix)
             })
             .or_else(|| {
                 sources
-                    .values
+                    .calls
                     .iter()
-                    .find(|values| values.rows.iter().any(|&(row, _)| row == open))
-                    .map(|values| values.span.start)
+                    .find(|call| call.open == open)
+                    .map(|call| call.start)
+            })
+            .or_else(|| {
+                sources
+                    .inserts
+                    .iter()
+                    .find(|insert| insert.target_open == Some(open))
+                    .map(|insert| insert.body_start)
+                    .or_else(|| {
+                        sources.merges.iter().find_map(|merge| {
+                            merge
+                                .branches
+                                .iter()
+                                .find_map(|branch| match branch.action {
+                                    MergeAction::Insert {
+                                        target_open,
+                                        values_open,
+                                        ..
+                                    } if target_open == Some(open) || values_open == open => {
+                                        Some(branch.start)
+                                    }
+                                    _ => None,
+                                })
+                        })
+                    })
+                    .or_else(|| {
+                        sources
+                            .values
+                            .iter()
+                            .find(|values| values.rows.iter().any(|&(row, _)| row == open))
+                            .map(|_| open)
+                    })
             })
             .unwrap_or_else(|| open.saturating_sub(1));
         let compact = compact_width(tokens, compact_start, close + 1, options);
@@ -92,7 +134,9 @@ pub(super) fn parenthesized_lists(
         let unavoidable_single_argument = !has_top_level_comma
             && range_is_unavoidably_over_hard(tokens, open + 1, close, depths[open] + 1, options);
         let layout = LayoutGroup {
-            compact_line_width: depths[open] * INDENT_WIDTH + compact,
+            compact_line_width: definition_header.map_or(depths[open], |&(_, _, indent)| indent)
+                * INDENT_WIDTH
+                + compact,
             structurally_complex: contains_complex,
             hard_boundary: has_list_hard_boundary(tokens, open + 1, close),
             force_expand: authored,
@@ -106,7 +150,12 @@ pub(super) fn parenthesized_lists(
             base_indent: sources
                 .join_using_lists
                 .iter()
-                .find_map(|(using_open, indent)| (*using_open == open).then_some(*indent)),
+                .find_map(|(using_open, indent)| (*using_open == open).then_some(*indent))
+                .or_else(|| definition_header.map(|&(_, _, indent)| indent)),
+            arguments: sources.calls.iter().find(|call| call.open == open).map_or(
+                crate::formatter::layout_ir::FunctionArgumentLayout::Ordinary,
+                |call| call.arguments,
+            ),
         });
     }
 
@@ -159,7 +208,7 @@ fn contains_mixed_boolean_item(
 }
 
 pub(super) fn is_function_call_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
-    open.checked_sub(1)
+    crate::formatter::tokens::previous_non_comment(tokens, open)
         .is_some_and(|previous| is_function_call_syntax(tokens, previous))
 }
 
@@ -191,6 +240,27 @@ pub(super) fn plan_keyword_list_at_indent(
     force_expand: bool,
     plan: &mut LayoutPlan,
 ) -> bool {
+    plan_keyword_list_with_prefix(
+        context,
+        TokenRange::new(keyword, keyword + 1).expect("owned list keyword"),
+        end,
+        syntax_depth,
+        owner_indent,
+        force_expand,
+        plan,
+    )
+}
+
+fn plan_keyword_list_with_prefix(
+    context: &PlanningContext<'_, '_>,
+    prefix: TokenRange,
+    end: usize,
+    syntax_depth: usize,
+    owner_indent: usize,
+    force_expand: bool,
+    plan: &mut LayoutPlan,
+) -> bool {
+    let keyword = prefix.end - 1;
     let tokens = context.tokens;
     let depths = context.depths;
     let cases = context.cases;
@@ -224,7 +294,7 @@ pub(super) fn plan_keyword_list_at_indent(
             .any(|item| tokens[item.start].line_breaks_before > 0);
     let has_complex = items.iter().any(|item| item.complex);
     let compact_line_width =
-        owner_indent * INDENT_WIDTH + compact_width(tokens, keyword, list_end, options);
+        owner_indent * INDENT_WIDTH + compact_width(tokens, prefix.start, list_end, options);
     let layout = LayoutGroup {
         compact_line_width,
         structurally_complex: has_complex,
@@ -591,13 +661,20 @@ pub(super) fn plan_parenthesized_lists(
 ) {
     for list in lists.iter().filter(|list| list.expanded) {
         let inner_depth = depths[list.open] + 1;
+        let (argument_end, order_by) = match list.arguments {
+            crate::formatter::layout_ir::FunctionArgumentLayout::Ordinary => (list.close, None),
+            crate::formatter::layout_ir::FunctionArgumentLayout::KeyValuePairs {
+                end,
+                order_by,
+            } => (end, order_by),
+        };
         let mut items = split_list_items(
             tokens,
             depths,
             cases,
             lists,
             list.open + 1,
-            list.close,
+            argument_end,
             inner_depth,
         );
         if items.is_empty() {
@@ -607,6 +684,12 @@ pub(super) fn plan_parenthesized_lists(
             .base_indent
             .unwrap_or_else(|| plan.indent_for(list.open, depths[list.open]));
         let indent = base_indent + 1;
+        if matches!(
+            list.arguments,
+            crate::formatter::layout_ir::FunctionArgumentLayout::KeyValuePairs { .. }
+        ) {
+            items = key_value_items(tokens, cases, lists, &items, indent, options);
+        }
         for item in &items {
             set_contextual_indent(plan, depths, item.start..item.end, inner_depth, indent);
             if let Some(comma) = item.comma {
@@ -636,6 +719,30 @@ pub(super) fn plan_parenthesized_lists(
             );
         }
         plan.break_before(list.close, 1, base_indent);
+        if let Some(order) = order_by {
+            plan.set_indent(order..list.close, indent);
+            plan.break_before(order, tokens[order].line_breaks_before.max(1), indent);
+            let by =
+                crate::formatter::tokens::next_non_comment(tokens, order).expect("bound ORDER BY");
+            let context = PlanningContext {
+                tokens,
+                depths,
+                cases,
+                lists,
+                options,
+            };
+            // Include ORDER in the keyword owner's width budget, while BY stays
+            // with its prefix and sort expressions retain ordinary list groups.
+            plan_keyword_list_with_prefix(
+                &context,
+                TokenRange::new(order, by + 1).expect("bound ORDER BY prefix"),
+                list.close,
+                inner_depth,
+                indent,
+                false,
+                plan,
+            );
+        }
 
         for item in &mut items {
             if tokens[item.start..item.end]
@@ -646,6 +753,62 @@ pub(super) fn plan_parenthesized_lists(
             }
         }
     }
+}
+
+/// Prefer intrinsic key/value units without merging across comments or blank gaps.
+fn key_value_items(
+    tokens: &[SqlToken<'_>],
+    cases: &[CaseRange],
+    lists: &[ParenthesizedList],
+    items: &[ListItem],
+    indent: usize,
+    options: &FormatOptions,
+) -> Vec<ListItem> {
+    let mut result = Vec::new();
+    for pair in items.chunks_exact(2) {
+        let key = pair[0];
+        let value = pair[1];
+        let first_key = (key.start..key.end)
+            .find(|&index| !tokens[index].is_comment())
+            .unwrap_or(key.start);
+        let first_value = (value.start..value.end)
+            .find(|&index| !tokens[index].is_comment())
+            .unwrap_or(value.start);
+        let boundary = key.complex
+            || tokens[first_key + 1..first_value + 1]
+                .iter()
+                .any(|token| token.is_comment() || token.line_breaks_before > 1);
+        let prefix_end = lists
+            .iter()
+            .filter(|list| list.expanded && value.start <= list.open && list.close < value.end)
+            .map(|list| list.open + 1)
+            .chain(
+                cases
+                    .iter()
+                    .filter(|case| {
+                        case.expanded && value.start <= case.start && case.end < value.end
+                    })
+                    .map(|case| case.start + 1),
+            )
+            .min()
+            .unwrap_or(value.end);
+        let width = indent * INDENT_WIDTH
+            + compact_width(tokens, first_key, prefix_end, options)
+            + usize::from(
+                prefix_end == value.end && value.comma.is_some_and(|comma| comma >= value.end),
+            );
+        if !boundary && width <= options.hard_line_width {
+            result.push(ListItem {
+                start: key.start,
+                end: value.end,
+                comma: value.comma,
+                complex: key.complex || value.complex,
+            });
+        } else {
+            result.extend_from_slice(pair);
+        }
+    }
+    result
 }
 
 fn set_contextual_indent(

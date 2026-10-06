@@ -292,8 +292,8 @@ fn unsupported_plpgsql_is_skipped_by_default_and_strict_mode_is_atomic() {
     let project = TempDir::new().expect("create temporary Go project");
     let valid = "package fixture\n\nconst query = `select id,name from public.users;`\n";
     let formatted_valid = "package fixture\n\nconst query = `SELECT id, name FROM public.users;`\n";
-    let routine = "package fixture\n\nconst routine = `\nCREATE PROCEDURE p() LANGUAGE plpgsql AS $$ BEGIN perform 1; COMMIT; END; $$;\n`\n";
-    let formatted_routine = "package fixture\n\nconst routine = `\nCREATE PROCEDURE p() LANGUAGE plpgsql AS $$\nBEGIN\n    PERFORM 1;\n    COMMIT;\nEND;\n$$;\n`\n";
+    let routine = "package fixture\n\nconst routine = `\nCREATE PROCEDURE p() LANGUAGE plpgsql AS $$ BEGIN perform 1; CALL sample_work(); END; $$;\n`\n";
+    let formatted_routine = routine;
     fs::write(project.path().join("valid.go"), valid).expect("write valid Go source");
     fs::write(project.path().join("routine.go"), routine)
         .expect("write unsupported routine source");

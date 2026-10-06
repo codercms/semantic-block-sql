@@ -8,14 +8,20 @@ use super::ownership::{
 use super::structure::TokenStructure;
 use super::tokens::SqlToken;
 
+mod arrays;
+mod function_calls;
+mod migration_ddl;
 mod query;
 mod statement;
+mod values;
 
-use self::query::{bind_predicates, bind_queries, bind_set_operations, bind_window_blocks};
+use self::query::{
+    bind_predicates, bind_queries, bind_set_operations, bind_values_relations, bind_window_blocks,
+};
 use self::statement::{
     bind_alter_table, bind_body_start, bind_create_index, bind_create_table, bind_delete,
-    bind_insert, bind_materialized_view, bind_merge, bind_select, bind_update, bind_values,
-    bind_view, bind_with_block,
+    bind_insert, bind_materialized_view, bind_merge, bind_select, bind_update, bind_utility,
+    bind_values, bind_view, bind_with_block,
 };
 
 /// Generic token span owned by one PostgreSQL construct.
@@ -214,6 +220,23 @@ pub(super) struct RelationSourceBlock {
     pub wrappers: Vec<(usize, usize, usize)>,
     pub base_depth: usize,
     pub identifier_tokens: Vec<usize>,
+    pub definition_lists: Vec<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct FunctionCallBlock {
+    pub start: usize,
+    pub name: usize,
+    pub open: usize,
+    pub close: usize,
+    pub arguments: FunctionArgumentLayout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Token-index bounds are half-open; pair `end` excludes aggregate ORDER BY.
+pub(super) enum FunctionArgumentLayout {
+    Ordinary,
+    KeyValuePairs { end: usize, order_by: Option<usize> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -339,6 +362,8 @@ pub(super) struct ValuesBlock {
     pub span: TokenSpan,
     pub keyword: usize,
     pub rows: Vec<(usize, usize)>,
+    pub wrapper: Option<(usize, usize)>,
+    pub clauses: QueryClauses,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -354,6 +379,14 @@ pub(super) struct CreateTableItem {
     pub range: TokenRange,
     pub kind: CreateTableElementSpec,
     pub checks: Vec<CheckPredicateBlock>,
+    pub identity: Option<IdentityBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct IdentityBlock {
+    pub introducer: usize,
+    pub options: Option<(usize, usize)>,
+    pub clauses: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -389,6 +422,8 @@ pub(super) struct AlterTableAction {
     pub group: AlterTableActionGroup,
     pub relation_options: Option<AlterTableOptionList>,
     pub checks: Vec<CheckPredicateBlock>,
+    pub foreign_key_clauses: Vec<usize>,
+    pub identity: Option<IdentityBlock>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -397,10 +432,13 @@ pub(super) struct AlterTableBlock {
     pub actions: Vec<AlterTableAction>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UtilityBlock {
     pub span: TokenSpan,
     pub kind: UtilityStatementKind,
+    pub lists: [Option<(usize, usize)>; 2],
+    pub clauses: Vec<usize>,
+    pub identifier_tokens: Vec<usize>,
 }
 
 /// Exhaustive top-level layout dispatcher.
@@ -425,11 +463,14 @@ pub(super) enum StatementLayout {
 pub(super) struct LayoutDocument {
     statements: Vec<StatementLayout>,
     queries: Vec<QueryBlock>,
+    values_relations: Vec<ValuesBlock>,
     with_blocks: Vec<WithBlock>,
     predicates: Vec<PredicateBlock>,
     set_operations: Vec<SetOperationBlock>,
     window_blocks: Vec<WindowBlock>,
     identifier_tokens: Vec<usize>,
+    function_calls: Vec<FunctionCallBlock>,
+    arrays: Vec<(usize, usize)>,
 }
 
 impl LayoutDocument {
@@ -438,6 +479,16 @@ impl LayoutDocument {
         tokens: &[SqlToken<'_>],
         structure: &TokenStructure,
     ) -> Result<Self, FormatDiagnostic> {
+        let function_calls = function_calls::bind(tokens, structure, document.function_calls())?;
+        let arrays = arrays::bind(tokens, structure, document.arrays())?;
+        // Relation alias binding needs to distinguish a real call name from a
+        // same-spelled alias before expression layout starts. Keep caller tokens
+        // immutable while binding this shared source-role view.
+        let mut owned_tokens = tokens.to_vec();
+        for call in &function_calls {
+            owned_tokens[call.name].role = super::tokens::TokenRole::FunctionName;
+        }
+        let tokens = owned_tokens.as_slice();
         let top_level_statements = bind_token_statements(document, tokens, structure.depths())?;
         let top_level_count = top_level_statements.len();
         let mut token_statements = top_level_statements.clone();
@@ -506,12 +557,39 @@ impl LayoutDocument {
                 StatementSpec::Merge(spec) => StatementLayout::Merge(bind_merge(
                     tokens, structure, &statement, body_start, spec,
                 )?),
-                StatementSpec::View(spec) => StatementLayout::View(bind_view(
-                    tokens, structure, &statement, body_start, spec,
-                )?),
-                StatementSpec::MaterializedView(spec) => StatementLayout::MaterializedView(
-                    bind_materialized_view(tokens, structure, &statement, body_start, spec)?,
-                ),
+                StatementSpec::View(spec) => {
+                    let view = bind_view(tokens, structure, &statement, body_start, spec)?;
+                    if spec.query.has_with {
+                        token_statements.push(StatementTokens {
+                            spec: StatementSpec::Select(spec.query.clone()),
+                            ctes: spec.ctes.clone(),
+                            range: TokenRange::new(
+                                view.query_start,
+                                view.check_option.unwrap_or(view.span.end),
+                            )?,
+                            semicolon: None,
+                            base_depth: structure.depth(view.query_start),
+                        });
+                    }
+                    StatementLayout::View(view)
+                }
+                StatementSpec::MaterializedView(spec) => {
+                    let view =
+                        bind_materialized_view(tokens, structure, &statement, body_start, spec)?;
+                    if spec.query.has_with {
+                        token_statements.push(StatementTokens {
+                            spec: StatementSpec::Select(spec.query.clone()),
+                            ctes: spec.ctes.clone(),
+                            range: TokenRange::new(
+                                view.query_start,
+                                view.data_clause.unwrap_or(view.span.end),
+                            )?,
+                            semicolon: None,
+                            base_depth: structure.depth(view.query_start),
+                        });
+                    }
+                    StatementLayout::MaterializedView(view)
+                }
                 StatementSpec::CreateTable(spec) => StatementLayout::CreateTable(
                     bind_create_table(tokens, structure, &statement, body_start, spec)?,
                 ),
@@ -521,22 +599,28 @@ impl LayoutDocument {
                 StatementSpec::AlterTable(spec) => StatementLayout::AlterTable(bind_alter_table(
                     tokens, structure, &statement, body_start, spec,
                 )?),
-                StatementSpec::Utility(kind) => StatementLayout::Utility(UtilityBlock {
-                    span: TokenSpan {
-                        start: statement.range.start,
-                        end: statement.range.end,
-                        base_depth: statement.base_depth,
-                    },
-                    kind: *kind,
-                }),
+                StatementSpec::Utility(kind) => {
+                    StatementLayout::Utility(bind_utility(tokens, structure, &statement, *kind)?)
+                }
             });
             statement_index += 1;
         }
 
         let queries = bind_queries(tokens, structure, &top_level_statements, document.queries())?;
+        let values_relations = bind_values_relations(
+            tokens,
+            structure,
+            &top_level_statements,
+            document.values_relations(),
+        )?;
         let predicates = bind_predicates(tokens, structure.depths(), &queries, &statements);
-        let set_operations =
-            bind_set_operations(tokens, structure, &top_level_statements, document.queries())?;
+        let set_operations = bind_set_operations(
+            tokens,
+            structure,
+            &top_level_statements,
+            &statements,
+            document.queries(),
+        )?;
         let window_blocks = bind_window_blocks(tokens, structure, &queries);
 
         let mut identifier_tokens = queries
@@ -566,11 +650,14 @@ impl LayoutDocument {
         Ok(Self {
             statements,
             queries,
+            values_relations,
             with_blocks,
             predicates,
             set_operations,
             window_blocks,
             identifier_tokens,
+            function_calls,
+            arrays,
         })
     }
 
@@ -605,6 +692,14 @@ impl LayoutDocument {
 
     pub fn identifier_tokens(&self) -> &[usize] {
         &self.identifier_tokens
+    }
+
+    pub fn function_calls(&self) -> &[FunctionCallBlock] {
+        &self.function_calls
+    }
+
+    pub fn arrays(&self) -> &[(usize, usize)] {
+        &self.arrays
     }
 
     pub fn statement_spans(&self) -> impl Iterator<Item = TokenSpan> + '_ {
@@ -694,6 +789,7 @@ impl LayoutDocument {
                 StatementLayout::Values(block) => Some(block),
                 _ => None,
             })
+            .chain(self.values_relations.iter())
     }
 
     pub fn create_tables(&self) -> impl Iterator<Item = &CreateTableBlock> {
@@ -761,6 +857,7 @@ fn statement_identifier_tokens<'a>(
                 .chain(block.source.identifier_tokens.iter().copied()),
         ),
         StatementLayout::View(block) => Box::new(owned_list(block.aliases)),
+        StatementLayout::Utility(block) => Box::new(block.identifier_tokens.iter().copied()),
         StatementLayout::MaterializedView(block) => Box::new(owned_list(block.aliases)),
         _ => Box::new(std::iter::empty()),
     }

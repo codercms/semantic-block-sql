@@ -2,7 +2,7 @@
 
 Status: **Runnable CLI and raw-Go MVP complete**
 
-Last updated: **2026-08-18**
+Last updated: **2026-10-06**
 
 ## Purpose
 
@@ -94,6 +94,22 @@ Current application-level decisions are:
   skill.
 
 Any future ambiguity is recorded here before implementation.
+
+### Desired coverage recorded by red tests
+
+The explicit requirement to cover unsupported migration syntax and formatter
+regressions is implemented with invented fixtures. The original 36 cases and all
+22 follow-up cases pass through reviewed AST/ownership/planner contracts. This
+includes session settings, aggregate definitions, index attachment, SQL routine
+forms/options, procedural adapters, VALUES sources, CTE-backed views, trigger
+transition tables, and the subsequent layout/diagnostic reductions. The coverage
+report records their fixture-backed scope; PostgreSQL support remains closed.
+
+Existing rejection fixtures describe the current implementation. When a desired
+capability is implemented, reconcile its former rejection fixture and coverage
+entry with the newly reviewed AST/ownership/planner contract; retain adjacent
+unreviewed forms as negative tests. Do not satisfy the red tests with a generic
+fallback, an unsupported-diagnostic suppression, or copied production SQL.
 
 ## Architecture hardening decisions
 
@@ -251,6 +267,13 @@ owned layouts and acceptance fixtures.
 - The formatter never splits inside a token.
 
 ### Authored group model
+
+The explicit project request for JSON object key/value readability supersedes
+the generic one-argument-per-line rule and preservation of a break between a
+reviewed key and its value. Core section 10.1 now defines that limited exception.
+Authored grouping between pairs and all comment/blank boundaries retain priority.
+The preference must be carried from AST call capabilities through typed argument
+ownership into the existing list planner; it is not a renderer name scan.
 
 Core sections 5.4 and 6 take precedence over compact-query preferences:
 authored breaks before typed SELECT and DML clauses remain boundaries even when the
@@ -981,7 +1004,10 @@ The default `UnsupportedPolicy::Skip` reports both opaque outcomes as warnings a
 
 Routine bodies are no longer formatted from authored lines. `parse_plpgsql` is adapted into typed parser capability categories, while PostgreSQL scanner tokens are bound into a span-bearing `RoutineBody` IR containing declarations, control headers, statements, comments, and opaque units. A separate procedural layout pass owns indentation and blank-line policy. This enables compact and multi-statement single-line bodies without weakening the outer PostgreSQL parser boundary.
 
-`ASSERT` and `RETURN QUERY` are formatter-owned. Trustworthy opaque transaction-control spans are preserved and diagnosed per statement, so supported routine siblings still format under the default unsupported policy; strict policy restores the complete routine/document.
+`ASSERT`, `RETURN QUERY`, and reviewed COMMIT/ROLLBACK commands are formatter-owned.
+Transaction kind and chain metadata are bound before the shared token emitter is
+used. Unknown parser nodes preserve the enclosing routine with an unsupported
+diagnostic; strict policy restores the complete document.
 
 ## Go interpreted-string and corpus contract
 
@@ -1040,3 +1066,215 @@ is already in the lockfile, is MIT OR Apache-2.0 licensed, declares Rust 1.71,
 and is directly enabled only for `derive` and `parsing` (string and type parsing).
 The MIT license texts are retained in third-party notices. No fork, vendored
 backend, new parser runtime, or database dependency is introduced.
+
+
+### Reviewed view CTE and wrapped-query coverage
+
+The explicit desired-support requirement supersedes the former unsupported
+boundary for CTE-led view and materialized-view queries. Both now carry typed
+CTE ownership into the shared work queue. View AS binds the query's first token,
+including a WITH prefix or branch parenthesis; set-operation owners exclude
+CREATE headers and check/data suffixes. Adjacent unreviewed expressions remain
+byte-identical with `syntax.unsupported`. Synthetic fixtures cover nested CTEs,
+comments, alias/storage options, check/data suffixes, and wrapped UNION branches.
+
+
+### Reviewed migration utility coverage
+
+The desired-support requirement is implemented for ordinary SET values/defaults/
+current values, ordinary aggregate definitions, index partition attachments, and
+multiline composite fields. The shared utility ownership model carries aggregate
+signature/option and composite-field cardinality into bounded list owners. It
+reuses the canonical list renderer and semantic/idempotence gates. Star aggregate
+signatures have an explicit variant because PostgreSQL represents them with a
+missing parameter node. Ordered-set signatures, SET TRANSACTION, and unrelated
+index actions retain fixture-backed unsupported boundaries.
+
+
+### VALUES source support and diagnostic locations
+
+The explicit desired-support requirement includes VALUES derived relations in
+SELECT/view and DML relation owners. Their typed capability and wrapper/row
+ownership extend the existing VALUES renderer; nested join grouping and each
+row's own width are preserved. Unreviewed ORDER BY suffixes remain opaque.
+When PostgreSQL provides a first-expression location for such a rejected VALUES
+shape, diagnostics point to its bounded VALUES construct instead of the entire
+outer statement. Source-relative byte offsets are retained through document/CLI
+coordinate translation, including CRLF and UTF-8 prefixes.
+
+
+### Statement diagnostic anchors after dump comments
+
+The explicit diagnostic-location requirement treats a statement's first SQL
+token as the fallback anchor. PostgreSQL RawStmt spans may include attached
+leading dump comments; those comments remain inside the statement's immutable
+rewrite/opaque span, but unsupported and skipped-statement fallbacks no longer
+point at their leading `--` separator. The shared diagnostic builder uses scanner
+tokens to locate syntax and preserves existing ranges if scanning is unavailable.
+Trusted cause ranges remain exact. Skipped-statement messages adjust their
+absolute statement line consistently. File fmt recomputes these locations in
+its output pass; check/diff retain input coordinates. Synthetic CLI coverage
+includes Unicode, CRLF, preceding layout changes, and repeated fmt calls.
+
+
+### Authored whitespace after comments
+
+Blank lines between a comment and following SQL are hard authored boundaries,
+including dump header comments before DDL. The shared token emitter retains the
+next token's authored newline count when terminating a line or block comment.
+Layout plans can still supply the following token's indentation without reducing
+that gap. Comment attachment and inter-statement spacing remain under their
+existing ownership rules. Synthetic fixtures cover dump index headers, line and
+block comments, multiple blank lines, and comments within query groups.
+
+
+### Reviewed SQL-standard multi-statement and RETURN bodies
+
+The explicit remaining-support requirement supersedes the former rejection of
+multi-statement SQL-standard bodies. SELECT/DML and RETURN are closed AST-owned
+body variants; unknown statement families remain unsupported. RETURN uses the
+canonical expression layout and safety gates through an equal-length SELECT
+prefix adapter. Inline authored boundaries and atomic body groups are preserved,
+with indentation accounted for in the body width budget. Parallel option values
+are explicitly reviewed. Nested unsupported failures retain the complete original
+routine and report body-relative locations shifted to the enclosing source.
+
+### Reviewed dollar-quoted SQL bodies
+
+The explicit remaining-support requirement supersedes the former non-PL/pgSQL
+rejection for LANGUAGE SQL. Declaration metadata is parsed in its owning
+statement frame; document-relative AST locations are never applied to slices.
+The AS literal is bound through its DefElem location and decoded AST value.
+Embedded SQL passes its own structural and protected-token comparison, while
+the outer declaration is compared with its original literal restored. No
+generic literal exemption is introduced. Multiline token continuation bytes
+are never indented. Unreviewed quoting or inner syntax preserves the routine.
+
+### Shared routine header layout
+
+Routine adapters bind declaration signatures and RETURNS TABLE columns against
+AST parameter counts, then reuse the canonical parenthesized list planner and
+token emitter. Option clauses are located through their DefElem metadata.
+The declaration prefix is isolated from its body; header wrapping does not
+change body tokens or recase identifiers/types. Original comments, list groups,
+defaults, and framing gaps remain subject to the existing safety gates.
+
+### Reviewed migration DDL clause layout
+
+The requested remaining DDL support carries explicit sequence-option kinds and
+locations, trigger timing/column/transition-table capabilities, and foreign-key
+key counts and action kinds. Token binders verify these capabilities before
+producing clause boundaries for the existing planners. This replaces neither
+the PostgreSQL parser nor the closed ownership model. Trigger ROW transition
+aliases remain unreviewed; OLD/NEW TABLE aliases are separately identifier-owned.
+
+### AST-owned explicit function names
+
+Keyword-tokenized names such as replace must not lose their argument-list
+ownership. The completed AST traversal records explicit call locations and
+qualified names, distinguishing the pinned parser's operator escape helpers
+from authored calls. Binders verify names and argument parentheses, then assign
+a function-name source role used by rendering and list planning. A role view is
+also available while binding relations, so a call cannot masquerade as a
+same-spelled alias. AS-less recordset aliases are verified against their typed
+following column-definition capability. Scanner trivia never removes call
+ownership; comments remain protected by the existing emission and safety gates.
+
+### Identity sequence-option ownership
+
+Identity constraints carry their AST introduction location and reviewed sequence
+options. CREATE TABLE column items and ALTER TABLE actions bind the same typed
+option capability within their own spans, preserving generation mode and order.
+The sequence-option binder accepts an owned token range and depth rather than
+inventing a utility statement for an identity child. Absent and multiline option
+forms retain the existing semantic, comment, hard-width, and idempotence gates.
+
+### Nested expression and relation group ownership
+
+SELECT and DML use the same typed join predicates, including ON clauses below
+parenthesized relation wrappers. Array constructors carry AST locations and
+element counts; their bracket lists are distinct from subscripts. The completed
+traversal includes array elements and expression-bearing table/constraint fields
+omitted by the backend's convenience walker. Unknown children remain unsupported.
+After CASE/predicate parents are planned, array bracket subtrees inherit their
+actual parent line indentation, preserving nested child layouts. Function and
+recordset list width budgets include validated qualified names/relation headers;
+already-expanded child groups do not count as a single compact header line.
+Named CHECK prefixes wrap only when their predicate is still compact, keeping
+existing expanded predicate layouts stable.
+
+### Parser-owned procedural leaf capabilities
+
+PL/pgSQL static SQL queries, transaction commands, and datatype references are
+bound against the pinned parser's JSON nodes. SQL leaves must match parser query
+tokens after removal of exactly the parser-owned procedural INTO span. The SQL
+child uses the canonical formatter; INTO targets are restored at their original
+token boundary, with comments and STRICT preserved. No table-target inference
+or keyword fallback is used. Transaction spelling is checked against command
+kind and chain metadata. Reference datatype spans retain the parser-recorded
+spelling; arithmetic percent operators remain ordinary expressions. Both body
+passes repeat capability binding, structural equivalence, and idempotence.
+Boolean root connectors exclude contained query owners. In particular, NOT
+EXISTS cannot claim an inner WHERE connector and introduce a new authored break
+on the second pass. Transaction commands use the shared comment-preserving emitter.
+
+### VALUES suffix ownership
+
+Standalone and derived VALUES carry row counts, ORDER BY item counts, and limit/
+offset presence. A shared binder consumes consecutive row groups before binding
+query suffix clauses, so suffix expression parentheses cannot claim row ownership.
+Lexical capabilities must match the AST record, including repeated sources.
+CTE bodies use the existing exhaustive VALUES statement variant rather than a
+SELECT spec; nested CTEs and their enclosing SELECT/DML keep separate owners.
+Suffix lists and clause boundaries reuse the query list planners, while comments
+between rows inherit the row group's indentation. Set-operation VALUES branches
+and direct INSERT VALUES suffixes remain explicit fixture-backed boundaries.
+Enabling VALUES CTEs exposed a CASE branch whose condition and result each fit
+but whose combined WHEN/THEN line did not. Typed CASE result ranges now include
+the current planned line prefix in their hard-width budget and may begin a
+separate result line. No expression syntax is added, moved, or split.
+
+### External routine declaration ownership
+
+C and internal declarations have explicit language and AS literal cardinality
+capabilities. Bound library/symbol tokens remain protected, while signatures,
+options, and long AS argument groups reuse shared header planning. Common option
+validation is shared with SQL routines; unknown languages remain unsupported.
+Header layout precedes normalization, and the header is reparsed before applying
+location-owned casing so comment whitespace changes cannot invalidate offsets.
+The whole declaration passes structural/protected-token and document idempotence
+gates; external literal contents never enter an embedded SQL formatter.
+
+### Multiline token warning coordinates
+
+Width warnings bind tokens intersecting the output line, including multiline
+comments and dollar bodies. Reviewed SQL/PL routine AS literals are identified
+by their AST metadata and exact body values, including on unchanged second runs.
+Inner warnings map exact token identity and occurrence back to source bytes;
+optional type aliases do not invalidate surrounding token counts. Unprovable
+provenance retains the enclosing token range. Ordinary dollar literals retain
+literal ownership, and multiline comment fragments exclude CRLF terminators.
+
+### Independent review requirement resolution
+
+The seven independent-review reproductions are formatter defects within reviewed
+syntax, not new grammar requests. Comment attachment and blank boundaries take
+precedence over routine statement splitting and procedural target compactness.
+Header normalization must never consume locations from a different source frame.
+Routine header decisions use the shared group policy; both SQL body spellings
+share token-aware assembly/indentation. Unsupported procedural SQL children keep
+their diagnostic identity and bounded leaf range rather than becoming routine
+ownership failures. Default mode can format the enclosing procedural layout while
+preserving the unsupported SQL leaf exactly; strict mode returns the original
+complete document. The core specification remains authoritative.
+
+### Routine/result maintainability follow-up
+
+Preservation is an internal typed outcome, independent of user-facing diagnostic
+IDs. Canonical formatting retains owned opaque spans through its existing gates;
+procedural leaf adapters turn that provenance into `Formatted` or `Preserved`
+and return diagnostics separately. A shared internal result module carries text,
+diagnostics, warnings and source/output protection across adapters. Declaration
+ownership and generic helpers belong to `routine_header`, with one AST-backed
+constructor used by SQL, external and procedural routines. These changes clarify
+module responsibilities without changing public behavior or the core contract.

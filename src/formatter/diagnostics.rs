@@ -166,6 +166,9 @@ pub(super) fn warning_diagnostics(
     warnings: &[FormatWarning],
     options: &FormatOptions,
 ) -> Result<Vec<Diagnostic>, FormatDiagnostic> {
+    if warnings.is_empty() {
+        return Ok(Vec::new());
+    }
     let source_tokens = tokenize(source)?;
     let output_tokens = tokenize(output)?;
     let source_terminal = terminal_semicolon(&source_tokens);
@@ -177,29 +180,13 @@ pub(super) fn warning_diagnostics(
         output_terminal.filter(|_| source_terminal.is_none()),
     )?;
 
+    let body_literals = routine_body_literals(source, &source_tokens);
     warnings
         .iter()
         .map(|warning| match warning {
             FormatWarning::IndivisibleTokenExceedsHardWidth { line, width } => {
                 let output_range = output_line_range(output, *line);
-                let output_index = output_range.and_then(|range| {
-                    let indent = output[range.start..range.end]
-                        .chars()
-                        .take_while(|character| *character == ' ')
-                        .count();
-                    output_tokens
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, token)| token.start >= range.start && token.end <= range.end)
-                        .filter(|(_, token)| {
-                            indent + token.text.chars().count() > options.hard_line_width
-                                || (token.is_comment()
-                                    && output[range.start..token.end].chars().count()
-                                        > options.hard_line_width)
-                        })
-                        .max_by_key(|(_, token)| token.text.chars().count())
-                        .map(|(index, _)| index)
-                });
+                let output_index = output_range.and_then(|range| warning_output_token(&output_tokens, output, range, options.hard_line_width));
                 let source_range = output_index
                     .and_then(|output_index| {
                         pairs
@@ -207,7 +194,7 @@ pub(super) fn warning_diagnostics(
                             .find(|(_, candidate)| *candidate == output_index)
                             .map(|(source_index, _)| {
                                 let token = &source_tokens[*source_index];
-                                SourceRange::new(token.start, token.end)
+                                warning_token_range(token, &output_tokens[output_index], output_range, options, body_literals.contains(&token.start))
                             })
                     })
                     .unwrap_or_else(|| SourceRange::new(0, source.len()));
@@ -227,10 +214,225 @@ pub(super) fn warning_diagnostics(
         .collect()
 }
 
+fn warning_token_range(
+    source: &SqlToken<'_>,
+    output: &SqlToken<'_>,
+    line: Option<SourceRange>,
+    options: &FormatOptions,
+    routine_body: bool,
+) -> SourceRange {
+    let whole = SourceRange::new(source.start, source.end);
+    let Some(line) = line else {
+        return whole;
+    };
+    if source.kind == Token::Sconst && (routine_body || source.text != output.text) {
+        if let (Some((source_start, source_body)), Some((output_start, output_body))) = (
+            dollar_token_content(source.text),
+            dollar_token_content(output.text),
+        ) {
+            let relative = line.start.saturating_sub(output.start + output_start);
+            if relative <= output_body.len() {
+                let body_line = output_body[..relative]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count()
+                    + 1;
+                if let Some(mapped) =
+                    body_warning_range(source_body, output_body, body_line, options)
+                {
+                    return SourceRange::new(
+                        source.start + source_start + mapped.start,
+                        source.start + source_start + mapped.end,
+                    );
+                }
+            }
+        }
+        return whole;
+    }
+    if output.text.contains('\n') {
+        // Protected multiline token contents are unchanged apart from permitted
+        // comment trailing whitespace. Physical line ordinals remain stable.
+        let relative = line
+            .start
+            .saturating_sub(output.start)
+            .min(output.text.len());
+        let ordinal = output.text[..relative]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+            + 1;
+        if let Some(fragment) = output_line_range(source.text, ordinal) {
+            return SourceRange::new(source.start + fragment.start, source.start + fragment.end);
+        }
+    }
+    whole
+}
+
+fn warning_output_token(
+    tokens: &[SqlToken<'_>],
+    output: &str,
+    range: SourceRange,
+    hard_width: usize,
+) -> Option<usize> {
+    let indent = output[range.start..range.end]
+        .chars()
+        .take_while(|character| *character == ' ')
+        .count();
+    tokens
+        .iter()
+        .enumerate()
+        .filter(|(_, token)| token.start < range.end && range.start < token.end)
+        .filter(|(_, token)| {
+            let start = token.start.max(range.start);
+            let end = token.end.min(range.end);
+            indent + output[start..end].chars().count() > hard_width
+                || (token.is_comment() && output[range.start..end].chars().count() > hard_width)
+        })
+        .max_by_key(|(_, token)| token.text.chars().count())
+        .map(|(index, _)| index)
+}
+
+fn body_warning_range(
+    source: &str,
+    output: &str,
+    line: usize,
+    options: &FormatOptions,
+) -> Option<SourceRange> {
+    let source_tokens = tokenize(source).ok()?;
+    let output_tokens = tokenize(output).ok()?;
+    let range = output_line_range(output, line)?;
+    let output_index =
+        warning_output_token(&output_tokens, output, range, options.hard_line_width)?;
+    let target = &output_tokens[output_index];
+    // Match exact token identity and occurrence, independently of optional type
+    // aliases changing surrounding token cardinality. The formatter's safety
+    // gate preserves protected token order; ambiguous multiplicity stays local
+    // to the enclosing body token rather than guessing a source occurrence.
+    let matches = |token: &SqlToken<'_>| {
+        token.kind == target.kind
+            && if target.is_comment() {
+                normalize_comment_trailing_whitespace(token.text)
+                    == normalize_comment_trailing_whitespace(target.text)
+            } else {
+                token.text == target.text
+            }
+    };
+    let source_matches = source_tokens
+        .iter()
+        .filter(|token| matches(token))
+        .collect::<Vec<_>>();
+    let output_matches = output_tokens
+        .iter()
+        .enumerate()
+        .filter(|(_, token)| matches(token))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    if source_matches.len() != output_matches.len() {
+        return None;
+    }
+    let ordinal = output_matches
+        .iter()
+        .position(|index| *index == output_index)?;
+    Some(warning_token_range(
+        source_matches[ordinal],
+        target,
+        Some(range),
+        options,
+        false,
+    ))
+}
+
+fn routine_body_literals(
+    source: &str,
+    tokens: &[SqlToken<'_>],
+) -> std::collections::HashSet<usize> {
+    use pg_query::protobuf::node::Node;
+    let mut locations = std::collections::HashSet::new();
+    let Ok(parsed) = pg_query::parse(source) else {
+        return locations;
+    };
+    for raw in &parsed.protobuf.stmts {
+        let (options, anonymous) = match raw.stmt.as_deref().and_then(|node| node.node.as_ref()) {
+            Some(Node::CreateFunctionStmt(statement)) if statement.sql_body.is_none() => {
+                (&statement.options, false)
+            }
+            Some(Node::DoStmt(statement)) => (&statement.args, true),
+            _ => continue,
+        };
+        let language = options.iter().find_map(|node| match node.node.as_ref() {
+            Some(Node::DefElem(option)) if option.defname == "language" => {
+                super::routine_header::option_string(option)
+            }
+            _ => None,
+        });
+        if !matches!(language.as_deref().unwrap_or("plpgsql"), "sql" | "plpgsql") {
+            continue;
+        }
+        let (start, end) = super::statement_span(source, raw);
+        for option in options {
+            let Some(Node::DefElem(option)) = option.node.as_ref() else {
+                continue;
+            };
+            if option.defname != "as" {
+                continue;
+            }
+            let value = match option.arg.as_deref().and_then(|node| node.node.as_ref()) {
+                Some(Node::String(value)) => Some(value.sval.as_str()),
+                Some(Node::List(list)) if list.items.len() == 1 => {
+                    match list.items[0].node.as_ref() {
+                        Some(Node::String(value)) => Some(value.sval.as_str()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            let Some(value) = value else {
+                continue;
+            };
+            let first = if anonymous {
+                None
+            } else {
+                tokens
+                    .iter()
+                    .position(|token| {
+                        usize::try_from(option.location).ok() == Some(token.start)
+                            && token.kind == Token::As
+                    })
+                    .and_then(|index| tokens[index + 1..].iter().find(|token| !token.is_comment()))
+                    .map(|token| token.start)
+            };
+            for token in tokens.iter().filter(|token| {
+                token.kind == Token::Sconst && start <= token.start && token.end <= end
+            }) {
+                if (anonymous || first == Some(token.start))
+                    && dollar_token_content(token.text).is_some_and(|(_, body)| body == value)
+                {
+                    locations.insert(token.start);
+                }
+            }
+        }
+    }
+    locations
+}
+
+fn dollar_token_content(text: &str) -> Option<(usize, &str)> {
+    if !text.starts_with('$') {
+        return None;
+    }
+    let delimiter_end = text[1..].find('$')? + 2;
+    let delimiter = &text[..delimiter_end];
+    (text.len() >= delimiter_end * 2 && text.ends_with(delimiter)).then(|| {
+        (
+            delimiter_end,
+            &text[delimiter_end..text.len() - delimiter_end],
+        )
+    })
+}
+
 fn output_line_range(output: &str, line: usize) -> Option<SourceRange> {
     let mut start = 0usize;
     for (index, segment) in output.split_inclusive('\n').enumerate() {
-        let end = start + segment.strip_suffix('\n').unwrap_or(segment).len();
+        let end = start + segment.trim_end_matches(['\r', '\n']).len();
         if index + 1 == line {
             return Some(SourceRange::new(start, end));
         }
@@ -259,6 +461,12 @@ pub(super) fn statement_skipped_diagnostic(
     statement_line: usize,
     cause_range: Option<SourceRange>,
 ) -> Diagnostic {
+    let statement_range = syntax_source_range(source, SourceRange::new(0, source.len()));
+    let statement_line = statement_line
+        + source[..statement_range.start]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count();
     Diagnostic {
         rule_id: "format.statement_skipped".into(),
         severity: match policy {
@@ -266,7 +474,7 @@ pub(super) fn statement_skipped_diagnostic(
             super::UnsupportedPolicy::Error => Severity::Error,
         },
         message: format!("statement formatting skipped at line {statement_line}: {error}"),
-        source_range: cause_range.unwrap_or_else(|| SourceRange::new(0, source.len())),
+        source_range: cause_range.unwrap_or(statement_range),
         fix_available: false,
     }
 }
@@ -285,7 +493,9 @@ pub(super) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diag
         | FormatDiagnostic::Ownership(_) => "format.safety_failure",
     };
     let source_range = match error {
-        FormatDiagnostic::UnsupportedSyntax { start, end, .. } => SourceRange::new(*start, *end),
+        FormatDiagnostic::UnsupportedSyntax { start, end, .. } => {
+            syntax_source_range(source, SourceRange::new(*start, *end))
+        }
         _ => SourceRange::new(0, source.len()),
     };
     Diagnostic {
@@ -295,6 +505,24 @@ pub(super) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diag
         source_range,
         fix_available: false,
     }
+}
+
+/// Parser statement ranges can include attached leading comments. Diagnostic
+/// fallbacks point to SQL syntax without changing the statement's rewrite span.
+/// Keep the original range if scanner provenance is unavailable.
+fn syntax_source_range(source: &str, range: SourceRange) -> SourceRange {
+    source
+        .get(range.start..range.end)
+        .and_then(|slice| tokenize(slice).ok())
+        .and_then(|tokens| {
+            tokens
+                .iter()
+                .find(|token| !token.is_comment())
+                .map(|token| token.start)
+        })
+        .map_or(range, |offset| {
+            SourceRange::new(range.start + offset, range.end)
+        })
 }
 
 fn align_tokens(

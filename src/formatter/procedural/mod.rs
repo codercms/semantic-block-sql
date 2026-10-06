@@ -1,14 +1,17 @@
+mod capabilities;
 mod ir;
 mod layout;
 
 use serde_json::Value;
 
-use super::{FormatDiagnostic, FormatOptions, FormattedSql};
+use super::result::{FormattedContent, FormattedLeaf, LeafOutcome};
+use super::routine_header::{OuterTokenOwnership, normalize_outer_tokens, option_string};
+use super::{FormatDiagnostic, FormatOptions};
 
 pub(super) fn format_single_routine(
     source: &str,
     options: &FormatOptions,
-) -> Result<FormattedSql, FormatDiagnostic> {
+) -> Result<FormattedContent, FormatDiagnostic> {
     let _ = validate_outer(source)?;
     let parsed = pg_query::parse_plpgsql(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
@@ -16,9 +19,15 @@ pub(super) fn format_single_routine(
 
     let (open_start, open_end, close_start, close_end) = dollar_body_span(source)?;
     let body = &source[open_end..close_start];
-    let body_ir = ir::parse(body)?;
+    let mut body_ir = ir::parse(body)?;
     ir::validate_parser_alignment(&body_ir, &parser_model)?;
+    capabilities::bind(&mut body_ir, &parsed)?;
     let formatted_body = layout::format(&body_ir, options)?;
+    super::semantic_block::validate_hard_width_except(
+        &formatted_body.output,
+        options,
+        &formatted_body.protected_output_ranges,
+    )?;
     let mut output = String::with_capacity(source.len() + formatted_body.output.len());
     output.push_str(&source[..open_start]);
     output.push_str(&source[open_start..open_end]);
@@ -27,6 +36,15 @@ pub(super) fn format_single_routine(
     output.push_str(&source[close_end..]);
     let outer_tokens = validate_outer(&output)?;
     let output = normalize_outer_tokens(&output, options, outer_tokens)?;
+    let output = super::routine_header::format_dollar_declaration(&output, options)?;
+    // Header layout may shift the body, whose protected spans remain body-local.
+    let (_, output_body_start, _, _) = dollar_body_span(&output)?;
+    let opaque_output_ranges = formatted_body
+        .protected_output_ranges
+        .iter()
+        .map(|range| range.shifted(output_body_start))
+        .collect::<Vec<_>>();
+    super::semantic_block::validate_hard_width_except(&output, options, &opaque_output_ranges)?;
 
     validate_outer(&output)?;
     let reparsed = pg_query::parse_plpgsql(&output)
@@ -39,50 +57,30 @@ pub(super) fn format_single_routine(
 
     let second_body = {
         let (_, second_open, second_close, _) = dollar_body_span(&output)?;
-        let second_ir = ir::parse(&output[second_open..second_close])?;
+        let mut second_ir = ir::parse(&output[second_open..second_close])?;
         ir::validate_parser_alignment(&second_ir, &reparsed_model)?;
+        capabilities::bind(&mut second_ir, &reparsed)?;
         layout::format(&second_ir, options)?
     };
     if second_body.output != formatted_body.output {
         return Err(FormatDiagnostic::NotIdempotent);
     }
 
-    Ok(FormattedSql {
-        changed: output != source,
-        output,
+    Ok(FormattedContent {
         warnings: Vec::new(),
+        output,
+        opaque_source_ranges: formatted_body
+            .protected_source_ranges
+            .into_iter()
+            .map(|range| range.shifted(open_end))
+            .collect(),
+        opaque_output_ranges,
         diagnostics: formatted_body
             .diagnostics
             .into_iter()
             .map(|diagnostic| diagnostic.shifted(open_end))
             .collect(),
     })
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub(super) struct OuterTokenOwnership {
-    pub language_location: Option<usize>,
-    pub routine_kind_location: Option<usize>,
-    pub returns_location: Option<usize>,
-}
-
-impl OuterTokenOwnership {
-    pub fn within(self, start: usize, end: usize) -> Self {
-        Self {
-            language_location: self
-                .language_location
-                .filter(|location| start <= *location && *location < end)
-                .map(|location| location - start),
-            routine_kind_location: self
-                .routine_kind_location
-                .filter(|location| start <= *location && *location < end)
-                .map(|location| location - start),
-            returns_location: self
-                .returns_location
-                .filter(|location| start <= *location && *location < end)
-                .map(|location| location - start),
-        }
-    }
 }
 
 fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic> {
@@ -100,23 +98,24 @@ fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic>
         .and_then(|node| node.node.as_ref())
         .ok_or_else(|| unsupported(source, "empty routine statement"))?;
     use pg_query::protobuf::node::Node;
-    let (options, routine_kind_location, returns_location) = match node {
-        Node::DoStmt(statement) => (&statement.args, None, None),
+    let (options, ownership) = match node {
+        Node::DoStmt(statement) => (
+            &statement.args,
+            OuterTokenOwnership::from_options(&statement.args),
+        ),
         Node::CreateFunctionStmt(statement) => {
             if statement.sql_body.is_some() {
                 return Err(unsupported(source, "SQL-standard routine body"));
             }
             (
                 &statement.options,
-                routine_kind_location(source, statement.is_procedure)?,
-                routine_returns_location(source, statement)?,
+                OuterTokenOwnership::from_statement(source, statement)?,
             )
         }
         _ => return Err(unsupported(source, "non-routine statement")),
     };
 
     let mut language = None;
-    let mut language_location = None;
     let mut body_count = 0usize;
     for option in options {
         let Some(Node::DefElem(option)) = option.node.as_ref() else {
@@ -125,7 +124,6 @@ fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic>
         match option.defname.as_str() {
             "language" => {
                 language = option_string(option);
-                language_location = usize::try_from(option.location).ok();
             }
             "as" => body_count += 1,
             _ => {}
@@ -137,60 +135,7 @@ fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic>
     if body_count != 1 {
         return Err(unsupported(source, "routine without exactly one body"));
     }
-    Ok(OuterTokenOwnership {
-        language_location,
-        routine_kind_location,
-        returns_location,
-    })
-}
-
-pub(super) fn routine_returns_location(
-    source: &str,
-    statement: &pg_query::protobuf::CreateFunctionStmt,
-) -> Result<Option<usize>, FormatDiagnostic> {
-    if statement.is_procedure {
-        return Ok(None);
-    }
-    let Some(return_type) = statement.return_type.as_ref() else {
-        return Ok(None);
-    };
-    let Some(return_type_location) = usize::try_from(return_type.location).ok() else {
-        return Ok(None);
-    };
-    Ok(super::tokens::tokenize(source)?
-        .into_iter()
-        .filter(|token| {
-            token.kind == pg_query::protobuf::Token::Returns && token.start < return_type_location
-        })
-        .map(|token| token.start)
-        .next_back())
-}
-
-pub(super) fn routine_kind_location(
-    source: &str,
-    is_procedure: bool,
-) -> Result<Option<usize>, FormatDiagnostic> {
-    let expected = if is_procedure {
-        pg_query::protobuf::Token::Procedure
-    } else {
-        pg_query::protobuf::Token::Function
-    };
-    Ok(super::tokens::tokenize(source)?
-        .into_iter()
-        .find(|token| token.kind == expected)
-        .map(|token| token.start))
-}
-
-pub(super) fn option_string(option: &pg_query::protobuf::DefElem) -> Option<String> {
-    use pg_query::protobuf::node::Node;
-    match option.arg.as_deref()?.node.as_ref()? {
-        Node::String(value) => Some(value.sval.to_ascii_lowercase()),
-        Node::List(list) if list.items.len() == 1 => match list.items[0].node.as_ref()? {
-            Node::String(value) => Some(value.sval.to_ascii_lowercase()),
-            _ => None,
-        },
-        _ => None,
-    }
+    Ok(ownership)
 }
 
 fn dollar_body_span(source: &str) -> Result<(usize, usize, usize, usize), FormatDiagnostic> {
@@ -224,7 +169,8 @@ fn format_leaf(
     text: &str,
     options: &FormatOptions,
     indent: usize,
-) -> Result<String, FormatDiagnostic> {
+    capability: Option<&capabilities::LeafCapability>,
+) -> Result<FormattedLeaf, FormatDiagnostic> {
     let mut nested_options = options.clone();
     let indent_width = indent * 4;
     nested_options.soft_line_width = options.soft_line_width.saturating_sub(indent_width).max(1);
@@ -232,7 +178,17 @@ fn format_leaf(
         .hard_line_width
         .saturating_sub(indent_width)
         .max(nested_options.soft_line_width);
-    format_body_statement(kind, text, &nested_options)
+    nested_options.semicolon_policy = super::SemicolonPolicy::Preserve;
+    if let Some(formatted) = capabilities::format(text, capability, &nested_options)? {
+        return Ok(formatted);
+    }
+    if kind == ir::BodyNodeKind::Sql {
+        return Ok(super::format_sql_content(text, &nested_options)?.into());
+    }
+    Ok(FormattedLeaf {
+        outcome: LeafOutcome::Formatted(format_body_statement(kind, text, &nested_options)?),
+        diagnostics: Vec::new(),
+    })
 }
 
 fn format_body_statement(
@@ -258,12 +214,6 @@ fn format_body_statement(
     if kind == ir::BodyNodeKind::ReturnQuery {
         return format_return_query(code, &upper, options)
             .map(|rendered| attach_line_comment(rendered, comment));
-    }
-    for keyword in ["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "GRANT"] {
-        if upper.starts_with(keyword) && code.ends_with(';') {
-            let formatted = super::format_sql(code, options)?.output;
-            return Ok(attach_line_comment(formatted, comment));
-        }
     }
     if let Some(rendered) = format_for_query_header(code, &upper, options)? {
         return Ok(attach_line_comment(rendered, comment));
@@ -314,10 +264,17 @@ fn format_return_expression(
     code: &str,
     options: &FormatOptions,
 ) -> Result<Option<String>, FormatDiagnostic> {
-    if kind != ir::BodyNodeKind::Return {
+    if !matches!(
+        kind,
+        ir::BodyNodeKind::Return | ir::BodyNodeKind::ReturnNext
+    ) {
         return Ok(None);
     }
-    let prefix = "RETURN";
+    let prefix = if kind == ir::BodyNodeKind::ReturnNext {
+        "RETURN NEXT"
+    } else {
+        "RETURN"
+    };
     let expression = code[prefix.len()..].trim().trim_end_matches(';').trim();
     if expression.is_empty() {
         return Ok(None);
@@ -334,10 +291,9 @@ fn format_assignment_expression(
         return Ok(None);
     }
     let tokens = super::tokens::tokenize(code)?;
-    let assignment = tokens
-        .iter()
-        .find(|token| token.text == ":=")
-        .ok_or_else(|| FormatDiagnostic::Ownership("assignment has no := boundary".into()))?;
+    let assignment = ir::assignment_operator(&tokens)
+        .map(|index| &tokens[index])
+        .ok_or_else(|| FormatDiagnostic::Ownership("assignment has no owned operator".into()))?;
     let prefix = uppercase_procedural_words(&normalize_procedural_code(
         code[..assignment.end].trim(),
         options,
@@ -771,9 +727,14 @@ fn normalize_plpgsql(value: &mut Value) -> Result<(), FormatDiagnostic> {
                     0 => canonical_postgresql(&query)?,
                     2 => canonical_postgresql(&format!("SELECT {query}"))?,
                     3 => {
-                        let (target, expression) = query.split_once(":=").ok_or_else(|| {
-                            unsupported(&query, "unrecognized PL/pgSQL assignment expression")
-                        })?;
+                        let tokens = super::tokens::tokenize(&query)?;
+                        let operator = ir::assignment_operator(&tokens)
+                            .map(|index| &tokens[index])
+                            .ok_or_else(|| {
+                                unsupported(&query, "unrecognized PL/pgSQL assignment expression")
+                            })?;
+                        let target = &query[..operator.start];
+                        let expression = &query[operator.end..];
                         serde_json::json!({
                             "target": target.trim(),
                             "expression": canonical_postgresql(&format!("SELECT {}", expression.trim()))?,
@@ -862,39 +823,6 @@ fn strip_locations(value: &mut Value) {
         Value::Array(items) => items.iter_mut().for_each(strip_locations),
         _ => {}
     }
-}
-
-pub(super) fn normalize_outer_tokens(
-    source: &str,
-    options: &FormatOptions,
-    ownership: OuterTokenOwnership,
-) -> Result<String, FormatDiagnostic> {
-    let tokens = super::tokens::tokenize(source)?;
-    let mut output = String::with_capacity(source.len());
-    let mut cursor = 0usize;
-    for (index, token) in tokens.iter().enumerate() {
-        output.push_str(&source[cursor..token.start]);
-        let actual_language_clause = ownership.language_location == Some(token.start);
-        let actual_routine_kind = ownership.routine_kind_location == Some(token.start);
-        let actual_returns_clause = ownership.returns_location == Some(token.start);
-        let sql_language_name = token.text.eq_ignore_ascii_case("sql")
-            && index > 0
-            && ownership.language_location == Some(tokens[index - 1].start);
-        if actual_language_clause
-            || actual_routine_kind
-            || actual_returns_clause
-            || sql_language_name
-        {
-            output.push_str(&token.text.to_ascii_uppercase());
-        } else {
-            output.push_str(&super::semantic_block::render_token(
-                &tokens, index, options,
-            ));
-        }
-        cursor = token.end;
-    }
-    output.push_str(&source[cursor..]);
-    Ok(output)
 }
 
 fn unsupported(source: &str, feature: impl Into<String>) -> FormatDiagnostic {

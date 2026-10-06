@@ -235,3 +235,77 @@ fn successful_stdin_fmt_reports_formatted_stdout_coordinates() {
         "{warnings:#?}"
     );
 }
+
+#[test]
+fn dump_comment_headers_do_not_own_unsupported_or_skipped_locations() {
+    let project = TempDir::new().expect("temp project");
+    let source = "select id,title from sample_rows where enabled=true;\r\n\r\n--\r\n-- Name: sample_value; Type: FUNCTION; café\r\n--\r\n\r\nCREATE FUNCTION sample_value() RETURNS int LANGUAGE plpython3u AS $$ return 1 $$;\r\n\r\n/* header for the next statement */\r\n--\r\n\r\nALTER TABLE public.long_table_name ALTER COLUMN long_column_name SET DEFAULT 123;\r\n";
+    write(project.path(), "schema.sql", source);
+    write(
+        project.path(),
+        "semblock.toml",
+        "[layout]\nsoft_line_width = 32\nhard_line_width = 40\n",
+    );
+    for mode in ["check", "diff"] {
+        let output = run(project.path(), &[mode, "schema.sql"], None);
+        let warnings = warning_lines(&output);
+        for (needle, rule) in [
+            ("CREATE FUNCTION", "syntax.unsupported"),
+            ("ALTER TABLE", "format.statement_skipped"),
+        ] {
+            let (line, column, start, _) = location(source, needle);
+            let warning = warnings
+                .iter()
+                .find(|warning| warning.contains(&format!("warning[{rule}]")))
+                .expect("warning exists");
+            assert!(
+                warning.starts_with(&format!("schema.sql:{line}:{column} (bytes {start}-")),
+                "{warning}"
+            );
+            if rule == "format.statement_skipped" {
+                assert!(
+                    warning.contains(&format!("statement formatting skipped at line {line}:")),
+                    "{warning}"
+                );
+            }
+        }
+        assert_eq!(
+            fs::read_to_string(project.path().join("schema.sql")).unwrap(),
+            source
+        );
+    }
+    let first = run(project.path(), &["fmt", "schema.sql"], None);
+    assert_eq!(first.status.code(), Some(0));
+    let rewritten = fs::read_to_string(project.path().join("schema.sql")).unwrap();
+    assert!(
+        rewritten
+            .contains("-- Name: sample_value; Type: FUNCTION; café\r\n--\r\n\r\nCREATE FUNCTION")
+    );
+    for (needle, rule) in [
+        ("CREATE FUNCTION", "syntax.unsupported"),
+        ("ALTER TABLE", "format.statement_skipped"),
+    ] {
+        let (line, column, start, _) = location(&rewritten, needle);
+        let warnings = warning_lines(&first);
+        let warning = warnings
+            .iter()
+            .find(|warning| warning.contains(&format!("warning[{rule}]")))
+            .expect("warning exists");
+        assert!(
+            warning.starts_with(&format!("schema.sql:{line}:{column} (bytes {start}-")),
+            "{warning}"
+        );
+        if rule == "format.statement_skipped" {
+            assert!(
+                warning.contains(&format!("statement formatting skipped at line {line}:")),
+                "{warning}"
+            );
+        }
+    }
+    let second = run(project.path(), &["fmt", "schema.sql"], None);
+    assert_eq!(warning_lines(&second), warning_lines(&first));
+    assert_eq!(
+        fs::read_to_string(project.path().join("schema.sql")).unwrap(),
+        rewritten
+    );
+}

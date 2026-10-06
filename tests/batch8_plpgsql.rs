@@ -109,7 +109,7 @@ fn formats_unicode_inside_dollar_quoted_bodies_without_panicking() {
 
 #[test]
 fn rejects_non_plpgsql_bodies() {
-    let source = "CREATE FUNCTION f() RETURNS int LANGUAGE SQL AS $$ SELECT 1 $$;";
+    let source = "CREATE FUNCTION f() RETURNS int LANGUAGE plpython3u AS $$ return 1 $$;";
     let result = format_sql_result(source, &FormatOptions::default());
     assert_eq!(result.output, source);
     assert!(

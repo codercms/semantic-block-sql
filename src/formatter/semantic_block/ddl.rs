@@ -4,7 +4,7 @@ use crate::formatter::layout_ir::{
 };
 use crate::formatter::ownership::TokenRange;
 
-use super::lists::plan_owned_delimited_list;
+use super::lists::{plan_keyword_list_at_indent, plan_owned_delimited_list};
 use super::*;
 
 pub(super) fn plan_values_statements(
@@ -24,14 +24,58 @@ pub(super) fn plan_values_statements(
                 values.span.end,
                 context.options,
             );
-        if values.rows.len() <= 1 && !authored && width <= context.options.soft_line_width {
+        let has_authored_suffix = values
+            .clauses
+            .ordered_boundaries(values.span.end)
+            .into_iter()
+            .filter(|&index| index < values.span.end)
+            .any(|index| context.tokens[index].line_breaks_before > 0);
+        if values.rows.len() <= 1
+            && !authored
+            && !has_authored_suffix
+            && width <= context.options.soft_line_width
+        {
             continue;
         }
-        let indent = values.span.base_depth + 1;
+        let keyword_indent = values
+            .wrapper
+            .map_or(values.span.base_depth, |(open, close)| {
+                let parent_indent =
+                    plan.line_indent_for(open, values.span.base_depth.saturating_sub(1));
+                plan.break_before(values.keyword, 1, parent_indent + 1);
+                plan.break_before(close, 1, parent_indent);
+                parent_indent + 1
+            });
+        let indent = keyword_indent + 1;
+        if let Some((_, close)) = values.rows.last() {
+            plan.set_indent(values.keyword + 1..close + 1, indent);
+        }
         for &(open, close) in &values.rows {
             plan.set_indent(open..close + 1, indent);
             plan.break_before(open, 1, indent);
         }
+        if let Some(order) = values.clauses.order_by {
+            plan_keyword_list_at_indent(
+                context,
+                order + 1,
+                values.clauses.next_after(order, values.span.end),
+                values.span.base_depth,
+                keyword_indent,
+                false,
+                plan,
+            );
+        }
+        plan_clause_boundaries(
+            context,
+            values
+                .clauses
+                .ordered_boundaries(values.span.end)
+                .into_iter()
+                .filter(|&index| index < values.span.end),
+            keyword_indent,
+            true,
+            plan,
+        );
     }
 }
 
@@ -80,6 +124,7 @@ pub(super) fn plan_materialized_views(
 pub(super) fn plan_create_tables(
     context: &PlanningContext<'_, '_>,
     statements: &[CreateTableBlock],
+    booleans: &[BooleanRange],
     plan: &mut LayoutPlan,
 ) {
     for table in statements {
@@ -90,6 +135,32 @@ pub(super) fn plan_create_tables(
                 && table.items[position - 1].kind.is_column()
                 && !item.kind.is_column();
             plan.break_before(item.range.start, if blank_line { 2 } else { 1 }, indent);
+            if let Some(identity) = &item.identity {
+                plan_identity(context, identity, indent, plan);
+            }
+            if indent * INDENT_WIDTH
+                + compact_width(
+                    context.tokens,
+                    item.range.start,
+                    item.range.end,
+                    context.options,
+                )
+                > context.options.soft_line_width
+            {
+                for check in &item.checks {
+                    if booleans
+                        .iter()
+                        .any(|range| range.start == check.open + 1 && range.end == check.close)
+                    {
+                        continue;
+                    }
+                    plan.break_before(
+                        check.introducer,
+                        context.tokens[check.introducer].line_breaks_before.max(1),
+                        indent + 1,
+                    );
+                }
+            }
         }
         if let Some(close) = table.close {
             plan.break_before(close, 1, table.span.base_depth);
@@ -240,6 +311,9 @@ pub(super) fn plan_alter_tables(
                 },
                 indent,
             );
+            if let Some(identity) = &action.identity {
+                plan_identity(context, identity, indent + 1, plan);
+            }
             if let Some(options) = &action.relation_options {
                 plan_owned_delimited_list(
                     context,
@@ -250,6 +324,50 @@ pub(super) fn plan_alter_tables(
                     plan,
                 );
             }
+            if !action.foreign_key_clauses.is_empty() {
+                let clause_indent = indent + 1;
+                for &index in &action.foreign_key_clauses {
+                    plan.break_before(
+                        index,
+                        context.tokens[index].line_breaks_before.max(1),
+                        clause_indent,
+                    );
+                    plan.set_indent(index..action.range.end, clause_indent);
+                }
+            }
         }
     }
+}
+
+fn plan_identity(
+    context: &PlanningContext<'_, '_>,
+    block: &crate::formatter::layout_ir::IdentityBlock,
+    indent: usize,
+    plan: &mut LayoutPlan,
+) {
+    let Some((open, close)) = block.options else {
+        return;
+    };
+    let authored = context.tokens[open + 1..close]
+        .iter()
+        .any(|token| token.line_breaks_before > 0);
+    let width = compact_width(context.tokens, block.introducer, close + 1, context.options)
+        + indent * INDENT_WIDTH;
+    if !authored && width <= context.options.soft_line_width {
+        return;
+    }
+    plan.break_before(
+        block.introducer,
+        context.tokens[block.introducer].line_breaks_before.max(1),
+        indent,
+    );
+    plan.set_indent(open + 1..close, indent + 1);
+    for &index in &block.clauses {
+        plan.break_before(
+            index,
+            context.tokens[index].line_breaks_before.max(1),
+            indent + 1,
+        );
+    }
+    plan.break_before(close, 1, indent);
 }
