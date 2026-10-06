@@ -1542,3 +1542,16 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Run focused and full all-target tests plus formatter/Clippy/Rustdoc/diff
   gates. Review semantics, typed ownership, idempotence, comments, diagnostics,
   atomicity, dependencies, and dead code; no dependencies added.
+
+## Identity sequence-option implementation
+
+- [x] Bind identity introductions and sequence options to constraint/DefElem
+  locations within CREATE TABLE column and ALTER TABLE action spans.
+- [x] Reuse sequence validation/binding directly through owned ranges, including
+  SEQUENCE NAME, both generation modes, optional options, and authored groups.
+- [x] Make the identity audit fixture green; cover column/ALTER forms, negative
+  increments, bounds, cycles, comments, and blank option groups.
+- [x] Run focused/full all-target checks and formatting/Clippy/Rustdoc/diff
+  gates; five remaining audit fixture cases are still red.
+- [x] Re-audit private copies and review semantics, module boundaries,
+  idempotence, comments/groups, diagnostics, atomicity, dependencies/dead code.

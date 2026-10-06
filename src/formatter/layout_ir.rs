@@ -359,6 +359,14 @@ pub(super) struct CreateTableItem {
     pub range: TokenRange,
     pub kind: CreateTableElementSpec,
     pub checks: Vec<CheckPredicateBlock>,
+    pub identity: Option<IdentityBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct IdentityBlock {
+    pub introducer: usize,
+    pub options: Option<(usize, usize)>,
+    pub clauses: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -395,6 +403,7 @@ pub(super) struct AlterTableAction {
     pub relation_options: Option<AlterTableOptionList>,
     pub checks: Vec<CheckPredicateBlock>,
     pub foreign_key_clauses: Vec<usize>,
+    pub identity: Option<IdentityBlock>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

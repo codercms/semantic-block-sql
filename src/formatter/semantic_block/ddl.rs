@@ -99,6 +99,9 @@ pub(super) fn plan_create_tables(
                 && table.items[position - 1].kind.is_column()
                 && !item.kind.is_column();
             plan.break_before(item.range.start, if blank_line { 2 } else { 1 }, indent);
+            if let Some(identity) = &item.identity {
+                plan_identity(context, identity, indent, plan);
+            }
         }
         if let Some(close) = table.close {
             plan.break_before(close, 1, table.span.base_depth);
@@ -249,6 +252,9 @@ pub(super) fn plan_alter_tables(
                 },
                 indent,
             );
+            if let Some(identity) = &action.identity {
+                plan_identity(context, identity, indent + 1, plan);
+            }
             if let Some(options) = &action.relation_options {
                 plan_owned_delimited_list(
                     context,
@@ -272,4 +278,37 @@ pub(super) fn plan_alter_tables(
             }
         }
     }
+}
+
+fn plan_identity(
+    context: &PlanningContext<'_, '_>,
+    block: &crate::formatter::layout_ir::IdentityBlock,
+    indent: usize,
+    plan: &mut LayoutPlan,
+) {
+    let Some((open, close)) = block.options else {
+        return;
+    };
+    let authored = context.tokens[open + 1..close]
+        .iter()
+        .any(|token| token.line_breaks_before > 0);
+    let width = compact_width(context.tokens, block.introducer, close + 1, context.options)
+        + indent * INDENT_WIDTH;
+    if !authored && width <= context.options.soft_line_width {
+        return;
+    }
+    plan.break_before(
+        block.introducer,
+        context.tokens[block.introducer].line_breaks_before.max(1),
+        indent,
+    );
+    plan.set_indent(open + 1..close, indent + 1);
+    for &index in &block.clauses {
+        plan.break_before(
+            index,
+            context.tokens[index].line_breaks_before.max(1),
+            indent + 1,
+        );
+    }
+    plan.break_before(close, 1, indent);
 }

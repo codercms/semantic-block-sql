@@ -249,8 +249,13 @@ pub(super) struct MaterializedViewSpec {
 /// enforcing the column/constraint boundary in layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CreateTableElementSpec {
-    Column { check_constraints: usize },
-    Constraint { is_check: bool },
+    Column {
+        check_constraints: usize,
+        identity: Option<IdentitySpec>,
+    },
+    Constraint {
+        is_check: bool,
+    },
 }
 
 impl CreateTableElementSpec {
@@ -260,8 +265,17 @@ impl CreateTableElementSpec {
 
     pub fn check_constraints(self) -> usize {
         match self {
-            Self::Column { check_constraints } => check_constraints,
+            Self::Column {
+                check_constraints, ..
+            } => check_constraints,
             Self::Constraint { is_check } => usize::from(is_check),
+        }
+    }
+
+    pub fn identity(self) -> Option<IdentitySpec> {
+        match self {
+            Self::Column { identity, .. } => identity,
+            Self::Constraint { .. } => None,
         }
     }
 }
@@ -311,6 +325,7 @@ pub(super) struct AlterTableActionSpec {
     pub relation_options: Option<usize>,
     pub check_constraints: usize,
     pub foreign_key: Option<ForeignKeySpec>,
+    pub identity: Option<IdentitySpec>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -340,11 +355,18 @@ pub(super) enum SequenceOptionKind {
     Cache,
     Cycle,
     OwnedBy,
+    SequenceName,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct SequenceSpec {
-    pub options: [Option<(SequenceOptionKind, usize)>; 8],
+    pub options: [Option<(SequenceOptionKind, usize)>; 9],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct IdentitySpec {
+    pub location: usize,
+    pub sequence: SequenceSpec,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

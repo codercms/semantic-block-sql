@@ -90,3 +90,21 @@ fn trigger_transition_rows_remain_an_explicit_unsupported_boundary() {
             .any(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
     );
 }
+
+#[test]
+fn identity_options_cover_both_generation_modes_and_column_declarations() {
+    for mode in ["ALWAYS", "BY DEFAULT"] {
+        for options in [
+            "",
+            " (START WITH 2 INCREMENT BY -1 NO MINVALUE NO MAXVALUE CACHE 5 CYCLE)",
+            " (\nSTART WITH 2\n\n-- retained sequence option group\nCACHE 10\n)",
+        ] {
+            assert_supported(&format!(
+                "CREATE TABLE sample_rows (id bigint GENERATED {mode} AS IDENTITY{options}, label text);"
+            ));
+            assert_supported(&format!(
+                "ALTER TABLE sample_rows ALTER COLUMN id ADD GENERATED {mode} AS IDENTITY{options};"
+            ));
+        }
+    }
+}

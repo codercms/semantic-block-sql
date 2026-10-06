@@ -171,6 +171,9 @@ Fixture-backed support includes:
   queries, and wrapped set-operation branches with owned data clauses.
 
 Sequence options retain their authored order and wrap at parser-owned locations.
+The same option capabilities cover GENERATED ALWAYS/BY DEFAULT AS IDENTITY in
+CREATE TABLE columns and ALTER TABLE ADD GENERATED clauses, including SEQUENCE
+NAME and authored option/comment groups.
 Trigger headers own timing, UPDATE OF columns, relation, condition, execution,
 and OLD/NEW transition-table clauses, including keyword-like transition aliases.
 ALTER TABLE foreign-key clauses wrap at verified key/reference/action boundaries.

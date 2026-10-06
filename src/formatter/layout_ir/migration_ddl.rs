@@ -14,15 +14,14 @@ fn missing(message: &str) -> FormatDiagnostic {
 pub(super) fn bind_sequence(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
-    statement: &StatementTokens,
+    range: TokenRange,
+    base: usize,
     spec: SequenceSpec,
 ) -> Result<Vec<usize>, FormatDiagnostic> {
     let mut clauses = Vec::new();
     for &(kind, location) in spec.options.iter().flatten() {
-        let index = (statement.range.start..statement.range.end)
-            .find(|&index| {
-                tokens[index].start == location && structure.depth(index) == statement.base_depth
-            })
+        let index = (range.start..range.end)
+            .find(|&index| tokens[index].start == location && structure.depth(index) == base)
             .ok_or_else(|| missing("sequence option location disagrees with its AST"))?;
         let expected = match kind {
             SequenceOptionKind::As => Token::As,
@@ -33,6 +32,7 @@ pub(super) fn bind_sequence(
             SequenceOptionKind::Cache => Token::Cache,
             SequenceOptionKind::Cycle => Token::Cycle,
             SequenceOptionKind::OwnedBy => Token::Owned,
+            SequenceOptionKind::SequenceName => Token::Sequence,
         };
         let keyword = if tokens[index].kind == Token::No
             && matches!(
@@ -52,6 +52,56 @@ pub(super) fn bind_sequence(
         clauses.push(index);
     }
     Ok(clauses)
+}
+
+pub(super) fn bind_identity(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    range: TokenRange,
+    base: usize,
+    spec: crate::formatter::ownership::IdentitySpec,
+) -> Result<super::IdentityBlock, FormatDiagnostic> {
+    let introducer = (range.start..range.end)
+        .find(|&index| {
+            tokens[index].start == spec.location
+                && structure.depth(index) == base
+                && matches!(tokens[index].kind, Token::AddP | Token::Generated)
+        })
+        .ok_or_else(|| missing("identity clause location disagrees with its AST"))?;
+    let identity = (introducer..range.end)
+        .find(|&index| structure.depth(index) == base && tokens[index].kind == Token::IdentityP)
+        .ok_or_else(|| missing("identity keyword is missing"))?;
+    let open = next_non_comment(tokens, identity)
+        .filter(|&index| index < range.end && tokens[index].kind == Token::Ascii40);
+    let options = open
+        .map(|open| {
+            structure
+                .matching_parenthesis(open)
+                .filter(|&close| close < range.end)
+                .map(|close| (open, close))
+                .ok_or_else(|| missing("identity option list is unclosed"))
+        })
+        .transpose()?;
+    let has_options = spec.sequence.options.iter().any(Option::is_some);
+    if options.is_some() != has_options {
+        return Err(missing("identity option list disagrees with its AST"));
+    }
+    let clauses = if let Some((open, close)) = options {
+        bind_sequence(
+            tokens,
+            structure,
+            TokenRange::new(open + 1, close)?,
+            base + 1,
+            spec.sequence,
+        )?
+    } else {
+        Vec::new()
+    };
+    Ok(super::IdentityBlock {
+        introducer,
+        options,
+        clauses,
+    })
 }
 
 pub(super) fn bind_trigger(

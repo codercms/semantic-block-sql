@@ -261,7 +261,13 @@ pub(super) fn bind_utility(
     }
     let (clauses, identifier_tokens) = match kind {
         UtilityStatementKind::CreateSequence(spec) => (
-            super::migration_ddl::bind_sequence(tokens, structure, statement, spec)?,
+            super::migration_ddl::bind_sequence(
+                tokens,
+                structure,
+                statement.range,
+                statement.base_depth,
+                spec,
+            )?,
             Vec::new(),
         ),
         UtilityStatementKind::CreateTrigger(spec) => {
@@ -712,6 +718,18 @@ pub(super) fn bind_create_table(
                     range,
                     kind,
                     checks,
+                    identity: kind
+                        .identity()
+                        .map(|spec| {
+                            super::migration_ddl::bind_identity(
+                                tokens,
+                                structure,
+                                range,
+                                base + 1,
+                                spec,
+                            )
+                        })
+                        .transpose()?,
                 })
             })
             .collect::<Result<Vec<_>, FormatDiagnostic>>()?;
@@ -1012,6 +1030,12 @@ pub(super) fn bind_alter_table(
             Ok(AlterTableAction {
                 range,
                 group: action.group,
+                identity: action
+                    .identity
+                    .map(|spec| {
+                        super::migration_ddl::bind_identity(tokens, structure, range, base, spec)
+                    })
+                    .transpose()?,
                 relation_options,
                 foreign_key_clauses: action
                     .foreign_key

@@ -1170,3 +1170,12 @@ also available while binding relations, so a call cannot masquerade as a
 same-spelled alias. AS-less recordset aliases are verified against their typed
 following column-definition capability. Scanner trivia never removes call
 ownership; comments remain protected by the existing emission and safety gates.
+
+### Identity sequence-option ownership
+
+Identity constraints carry their AST introduction location and reviewed sequence
+options. CREATE TABLE column items and ALTER TABLE actions bind the same typed
+option capability within their own spans, preserving generation mode and order.
+The sequence-option binder accepts an owned token range and depth rather than
+inventing a utility statement for an identity child. Empty and multiline option
+forms retain the existing semantic, comment, hard-width, and idempotence gates.

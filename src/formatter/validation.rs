@@ -18,7 +18,7 @@ pub use equivalence::validate_equivalent;
 use super::ownership::{
     AggregateSignatureSpec, AliasSpec, AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec,
     ConflictActionSpec, ConflictSpec, CreateIndexSpec, CreateTableElementSpec, CreateTableSpec,
-    CteStatementSpec, DeleteSpec, ForeignKeyAction, ForeignKeySpec, FunctionCallSpec,
+    CteStatementSpec, DeleteSpec, ForeignKeyAction, ForeignKeySpec, FunctionCallSpec, IdentitySpec,
     InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeBranchSpec,
     MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec, RelationItemSpec,
     RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec,
@@ -1043,11 +1043,18 @@ fn validate_sequence(statement: &CreateSeqStmt) -> Result<SequenceSpec, &'static
     if statement.sequence.is_none() || statement.for_identity {
         return Err("unreviewed CREATE SEQUENCE form");
     }
-    let mut options = [None; 8];
-    if statement.options.len() > options.len() {
+    validate_sequence_options(&statement.options, false)
+}
+
+fn validate_sequence_options(
+    source_options: &[Node],
+    identity: bool,
+) -> Result<SequenceSpec, &'static str> {
+    let mut options = [None; 9];
+    if source_options.len() > options.len() {
         return Err("too many sequence options");
     }
-    for (slot, option) in options.iter_mut().zip(&statement.options) {
+    for (slot, option) in options.iter_mut().zip(source_options) {
         let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
             return Err("unrecognized sequence option");
         };
@@ -1060,6 +1067,7 @@ fn validate_sequence(statement: &CreateSeqStmt) -> Result<SequenceSpec, &'static
             "cache" => SequenceOptionKind::Cache,
             "cycle" => SequenceOptionKind::Cycle,
             "owned_by" => SequenceOptionKind::OwnedBy,
+            "sequence_name" if identity => SequenceOptionKind::SequenceName,
             _ => return Err("unreviewed sequence option"),
         };
         *slot = Some((
@@ -1327,6 +1335,7 @@ fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'stati
                 }
                 elements.push(CreateTableElementSpec::Column {
                     check_constraints: column_check_constraint_count(column),
+                    identity: column_identity_spec(column)?,
                 });
             }
             Some(NodeEnum::Constraint(constraint)) if !typed_table => {
@@ -1588,6 +1597,10 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
             group,
             relation_options,
             check_constraints,
+            identity: match command.def.as_deref().and_then(|node| node.node.as_ref()) {
+                Some(NodeEnum::Constraint(constraint)) => identity_spec(constraint)?,
+                _ => None,
+            },
             foreign_key: match command.def.as_deref().and_then(|node| node.node.as_ref()) {
                 Some(NodeEnum::Constraint(constraint))
                     if ConstrType::try_from(constraint.contype)
@@ -1713,6 +1726,35 @@ fn validate_constraint(constraint: &Constraint) -> Result<(), &'static str> {
 
 fn constraint_is_check(constraint: &Constraint) -> bool {
     ConstrType::try_from(constraint.contype).is_ok_and(|kind| kind == ConstrType::ConstrCheck)
+}
+
+fn identity_spec(constraint: &Constraint) -> Result<Option<IdentitySpec>, &'static str> {
+    if ConstrType::try_from(constraint.contype) != Ok(ConstrType::ConstrIdentity) {
+        return Ok(None);
+    }
+    if !matches!(constraint.generated_when.as_str(), "a" | "d") {
+        return Err("unreviewed identity generation mode");
+    }
+    Ok(Some(IdentitySpec {
+        location: usize::try_from(constraint.location).map_err(|_| "unlocated identity clause")?,
+        sequence: validate_sequence_options(&constraint.options, true)?,
+    }))
+}
+
+fn column_identity_spec(column: &ColumnDef) -> Result<Option<IdentitySpec>, &'static str> {
+    let mut identity = None;
+    for constraint in &column.constraints {
+        let Some(NodeEnum::Constraint(constraint)) = constraint.node.as_ref() else {
+            return Err("unrecognized column constraint");
+        };
+        if let Some(spec) = identity_spec(constraint)? {
+            if identity.is_some() {
+                return Err("multiple column identity clauses");
+            }
+            identity = Some(spec);
+        }
+    }
+    Ok(identity)
 }
 
 fn column_check_constraint_count(column: &ColumnDef) -> usize {
