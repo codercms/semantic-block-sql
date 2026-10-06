@@ -1,4 +1,4 @@
-# 0.2.1 formatter coverage and regression report
+# 0.3.0 formatter coverage and regression report
 
 The migration coverage work adds **107 tests** relative to the main branch after
 the authored-layout fix. The original 36 regression/desired-support cases and
@@ -69,5 +69,5 @@ The implementation keeps parser validation, typed ownership, layout planning,
 diagnostics, host extraction, and atomic rewriting separate. Structural and
 protected-token equivalence and byte idempotence remain mandatory. No formatter
 safety gate was weakened, and no dependencies or parser-backend revisions were
-added. The application version is 0.2.1; the optimized Windows build is verified
+added. The application version is 0.3.0; the optimized Windows build is verified
 separately from the test build.

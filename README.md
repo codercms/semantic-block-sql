@@ -205,7 +205,7 @@ For stdin, staged-file semantics, exit codes, directives, configuration, and oth
 - substantial PL/pgSQL support including datatype references, procedural `INTO`, transaction control, conditionals, loops, exception handlers, dynamic `EXECUTE`, cursors, and `RETURN QUERY`.
 
 Some valid PostgreSQL syntax is intentionally outside the reviewed capability set. See [PostgreSQL coverage](docs/sql-coverage.md) for the detailed boundary and known unsupported areas.
-The [0.2.1 coverage report](docs/coverage-improvements-0.2.1.md) lists the added fixtures, formatter fixes, and validation results.
+The [0.3.0 coverage report](docs/coverage-improvements-0.3.0.md) lists the added fixtures, formatter fixes, and validation results.
 
 ## Fail-safe by default
 

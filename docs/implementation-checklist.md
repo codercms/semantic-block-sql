@@ -1,11 +1,11 @@
 # Durable implementation checklist
 
-Status: **0.2.1 migration coverage and regression batches complete**
+Status: **0.3.0 migration coverage and regression batches complete**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
 
-The [0.2.1 coverage report](coverage-improvements-0.2.1.md) records the current
+The [0.3.0 coverage report](coverage-improvements-0.3.0.md) records the current
 verified outcome. Earlier batch notes retain historical red-test counts and
 audit findings; those counts do not describe the final implementation.
 
@@ -1296,9 +1296,9 @@ alignment failures, one SQL RETURN adapter failure, and one materialized-view
 query binding failure. Representative grammar shapes are covered by the new
 tests; the production audit and queries remain in local temporary storage only.
 
-## Tests-only patch version batch
+## Application version batch
 
-- [x] Bump the application and lockfile package version from 0.2.0 to 0.2.1.
+- [x] Bump the application and lockfile package version from 0.2.0 to 0.3.0.
 - [x] Build and verify the optimized executable through the existing user PATH.
 
 This version includes the synthetic regression coverage; the intentionally red
@@ -1401,7 +1401,7 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   in the two desired-coverage targets fail.
 - [x] Format/check a fresh private input copy without warnings; confirm the
   original path can produce a diff without warnings, without rewriting it.
-- [x] Rebuild and install the current optimized 0.2.1 on the user PATH; verify
+- [x] Rebuild and install the current optimized 0.3.0 on the user PATH; verify
   matching hashes, private-copy clean check, and installed CLI diagnostic offsets.
 - [x] Review semantic equivalence, ownership boundaries, idempotence, authored
   groups/comments, diagnostics, atomicity, dependencies, and dead code. No new
@@ -1426,7 +1426,7 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Review diagnostic provenance, input/output coordinates, comments,
   idempotence, semantic/rewrite boundaries, atomicity, and dependencies/dead code.
   No formatting/layout behavior or dependency changes were introduced.
-- [x] Rebuild/install optimized 0.2.1 on PATH and verify matching hashes and the
+- [x] Rebuild/install optimized 0.3.0 on PATH and verify matching hashes and the
   installed CLI's syntax-token location. Keep all private files outside the repo.
 
 
@@ -1443,7 +1443,7 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. Full all-target
   testing passes all existing and new controls; the same eleven pending cases
   in the two desired-coverage targets remain red.
-- [x] Rebuild/install optimized 0.2.1 on PATH, verify matching hashes and an
+- [x] Rebuild/install optimized 0.3.0 on PATH, verify matching hashes and an
   installed-CLI blank-line smoke test.
 - [x] Review semantics, authored groups/comments, idempotence, diagnostics,
   atomicity, module boundaries, dependencies, and dead code. No dependencies,
@@ -1629,4 +1629,4 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Verify all 873 original dump-header gaps and accurate indivisible warnings.
 - [x] Synchronize README, coverage, architecture, user guide, and design decisions;
   record the detailed fixture/bug/audit report without private SQL or domains.
-- [x] Build and verify the optimized 0.2.1 Windows executable.
+- [x] Build and verify the optimized 0.3.0 Windows executable.
