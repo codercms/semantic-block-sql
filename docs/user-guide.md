@@ -422,6 +422,10 @@ Unsupported procedural SQL, including SELECT/RETURNING INTO children, retains
 while formatting the enclosing routine layout; strict mode keeps the complete
 document unchanged.
 
+Preserved SQL leaves retain internal whitespace and comment termination, including
+multiline INTO queries. They are excluded from procedural indentation and style
+rewrites so repeated formatting keeps the same leaf and diagnostic identity.
+
 Coordinates refer to the source the user can act on:
 
 - `check` and `diff` refer to the original input;

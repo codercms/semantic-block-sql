@@ -1,5 +1,66 @@
 use semblock::{FormatOptions, TypeAliasFamily, check_sql, format_sql_result};
 
+#[test]
+fn multiline_unsupported_into_leaves_remain_protected() {
+    use semblock::UnsupportedPolicy;
+    for leaf in [
+        "SELECT json_value(payload, '$.id')\nINTO x FROM sample_rows;",
+        "SELECT json_value(payload, '$.id') -- value \n  INTO x FROM sample_rows;",
+        "SELECT payload INTO x\nFROM sample_rows -- source\nWHERE json_value(payload, '$.id') IS NULL;",
+        "\tSELECT json_value(payload, '$.id')\n\n\tINTO x FROM sample_rows; -- attached ",
+        "SELECT json_value(payload, '$.id')\nFROM sample_rows;",
+    ] {
+        for newline in ["\n", "\r\n"] {
+            let source = format!("-- café\nDO $$ DECLARE x text; BEGIN\n{leaf}\nEND; $$;")
+                .replace('\n', newline);
+            for policy in [UnsupportedPolicy::Skip, UnsupportedPolicy::Error] {
+                let options = FormatOptions {
+                    unsupported_policy: policy,
+                    ..FormatOptions::default()
+                };
+                let result = format_sql_result(&source, &options);
+                assert!(
+                    result.output.contains(&leaf.replace('\n', newline)),
+                    "{}",
+                    result.output
+                );
+                assert!(
+                    !result
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.rule_id == "format.statement_skipped"),
+                    "{:?}",
+                    result.diagnostics
+                );
+                let diagnostic = result
+                    .diagnostics
+                    .iter()
+                    .find(|d| d.rule_id == "syntax.unsupported")
+                    .expect("unsupported SQL leaf");
+                assert!(diagnostic.source_range.start >= source.find("SELECT").unwrap());
+                assert!(diagnostic.source_range.end <= source.find("END;").unwrap());
+                let second = format_sql_result(&result.output, &options);
+                assert_eq!(second.output, result.output);
+                assert!(
+                    second
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.rule_id == "syntax.unsupported")
+                );
+                assert!(
+                    !second
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.rule_id == "format.statement_skipped")
+                );
+                if policy == UnsupportedPolicy::Error {
+                    assert_eq!(result.output, source);
+                }
+            }
+        }
+    }
+}
+
 fn supported(source: &str, options: &FormatOptions) -> String {
     let result = format_sql_result(source, options);
     assert!(

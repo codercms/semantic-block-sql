@@ -27,6 +27,16 @@ struct LayoutLine {
     blank_before: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BodyLayout {
+    Line(LayoutLine),
+    Protected {
+        range: super::super::SourceRange,
+        indent: usize,
+        blank_before: bool,
+    },
+}
+
 pub(super) fn format(
     body: &RoutineBody<'_>,
     options: &FormatOptions,
@@ -34,13 +44,15 @@ pub(super) fn format(
     let mut frames = Vec::new();
     let mut lines = Vec::new();
     let mut diagnostics = Vec::new();
+    let mut protected_ranges = Vec::new();
     let mut in_declare = false;
 
     for node in &body.nodes {
         let separate_exception_handler =
             node.kind == BodyNodeKind::When && frames.last() == Some(&Frame::ExceptionBranch);
         let (indent, push_after) = layout_node(node, &mut frames, &mut in_declare, body.source)?;
-        let text = if node.kind.is_opaque() {
+        let mut protected = node.kind.is_opaque();
+        let text = if protected {
             diagnostics.push(Diagnostic {
                 rule_id: "syntax.unsupported".into(),
                 severity: match options.unsupported_policy {
@@ -62,6 +74,12 @@ pub(super) fn format(
                 indent,
                 node.capability.as_ref(),
             )?;
+            protected = leaf_diagnostics.iter().any(|diagnostic| {
+                matches!(
+                    diagnostic.rule_id.as_str(),
+                    "syntax.unsupported" | "format.statement_skipped"
+                )
+            });
             diagnostics.extend(
                 leaf_diagnostics
                     .into_iter()
@@ -69,6 +87,36 @@ pub(super) fn format(
             );
             output
         };
+        if protected {
+            let mut range = node.range;
+            if let Some(comment) = node.trailing_comment {
+                let suffix = &body.source[range.end..];
+                range.end += suffix.len() - suffix.trim_start().len() + comment.len();
+            }
+            // The leaf starts at its first token. Keep its authored line prefix
+            // when it occupies a line; inline leaves acquire contextual indentation
+            // once, and their source span remains untouched on subsequent passes.
+            let prefix = body.source[..range.start].rsplit('\n').next().unwrap_or("");
+            let indent = if prefix
+                .chars()
+                .all(|character| character == ' ' || character == '\t')
+            {
+                range.start -= prefix.len();
+                0
+            } else {
+                indent * 4
+            };
+            lines.push(BodyLayout::Protected {
+                range,
+                indent,
+                blank_before: node.blank_before || separate_exception_handler,
+            });
+            protected_ranges.push(range);
+            if let Some(frame) = push_after {
+                frames.push(frame);
+            }
+            continue;
+        }
         let mut rendered = text;
         if let Some(comment) = node.trailing_comment {
             rendered.push(' ');
@@ -76,7 +124,7 @@ pub(super) fn format(
         }
         let mut first = true;
         for part in rendered.lines() {
-            lines.push(LayoutLine {
+            lines.push(BodyLayout::Line(LayoutLine {
                 indent,
                 relative_indent: part
                     .chars()
@@ -84,7 +132,7 @@ pub(super) fn format(
                     .count(),
                 text: part.trim().to_owned(),
                 blank_before: first && (node.blank_before || separate_exception_handler),
-            });
+            }));
             first = false;
         }
         if let Some(frame) = push_after {
@@ -100,22 +148,40 @@ pub(super) fn format(
 
     let mut rendered = Vec::new();
     for line in lines {
-        if line.blank_before
+        let (blank_before, text) = match line {
+            BodyLayout::Protected {
+                range,
+                indent,
+                blank_before,
+            } => (
+                blank_before,
+                format!(
+                    "{}{}",
+                    " ".repeat(indent),
+                    &body.source[range.start..range.end]
+                ),
+            ),
+            BodyLayout::Line(line) => (
+                line.blank_before,
+                if line.text.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "{}{}",
+                        " ".repeat(line.indent * 4 + line.relative_indent),
+                        line.text
+                    )
+                },
+            ),
+        };
+        if blank_before
             && rendered
                 .last()
                 .is_some_and(|line: &String| !line.is_empty())
         {
             rendered.push(String::new());
         }
-        rendered.push(if line.text.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "{}{}",
-                " ".repeat(line.indent * 4 + line.relative_indent),
-                line.text
-            )
-        });
+        rendered.push(text);
     }
     while rendered.first().is_some_and(|line| line.is_empty()) {
         rendered.remove(0);
@@ -142,10 +208,8 @@ pub(super) fn format(
     let mut style_diagnostics =
         super::super::diagnostics::style_diagnostics(body.source, &style_output, &body_options)?;
     style_diagnostics.retain(|diagnostic| {
-        !body.nodes.iter().any(|node| {
-            node.kind.is_opaque()
-                && node.range.start <= diagnostic.source_range.start
-                && diagnostic.source_range.end <= node.range.end
+        !protected_ranges.iter().any(|range| {
+            range.start <= diagnostic.source_range.start && diagnostic.source_range.end <= range.end
         })
     });
     diagnostics.extend(style_diagnostics);

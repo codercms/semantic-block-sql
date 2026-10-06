@@ -1692,3 +1692,21 @@ a matching release hash and a paired-layout CLI smoke test; PR #49 is updated.
 Self-review covered semantic preservation, typed ownership/module boundaries,
 idempotence, comments/authored groups, diagnostics, atomicity, dependencies and
 dead code. No dependencies or safety exemptions were added.
+
+## Second independent review regressions
+
+- [x] Reproduce multiline unsupported procedural INTO diagnostic loss and JSON
+  aggregate ORDER BY comment-continuation indentation with red fixtures.
+- [x] Carry unsupported/skipped procedural leaves as protected source spans;
+  retain internal bytes, authored line prefixes and attached comments, and
+  exclude protected spans from style diagnostics.
+- [x] Set contextual indentation across the complete aggregate ORDER BY owner
+  before shared compact/expanded list planning.
+- [x] Pass all 484 tests across 59 targets and all five engineering gates;
+  private copies pass fmt/check and byte-identical repeat formatting with zero
+  unsupported/skipped/errors.
+- [x] Review semantics, typed source protection, ownership/module boundaries,
+  idempotence, comment attachment/groups, diagnostic ranges, strict atomicity,
+  dependencies and dead code. No dependency or safety exemption was added.
+- [x] Update PR #49 and install the fresh optimized 0.3.0 binary on PATH,
+  verifying PATH resolution and the matching release hash.

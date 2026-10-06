@@ -338,3 +338,9 @@ optional transition-table AS, procedural INTO alias expansion/contraction and
 modifiers, comment termination, target groups/widths/blank boundaries, and
 unsupported-child identity/ranges under default and strict policies. A VALUES
 subquery-element negative fixture retains that unreviewed boundary.
+
+Multiline unsupported SQL leaves, with and without INTO, retain their diagnostic
+identity and bytes through procedural rendering, including comments, tabs, blank
+lines, CRLF and strict policy. JSON aggregate ORDER BY fixtures cover comment
+continuations inside ORDER/BY and before sort expressions. These regressions
+strengthen existing behavior without expanding the reviewed PostgreSQL grammar.

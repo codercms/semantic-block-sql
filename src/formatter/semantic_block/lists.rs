@@ -720,6 +720,7 @@ pub(super) fn plan_parenthesized_lists(
         }
         plan.break_before(list.close, 1, base_indent);
         if let Some(order) = order_by {
+            plan.set_indent(order..list.close, indent);
             plan.break_before(order, tokens[order].line_breaks_before.max(1), indent);
             let by =
                 crate::formatter::tokens::next_non_comment(tokens, order).expect("bound ORDER BY");

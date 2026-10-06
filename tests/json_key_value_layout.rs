@@ -3,6 +3,25 @@ mod support;
 use semblock::{FormatOptions, check_sql, format_sql_result};
 use support::assert_sql;
 
+#[test]
+fn aggregate_order_comment_continuations_keep_clause_indentation() {
+    for clause in [
+        "ORDER BY -- sort\nrank",
+        "ORDER -- prefix\nBY rank",
+        "ORDER /* prefix\ncontinued */ BY -- sort\nrank",
+    ] {
+        let source = format!("SELECT jsonb_object_agg(k, v {clause}) FROM sample_rows;");
+        let output = reviewed(&source, &FormatOptions::default());
+        for line in output
+            .lines()
+            .filter(|line| matches!(line.trim(), "rank" | "BY rank"))
+        {
+            assert!(line.starts_with("        "), "{output}");
+        }
+        assert!(output.contains("        ORDER"), "{output}");
+    }
+}
+
 fn reviewed(source: &str, options: &FormatOptions) -> String {
     let result = format_sql_result(source, options);
     assert!(

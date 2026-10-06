@@ -1,9 +1,9 @@
 # 0.3.0 formatter coverage and regression report
 
-The formatter coverage work adds **135 tests** relative to the main branch after
+The formatter coverage work adds **137 tests** relative to the main branch after
 the authored-layout fix. The original 36 regression/desired-support cases and
 all 22 follow-up migration cases are green. The complete local suite passes
-**482 tests** across 59 all-target test invocations, including Go/Rust SQL parity.
+**484 tests** across 59 all-target test invocations, including Go/Rust SQL parity.
 
 Fixtures use invented schema, object, parameter, and literal names. Production
 SQL and domains were not copied into the repository. Private audits ran on local
@@ -75,7 +75,7 @@ separately from the test build.
 ## Independent review follow-up
 
 The independent review at 9640ff9 found seven reproducible defects not exercised
-by the initial feature fixtures. [Fifteen combination tests](../tests/review_combinations.rs)
+by the initial feature fixtures. [Sixteen combination tests](../tests/review_combinations.rs)
 now cover those defects and neighboring comment, literal, grouping, width,
 configuration and unsupported-policy boundaries.
 
@@ -104,7 +104,7 @@ pair may regroup; comments, blank boundaries and authored groups between pairs
 remain authoritative. Short calls stay compact, long pairs split safely, and
 nested values use their own planners.
 
-[Thirteen fixtures](../tests/json_key_value_layout.rs) cover both builders,
+[Fourteen fixtures](../tests/json_key_value_layout.rs) cover both builders,
 pg_catalog/quoted spelling, all eight object-aggregate names, ordered/DISTINCT/
 FILTER/OVER forms, prefix widths, nested values, dynamic/duplicate keys, hard and
 soft limits, leading/inline comments, blank boundaries and generic-call controls.
@@ -116,3 +116,18 @@ arguments separately from aggregate ORDER BY. The shared list planner creates
 compatible key/value units, and its owned prefix budget includes ORDER BY.
 The existing generic JSON golden fixture now reflects this explicit preference.
 No parser, dependency, safety exemption or renderer name scan was added.
+
+## Second independent review follow-up
+
+Review at 8fa12fa found two remaining combination defects. Multiline unsupported
+procedural SQL could accumulate indentation and become an idempotence skip;
+the renderer now carries a protected source span, retaining internal bytes and
+attached comments and excluding it from style rewrites. Child diagnostic identity
+and coordinates survive with and without INTO, under default and strict policy,
+with tabs, blank lines and CRLF. JSON aggregate ORDER BY comment continuations
+now receive indentation across the complete clause before list planning, so BY
+and sort expressions remain within the argument owner. Both new tests failed
+before the fixes. All 484 tests across 59 targets and the five engineering gates
+pass. Fresh private copies pass fmt/check and byte-identical repeat formatting,
+with zero unsupported/skipped/errors. No grammar support, dependencies or safety
+gates changed.

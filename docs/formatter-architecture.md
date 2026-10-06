@@ -782,3 +782,13 @@ unsupported/skipped diagnostics are returned with the removed INTO span mapped
 back into leaf source coordinates, then shifted through the procedural node and
 routine-body frames. Strict-policy and complete-file atomicity remain owned by
 the facade.
+
+Procedural rendering carries unsupported or safety-skipped SQL leaves as typed
+protected source spans rather than ordinary lines. Their internal indentation,
+line endings, blank lines and attached comments bypass trimming and frame
+indentation; their authored leading line prefix is retained. Inline leaves gain
+contextual indentation only outside that protected span. Style diagnostics also
+exclude these spans, while child diagnostic identities and source ranges remain
+intact. Aggregate ORDER BY owners receive contextual indentation over the complete
+clause before the shared compact/expanded sort-list planner runs, including
+comments inside the prefix and before sort expressions.
