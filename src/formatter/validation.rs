@@ -30,7 +30,7 @@ use super::ownership::{
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
 /// backend. A dependency upgrade must update this constant deliberately after
 /// the support classifier and fixtures have been reviewed against the new AST.
-const REVIEWED_POSTGRESQL_VERSION: i32 = 170004;
+const REVIEWED_POSTGRESQL_VERSION: i32 = 170007;
 
 pub(super) fn parse_supported_postgresql(
     source: &str,

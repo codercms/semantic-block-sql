@@ -1846,3 +1846,17 @@ the published 0.3.0 release is unchanged.
 0.4.0 release-preparation batch: the application and lockfile versions are bumped
 together for the configurable predicate-group layout feature. PR #50 is described
 under Features, Fixes and Chores; published releases remain unchanged.
+
+## Traversal architecture review and backend baseline
+
+- [x] Trace independent AST walks, text source frames, token depth and layout
+  indentation/width consumers; record the staged review and acceptance criteria.
+- [x] Review pg_query 6.2.1 schema/NodeRef differences and pin the backend.
+- [x] Observe the parser-version guard failing before review and a red fixture
+  for new PostgreSQL 17.7 source metadata; share SQL/procedural location stripping.
+- [x] Pass all 499 tests across 64 targets and full backend-upgrade gates on
+  Rust 1.88; review source metadata, unsupported boundaries, protected tokens,
+  semantics, idempotence, diagnostics, atomicity and unchanged dependency surface.
+- [x] Commit the reviewed backend baseline before traversal implementation.
+- [ ] Complete canonical AST traversal, source-index and owner-geometry batches
+  before implementing the separate JOIN-width behavior change.

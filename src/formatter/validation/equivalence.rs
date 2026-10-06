@@ -1,3 +1,4 @@
+use crate::formatter::ast::strip_locations;
 use pg_query::protobuf::Token;
 use serde_json::Value;
 
@@ -88,21 +89,6 @@ fn canonical_tree(source: &str) -> Result<Value, FormatDiagnostic> {
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
     strip_locations(&mut tree);
     Ok(tree)
-}
-
-fn strip_locations(value: &mut Value) {
-    match value {
-        Value::Object(fields) => {
-            for name in ["location", "stmt_location", "stmt_len"] {
-                fields.remove(name);
-            }
-            for child in fields.values_mut() {
-                strip_locations(child);
-            }
-        }
-        Value::Array(items) => items.iter_mut().for_each(strip_locations),
-        _ => {}
-    }
 }
 
 fn protected_tokens(source: &str) -> Result<Vec<ProtectedToken>, FormatDiagnostic> {

@@ -17,6 +17,8 @@ This index separates user documentation, current contributor documentation, and 
 ## Architecture and development
 
 - [Formatter architecture](formatter-architecture.md) — modules, ownership IR, safety model, and execution flow.
+- [Traversal and coordinate review](traversal-architecture-review.md) — current
+  structural traversal, source-coordinate and layout-geometry refactoring.
 - [Formatter design decisions](formatter-design.md) — resolved policy and architecture decisions.
 - [PostgreSQL extension guide](formatter-extension-guide.md) — compiler-guided procedure for adding syntax.
 - [Implementation checklist](implementation-checklist.md) — current status, gates, and remaining work.

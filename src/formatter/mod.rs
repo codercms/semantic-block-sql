@@ -1,3 +1,4 @@
+mod ast;
 mod diagnostics;
 mod external_routine;
 mod layout_ir;
