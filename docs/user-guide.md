@@ -425,6 +425,9 @@ document unchanged.
 Preserved SQL leaves retain internal whitespace and comment termination, including
 multiline INTO queries. They are excluded from procedural indentation and style
 rewrites so repeated formatting keeps the same leaf and diagnostic identity.
+They are also excluded from hard-width validation: an authored over-width
+unsupported leaf retains `syntax.unsupported`, while supported sibling statements
+continue to wrap or report legitimate indivisible-token width warnings.
 
 Coordinates refer to the source the user can act on:
 

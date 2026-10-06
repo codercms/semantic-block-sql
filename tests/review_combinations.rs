@@ -1,6 +1,98 @@
 use semblock::{FormatOptions, TypeAliasFamily, check_sql, format_sql_result};
 
 #[test]
+fn over_width_unsupported_leaves_keep_diagnostics_and_sibling_width_checks() {
+    use semblock::{Severity, UnsupportedPolicy};
+    for width in [80, 160] {
+        let predicate =
+            "first_identifier = second_identifier AND third_identifier = fourth_identifier";
+        let predicate = if width == 160 {
+            format!("{predicate} AND {predicate}")
+        } else {
+            predicate.into()
+        };
+        for newline in ["\n", "\r\n"] {
+            let leaf = format!(
+                "SELECT json_value(payload, '$.id')\nINTO x FROM sample_rows\nWHERE {predicate};"
+            );
+            let source =
+                format!("-- café\nSELECT 1;\nDO $$ DECLARE x text; BEGIN\n{leaf}\nSELECT first_identifier INTO x FROM sample_rows WHERE {predicate};\nEND; $$;")
+                    .replace("\n", newline);
+            let leaf = leaf.replace('\n', newline);
+            for policy in [UnsupportedPolicy::Skip, UnsupportedPolicy::Error] {
+                let options = FormatOptions {
+                    soft_line_width: width,
+                    hard_line_width: width,
+                    unsupported_policy: policy,
+                    ..FormatOptions::default()
+                };
+                let result = format_sql_result(&source, &options);
+                assert!(result.output.contains(&leaf), "{}", result.output);
+                let diagnostic = result
+                    .diagnostics
+                    .iter()
+                    .find(|d| d.rule_id == "syntax.unsupported")
+                    .expect("unsupported leaf diagnostic");
+                assert!(
+                    !result.diagnostics.iter().any(|d| matches!(
+                        d.rule_id.as_str(),
+                        "format.statement_skipped" | "layout.hard_line_width"
+                    )),
+                    "{:?}",
+                    result.diagnostics
+                );
+                assert!(diagnostic.source_range.start >= source.find("SELECT json_value").unwrap());
+                assert!(
+                    diagnostic.source_range.end <= source.find("SELECT first_identifier").unwrap()
+                );
+                assert_eq!(
+                    format_sql_result(&result.output, &options).output,
+                    result.output
+                );
+                if policy == UnsupportedPolicy::Error {
+                    assert_eq!(result.output, source);
+                    assert_eq!(diagnostic.severity, Severity::Error);
+                } else {
+                    assert!(
+                        result
+                            .output
+                            .replace(&leaf, "")
+                            .lines()
+                            .all(|line| line.chars().count() <= width),
+                        "{}",
+                        result.output
+                    );
+                }
+            }
+        }
+    }
+    let options = FormatOptions {
+        soft_line_width: 80,
+        hard_line_width: 80,
+        ..FormatOptions::default()
+    };
+    let long_identifier = "identifier_".repeat(9);
+    let source = format!(
+        "DO $$ DECLARE x text; BEGIN\nSELECT json_value(payload, '$.id') INTO x FROM sample_rows;\nSELECT {long_identifier} INTO x FROM sample_rows;\nEND; $$;"
+    );
+    let result = format_sql_result(&source, &options);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.rule_id == "syntax.unsupported")
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.rule_id == "layout.hard_line_width"),
+        "{:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn multiline_unsupported_into_leaves_remain_protected() {
     use semblock::UnsupportedPolicy;
     for leaf in [

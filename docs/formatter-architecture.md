@@ -792,3 +792,10 @@ exclude these spans, while child diagnostic identities and source ranges remain
 intact. Aggregate ORDER BY owners receive contextual indentation over the complete
 clause before the shared compact/expanded sort-list planner runs, including
 comments inside the prefix and before sort expressions.
+
+The procedural body result retains separate protected source and output ranges.
+Output ranges are recorded while assembling the rendered bytes, shifted through
+the newly laid-out routine header, and forwarded through the existing private
+DocumentContent opaque-range fields. Body, routine and document width validation
+exclude only those leaves; supported siblings still undergo width enforcement.
+The public formatter result and the shared width policy are unchanged.

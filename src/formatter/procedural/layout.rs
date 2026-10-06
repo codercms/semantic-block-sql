@@ -6,6 +6,8 @@ use super::ir::{BodyNode, BodyNodeKind, RoutineBody};
 pub(super) struct FormattedBody {
     pub output: String,
     pub diagnostics: Vec<Diagnostic>,
+    pub protected_source_ranges: Vec<super::super::SourceRange>,
+    pub protected_output_ranges: Vec<super::super::SourceRange>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,7 +150,7 @@ pub(super) fn format(
 
     let mut rendered = Vec::new();
     for line in lines {
-        let (blank_before, text) = match line {
+        let (blank_before, text, protected) = match line {
             BodyLayout::Protected {
                 range,
                 indent,
@@ -160,6 +162,7 @@ pub(super) fn format(
                     " ".repeat(indent),
                     &body.source[range.start..range.end]
                 ),
+                true,
             ),
             BodyLayout::Line(line) => (
                 line.blank_before,
@@ -172,29 +175,34 @@ pub(super) fn format(
                         line.text
                     )
                 },
+                false,
             ),
         };
         if blank_before
             && rendered
                 .last()
-                .is_some_and(|line: &String| !line.is_empty())
+                .is_some_and(|(line, _): &(String, bool)| !line.is_empty())
         {
-            rendered.push(String::new());
+            rendered.push((String::new(), false));
         }
-        rendered.push(text);
+        rendered.push((text, protected));
     }
-    while rendered.first().is_some_and(|line| line.is_empty()) {
+    while rendered.first().is_some_and(|(line, _)| line.is_empty()) {
         rendered.remove(0);
     }
-    while rendered.last().is_some_and(|line| line.is_empty()) {
+    while rendered.last().is_some_and(|(line, _)| line.is_empty()) {
         rendered.pop();
     }
-    let output = format!(
-        "{}{}{}",
-        body.newline,
-        rendered.join(body.newline),
-        body.newline
-    );
+    let mut output = body.newline.to_owned();
+    let mut protected_output_ranges = Vec::new();
+    for (text, protected) in rendered {
+        let start = output.len();
+        output.push_str(&text);
+        if protected {
+            protected_output_ranges.push(super::super::SourceRange::new(start, output.len()));
+        }
+        output.push_str(body.newline);
+    }
     let mut body_options = options.clone();
     body_options.semicolon_policy = super::super::SemicolonPolicy::Preserve;
     // Style diagnostics compare layout before optional alias changes, which can
@@ -216,6 +224,8 @@ pub(super) fn format(
     Ok(FormattedBody {
         output,
         diagnostics,
+        protected_source_ranges: protected_ranges,
+        protected_output_ranges,
     })
 }
 

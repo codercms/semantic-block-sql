@@ -4,12 +4,12 @@ mod layout;
 
 use serde_json::Value;
 
-use super::{Diagnostic, FormatDiagnostic, FormatOptions, FormattedSql};
+use super::{Diagnostic, DocumentContent, FormatDiagnostic, FormatOptions};
 
 pub(super) fn format_single_routine(
     source: &str,
     options: &FormatOptions,
-) -> Result<FormattedSql, FormatDiagnostic> {
+) -> Result<DocumentContent, FormatDiagnostic> {
     let _ = validate_outer(source)?;
     let parsed = pg_query::parse_plpgsql(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
@@ -21,7 +21,11 @@ pub(super) fn format_single_routine(
     ir::validate_parser_alignment(&body_ir, &parser_model)?;
     capabilities::bind(&mut body_ir, &parsed)?;
     let formatted_body = layout::format(&body_ir, options)?;
-    let mut warnings = super::semantic_block::validate_hard_width(&formatted_body.output, options)?;
+    super::semantic_block::validate_hard_width_except(
+        &formatted_body.output,
+        options,
+        &formatted_body.protected_output_ranges,
+    )?;
     let mut output = String::with_capacity(source.len() + formatted_body.output.len());
     output.push_str(&source[..open_start]);
     output.push_str(&source[open_start..open_end]);
@@ -31,9 +35,14 @@ pub(super) fn format_single_routine(
     let outer_tokens = validate_outer(&output)?;
     let output = normalize_outer_tokens(&output, options, outer_tokens)?;
     let output = super::routine_header::format_dollar_declaration(&output, options)?;
-    warnings.extend(super::semantic_block::validate_hard_width(
-        &output, options,
-    )?);
+    // Header layout may shift the body, whose protected spans remain body-local.
+    let (_, output_body_start, _, _) = dollar_body_span(&output)?;
+    let opaque_output_ranges = formatted_body
+        .protected_output_ranges
+        .iter()
+        .map(|range| range.shifted(output_body_start))
+        .collect::<Vec<_>>();
+    super::semantic_block::validate_hard_width_except(&output, options, &opaque_output_ranges)?;
 
     validate_outer(&output)?;
     let reparsed = pg_query::parse_plpgsql(&output)
@@ -55,10 +64,14 @@ pub(super) fn format_single_routine(
         return Err(FormatDiagnostic::NotIdempotent);
     }
 
-    Ok(FormattedSql {
-        changed: output != source,
+    Ok(DocumentContent {
         output,
-        warnings,
+        opaque_source_ranges: formatted_body
+            .protected_source_ranges
+            .into_iter()
+            .map(|range| range.shifted(open_end))
+            .collect(),
+        opaque_output_ranges,
         diagnostics: formatted_body
             .diagnostics
             .into_iter()

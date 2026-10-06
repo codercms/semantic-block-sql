@@ -1,9 +1,9 @@
 # 0.3.0 formatter coverage and regression report
 
-The formatter coverage work adds **137 tests** relative to the main branch after
+The formatter coverage work adds **138 tests** relative to the main branch after
 the authored-layout fix. The original 36 regression/desired-support cases and
 all 22 follow-up migration cases are green. The complete local suite passes
-**484 tests** across 59 all-target test invocations, including Go/Rust SQL parity.
+**485 tests** across 59 all-target test invocations, including Go/Rust SQL parity.
 
 Fixtures use invented schema, object, parameter, and literal names. Production
 SQL and domains were not copied into the repository. Private audits ran on local
@@ -75,7 +75,7 @@ separately from the test build.
 ## Independent review follow-up
 
 The independent review at 9640ff9 found seven reproducible defects not exercised
-by the initial feature fixtures. [Sixteen combination tests](../tests/review_combinations.rs)
+by the initial feature fixtures. [Seventeen combination tests](../tests/review_combinations.rs)
 now cover those defects and neighboring comment, literal, grouping, width,
 configuration and unsupported-policy boundaries.
 
@@ -131,3 +131,14 @@ before the fixes. All 484 tests across 59 targets and the five engineering gates
 pass. Fresh private copies pass fmt/check and byte-identical repeat formatting,
 with zero unsupported/skipped/errors. No grammar support, dependencies or safety
 gates changed.
+
+## Protected-leaf width follow-up
+
+Review at d564da8 found that routine-wide width validation still rejected
+preserved unsupported SQL leaves. The renderer now records protected output
+ranges alongside source ranges. Routine header and document assembly shift those
+ranges into their new frames; the existing width checker excludes only those
+leaves. The private document result carries this metadata without changing the
+public formatter result. An initially failing fixture covers 80/160 widths,
+default/strict policy, CRLF and a preceding statement. Supported sibling controls
+verify breakable predicate wrapping and indivisible-token width warnings.

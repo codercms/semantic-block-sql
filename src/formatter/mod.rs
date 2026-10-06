@@ -355,6 +355,18 @@ struct DocumentContent {
     opaque_output_ranges: Vec<SourceRange>,
 }
 
+impl From<FormattedSql> for DocumentContent {
+    fn from(formatted: FormattedSql) -> Self {
+        // Document validation recomputes width warnings in its final source frame.
+        Self {
+            output: formatted.output,
+            diagnostics: formatted.diagnostics,
+            opaque_source_ranges: Vec::new(),
+            opaque_output_ranges: Vec::new(),
+        }
+    }
+}
+
 fn format_document_content(
     source: &str,
     options: &FormatOptions,
@@ -492,6 +504,18 @@ fn format_regular_document_content(
         let routine = is_routine_statement(raw);
         match format_statement_once(statement, raw, options) {
             Ok(formatted) => {
+                opaque_source_ranges.extend(
+                    formatted
+                        .opaque_source_ranges
+                        .iter()
+                        .map(|range| range.shifted(start)),
+                );
+                opaque_output_ranges.extend(
+                    formatted
+                        .opaque_output_ranges
+                        .iter()
+                        .map(|range| range.shifted(statement_output_start)),
+                );
                 output.push_str(&formatted.output);
                 if routine {
                     diagnostics.extend(
@@ -758,7 +782,7 @@ fn format_statement_once(
     source: &str,
     raw: &pg_query::protobuf::RawStmt,
     options: &FormatOptions,
-) -> Result<FormattedSql, StatementFormatError> {
+) -> Result<DocumentContent, StatementFormatError> {
     if is_routine_statement(raw) {
         if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(statement)) =
             raw.stmt.as_deref().and_then(|node| node.node.as_ref())
@@ -766,7 +790,7 @@ fn format_statement_once(
                 matches!(node.node.as_ref(), Some(pg_query::protobuf::node::Node::DefElem(option))
                     if option.defname == "language" && procedural::option_string(option).is_some_and(|value| matches!(value.as_str(), "c" | "internal")))
             }) {
-            return external_routine::format_single_routine(source, options);
+            return external_routine::format_single_routine(source, options).map(Into::into);
         }
         if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(statement)) =
             raw.stmt.as_deref().and_then(|node| node.node.as_ref())
@@ -775,11 +799,11 @@ fn format_statement_once(
                     if option.defname == "language" && procedural::option_string(option).as_deref() == Some("sql"))
             }))
         {
-            return sql_standard_routine::format_single_routine(source, options);
+            return sql_standard_routine::format_single_routine(source, options).map(Into::into);
         }
         return procedural::format_single_routine(source, options).map_err(Into::into);
     }
-    format_supported_statement(source, options)
+    format_supported_statement(source, options).map(Into::into)
 }
 
 fn format_supported_statement(

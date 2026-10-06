@@ -1710,3 +1710,21 @@ dead code. No dependencies or safety exemptions were added.
   dependencies and dead code. No dependency or safety exemption was added.
 - [x] Update PR #49 and install the fresh optimized 0.3.0 binary on PATH,
   verifying PATH resolution and the matching release hash.
+
+## Protected procedural leaf width validation
+
+- [x] Add a red over-width unsupported-leaf fixture at 80/default 160 columns,
+  covering strict policy, CRLF, preceding SQL and supported sibling controls.
+- [x] Retain rendered protected output ranges, shift them through header layout
+  and document assembly, and reuse existing width validation exclusions.
+- [x] Run full gates and private-copy audits; self-review source protection,
+  diagnostic provenance, supported width enforcement and strict atomicity.
+- [x] Update PR #49 and install the fresh optimized 0.3.0 binary on PATH.
+
+Width follow-up verification: 485 tests across 59 targets pass, with one existing
+ignored test. All five required gates pass. Fresh private copies pass fmt/check
+and byte-identical repeat formatting with zero unsupported/skipped/errors.
+The PATH executable matches the optimized release hash. Self-review confirmed
+leaf-only exclusions, source/output coordinate frames, supported width checks,
+parse/equivalence/idempotence gates, strict atomicity, comments/groups, module
+boundaries and unchanged dependencies. No dead code or fallback was introduced.

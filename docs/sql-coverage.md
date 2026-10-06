@@ -344,3 +344,9 @@ identity and bytes through procedural rendering, including comments, tabs, blank
 lines, CRLF and strict policy. JSON aggregate ORDER BY fixtures cover comment
 continuations inside ORDER/BY and before sort expressions. These regressions
 strengthen existing behavior without expanding the reviewed PostgreSQL grammar.
+
+Over-width unsupported procedural leaves retain `syntax.unsupported` at both 80
+and 160 columns, including strict policy and CRLF. Supported siblings still wrap
+breakable predicates and report indivisible-width warnings. The protected output
+ranges survive routine-header and preceding-statement shifts into document
+validation; see the over-width fixture in `tests/review_combinations.rs`.
