@@ -32,6 +32,14 @@ pub(super) struct QuerySpec {
     pub select: SelectSpec,
 }
 
+/// An explicit call name located by the PostgreSQL AST. SQL-standard special
+/// expression syntax retains its separate grammar-owned rendering path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum FunctionCallSpec {
+    Named { location: usize, name: Vec<String> },
+    OperatorEscape { location: usize, keyword: Token },
+}
+
 /// Top-level VALUES capabilities proven by PostgreSQL AST validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ValuesSpec {
@@ -599,6 +607,7 @@ pub(super) struct SupportedDocument {
     statements: Vec<SourceStatement>,
     queries: Vec<QuerySpec>,
     values_relations: Vec<ValuesRelationSpec>,
+    function_calls: Vec<FunctionCallSpec>,
 }
 
 impl SupportedDocument {
@@ -608,6 +617,7 @@ impl SupportedDocument {
             statements,
             queries: Vec::new(),
             values_relations: Vec::new(),
+            function_calls: Vec::new(),
         }
     }
 
@@ -615,11 +625,13 @@ impl SupportedDocument {
         statements: Vec<SourceStatement>,
         queries: Vec<QuerySpec>,
         values_relations: Vec<ValuesRelationSpec>,
+        function_calls: Vec<FunctionCallSpec>,
     ) -> Self {
         Self {
             statements,
             queries,
             values_relations,
+            function_calls,
         }
     }
 
@@ -633,6 +645,10 @@ impl SupportedDocument {
 
     pub fn queries(&self) -> &[QuerySpec] {
         &self.queries
+    }
+
+    pub fn function_calls(&self) -> &[FunctionCallSpec] {
+        &self.function_calls
     }
 }
 

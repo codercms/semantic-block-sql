@@ -21,6 +21,15 @@ pub(in crate::formatter) fn render_token(
     if token.role == TokenRole::Identifier {
         return token.text.to_owned();
     }
+    if token.role == TokenRole::FunctionName {
+        return if token.text.starts_with('"') {
+            token.text.to_owned()
+        } else if is_uppercase_builtin(token.text) {
+            token.text.to_uppercase()
+        } else {
+            token.text.to_lowercase()
+        };
+    }
 
     if token.kind == Token::NotEquals {
         return match options.not_equal_policy {
@@ -79,46 +88,45 @@ pub(in crate::formatter) fn is_function_call_name(tokens: &[SqlToken<'_>], index
 }
 
 pub(in crate::formatter) fn is_function_call_syntax(tokens: &[SqlToken<'_>], index: usize) -> bool {
-    tokens
-        .get(index + 1)
-        .is_some_and(|next| next.kind == Token::Ascii40)
-        && matches!(
-            tokens[index].kind,
-            Token::Ident
-                | Token::Coalesce
-                | Token::Extract
-                | Token::Format
-                | Token::Greatest
-                | Token::JsonArray
-                | Token::JsonArrayagg
-                | Token::JsonExists
-                | Token::JsonObject
-                | Token::JsonObjectagg
-                | Token::JsonQuery
-                | Token::JsonScalar
-                | Token::JsonSerialize
-                | Token::JsonTable
-                | Token::JsonValue
-                | Token::Least
-                | Token::MergeAction
-                | Token::Normalize
-                | Token::Nullif
-                | Token::Overlay
-                | Token::Position
-                | Token::Substring
-                | Token::Trim
-                | Token::Xmlattributes
-                | Token::Xmlconcat
-                | Token::Xmlelement
-                | Token::Xmlexists
-                | Token::Xmlforest
-                | Token::Xmlnamespaces
-                | Token::Xmlparse
-                | Token::Xmlpi
-                | Token::Xmlroot
-                | Token::Xmlserialize
-                | Token::Xmltable
-        )
+    next_non_comment(tokens, index).is_some_and(|next| tokens[next].kind == Token::Ascii40)
+        && (tokens[index].role == TokenRole::FunctionName
+            || matches!(
+                tokens[index].kind,
+                Token::Ident
+                    | Token::Coalesce
+                    | Token::Extract
+                    | Token::Format
+                    | Token::Greatest
+                    | Token::JsonArray
+                    | Token::JsonArrayagg
+                    | Token::JsonExists
+                    | Token::JsonObject
+                    | Token::JsonObjectagg
+                    | Token::JsonQuery
+                    | Token::JsonScalar
+                    | Token::JsonSerialize
+                    | Token::JsonTable
+                    | Token::JsonValue
+                    | Token::Least
+                    | Token::MergeAction
+                    | Token::Normalize
+                    | Token::Nullif
+                    | Token::Overlay
+                    | Token::Position
+                    | Token::Substring
+                    | Token::Trim
+                    | Token::Xmlattributes
+                    | Token::Xmlconcat
+                    | Token::Xmlelement
+                    | Token::Xmlexists
+                    | Token::Xmlforest
+                    | Token::Xmlnamespaces
+                    | Token::Xmlparse
+                    | Token::Xmlpi
+                    | Token::Xmlroot
+                    | Token::Xmlserialize
+                    | Token::Xmltable
+            ))
 }
 
 pub(in crate::formatter) fn is_compact_grammar_parenthesis(

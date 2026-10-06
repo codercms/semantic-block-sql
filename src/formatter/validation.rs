@@ -18,12 +18,13 @@ pub use equivalence::validate_equivalent;
 use super::ownership::{
     AggregateSignatureSpec, AliasSpec, AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec,
     ConflictActionSpec, ConflictSpec, CreateIndexSpec, CreateTableElementSpec, CreateTableSpec,
-    CteStatementSpec, DeleteSpec, ForeignKeyAction, ForeignKeySpec, InsertSourceSpec, InsertSpec,
-    MaterializedViewSpec, MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec,
-    RelationIdentifierSpec, RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec,
-    RelationJoinTypeSpec, RelationListSpec, SelectSpec, SequenceOptionKind, SequenceSpec,
-    StatementSpec, SupportedDocument, TriggerSpec, TriggerTiming, UpdateSpec, UtilityStatementKind,
-    ValuesRelationSpec, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
+    CteStatementSpec, DeleteSpec, ForeignKeyAction, ForeignKeySpec, FunctionCallSpec,
+    InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeBranchSpec,
+    MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec, RelationItemSpec,
+    RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec,
+    SelectSpec, SequenceOptionKind, SequenceSpec, StatementSpec, SupportedDocument, TriggerSpec,
+    TriggerTiming, UpdateSpec, UtilityStatementKind, ValuesRelationSpec, ValuesSpec, ViewCheckSpec,
+    ViewSpec, source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -73,6 +74,8 @@ pub(super) fn parse_supported_postgresql(
 
     let mut queries = Vec::new();
     let mut values_relations = Vec::new();
+    let mut function_calls = Vec::new();
+    let source_tokens = super::tokens::tokenize(source)?;
     for (statement_index, raw) in parsed.protobuf.stmts.iter().enumerate() {
         let root = raw
             .stmt
@@ -83,13 +86,19 @@ pub(super) fn parse_supported_postgresql(
                 start: 0,
                 end: source.len(),
             })?;
-        collect_query_specs(root, statement_index, &mut queries, &mut values_relations).map_err(
-            |feature| FormatDiagnostic::UnsupportedSyntax {
-                feature: feature.into(),
-                start: 0,
-                end: source.len(),
-            },
-        )?;
+        collect_query_specs(
+            root,
+            statement_index,
+            &mut queries,
+            &mut values_relations,
+            &source_tokens,
+            &mut function_calls,
+        )
+        .map_err(|feature| FormatDiagnostic::UnsupportedSyntax {
+            feature: feature.into(),
+            start: 0,
+            end: source.len(),
+        })?;
     }
     queries.sort_by_key(|query| (query.statement_index, query.anchor.unwrap_or(usize::MAX)));
 
@@ -97,6 +106,7 @@ pub(super) fn parse_supported_postgresql(
         statements,
         queries,
         values_relations,
+        function_calls,
     ))
 }
 
@@ -195,8 +205,49 @@ fn collect_query_specs(
     statement_index: usize,
     queries: &mut Vec<QuerySpec>,
     values_relations: &mut Vec<ValuesRelationSpec>,
+    source_tokens: &[super::tokens::SqlToken<'_>],
+    function_calls: &mut Vec<FunctionCallSpec>,
 ) -> Result<(), &'static str> {
     walk_complete_tree(root, &mut |node, _| {
+        if let NodeRef::FuncCall(call) = node {
+            match pg_query::protobuf::CoercionForm::try_from(call.funcformat) {
+                Ok(pg_query::protobuf::CoercionForm::CoerceExplicitCall) if call.location >= 0 => {
+                    let location = usize::try_from(call.location)
+                        .map_err(|_| "unlocated explicit function call")?;
+                    let name = string_nodes(&call.funcname, "function call name")?;
+                    let keyword = source_tokens
+                        .iter()
+                        .find(|token| token.start == location)
+                        .map(|token| token.kind);
+                    let operator_escape = match (name.as_slice(), keyword) {
+                        (
+                            [schema, function],
+                            Some(
+                                keyword @ (pg_query::protobuf::Token::Like
+                                | pg_query::protobuf::Token::Ilike),
+                            ),
+                        ) if schema == "pg_catalog" && function == "like_escape" => Some(keyword),
+                        ([schema, function], Some(pg_query::protobuf::Token::Similar))
+                            if schema == "pg_catalog" && function == "similar_to_escape" =>
+                        {
+                            Some(pg_query::protobuf::Token::Similar)
+                        }
+                        _ => None,
+                    };
+                    function_calls.push(match operator_escape {
+                        Some(keyword) => FunctionCallSpec::OperatorEscape { location, keyword },
+                        None => FunctionCallSpec::Named { location, name },
+                    });
+                }
+                // PostgreSQL synthesizes unlocated helper calls for LIKE /
+                // SIMILAR escapes. They have no authored call-name token.
+                Ok(
+                    pg_query::protobuf::CoercionForm::CoerceExplicitCall
+                    | pg_query::protobuf::CoercionForm::CoerceSqlSyntax,
+                ) => {}
+                _ => return Err("unreviewed function call coercion form"),
+            }
+        }
         if let NodeRef::SelectStmt(select) = node {
             push_query_spec(select, statement_index, queries)?;
         }

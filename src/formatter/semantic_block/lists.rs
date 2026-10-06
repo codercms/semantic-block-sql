@@ -166,7 +166,7 @@ fn contains_mixed_boolean_item(
 }
 
 pub(super) fn is_function_call_open(tokens: &[SqlToken<'_>], open: usize) -> bool {
-    open.checked_sub(1)
+    crate::formatter::tokens::previous_non_comment(tokens, open)
         .is_some_and(|previous| is_function_call_syntax(tokens, previous))
 }
 

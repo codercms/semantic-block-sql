@@ -1526,3 +1526,19 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [ ] Implement the remaining reviewed capabilities and make this target green.
 - [ ] Repeat private formatting/check/idempotence audits and resolve remaining
   safety skips before reporting the final coverage and updating the PR.
+
+## AST-owned function calls and relation alias binding
+
+- [x] Reproduce deep keyword-named call collapse and commented-call argument
+  overflow; record explicit call names through the completed AST traversal.
+- [x] Bind qualified/quoted names and parentheses; retain reviewed special SQL
+  grammar and model parser-generated escape helpers as explicit operator owners.
+- [x] Bind call-name roles before relations, excluding same-spelled call tokens
+  from aliases and recognizing AS-less recordset column-definition aliases.
+- [x] Cover keyword names, quote/qualification, comments, argument groups,
+  authored/generated helper calls, and both private ownership reductions.
+- [x] Keep all original 36 cases green; six remaining audit fixture failures
+  still require identity, procedural, VALUES suffix, and external routines.
+- [x] Run focused and full all-target tests plus formatter/Clippy/Rustdoc/diff
+  gates. Review semantics, typed ownership, idempotence, comments, diagnostics,
+  atomicity, dependencies, and dead code; no dependencies added.

@@ -220,6 +220,9 @@ pub(super) fn format(
     for &index in layout.identifier_tokens() {
         tokens[index].role = TokenRole::Identifier;
     }
+    for &index in layout.function_name_tokens() {
+        tokens[index].role = TokenRole::FunctionName;
+    }
     let cases = case_ranges(&tokens, options);
     let selects = layout.selects().cloned().collect::<Vec<_>>();
     let inserts = layout.inserts().cloned().collect::<Vec<_>>();

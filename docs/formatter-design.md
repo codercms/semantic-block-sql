@@ -1158,3 +1158,15 @@ key counts and action kinds. Token binders verify these capabilities before
 producing clause boundaries for the existing planners. This replaces neither
 the PostgreSQL parser nor the closed ownership model. Trigger ROW transition
 aliases remain unreviewed; OLD/NEW TABLE aliases are separately identifier-owned.
+
+### AST-owned explicit function names
+
+Keyword-tokenized names such as replace must not lose their argument-list
+ownership. The completed AST traversal records explicit call locations and
+qualified names, distinguishing the pinned parser's operator escape helpers
+from authored calls. Binders verify names and argument parentheses, then assign
+a function-name source role used by rendering and list planning. A role view is
+also available while binding relations, so a call cannot masquerade as a
+same-spelled alias. AS-less recordset aliases are verified against their typed
+following column-definition capability. Scanner trivia never removes call
+ownership; comments remain protected by the existing emission and safety gates.

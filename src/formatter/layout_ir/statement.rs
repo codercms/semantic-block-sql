@@ -2101,7 +2101,7 @@ fn bind_relation_identifiers(
 ) -> Result<Vec<usize>, FormatDiagnostic> {
     let mut result = Vec::new();
     let mut cursor = range.start;
-    for identifier in expected {
+    for (position, identifier) in expected.iter().enumerate() {
         match identifier {
             RelationIdentifierSpec::Name(name) => {
                 let index = bind_expected_name(tokens, cursor, range.end, name, owner)?;
@@ -2112,7 +2112,16 @@ fn bind_relation_identifiers(
                 let index = (cursor..range.end)
                     .find(|index| {
                         token_matches_identifier(&tokens[*index], &alias.name)
-                            && is_relation_alias_boundary(tokens, *index, range.end, alias)
+                            && is_relation_alias_boundary(
+                                tokens,
+                                *index,
+                                range.end,
+                                alias,
+                                matches!(
+                                    expected.get(position + 1),
+                                    Some(RelationIdentifierSpec::ColumnDefinitions(_))
+                                ),
+                            )
                     })
                     .ok_or_else(|| {
                         FormatDiagnostic::Ownership(format!(
@@ -2169,7 +2178,11 @@ fn is_relation_alias_boundary(
     index: usize,
     end: usize,
     alias: &AliasSpec,
+    has_column_definitions: bool,
 ) -> bool {
+    if tokens[index].role == crate::formatter::tokens::TokenRole::FunctionName {
+        return false;
+    }
     if previous_non_comment(tokens, index)
         .is_some_and(|previous| tokens[previous].kind == Token::Ascii46)
     {
@@ -2183,7 +2196,7 @@ fn is_relation_alias_boundary(
     let Some(next) = next_non_comment(tokens, index).filter(|next| *next < end) else {
         return true;
     };
-    (tokens[next].kind == Token::Ascii40 && !alias.columns.is_empty())
+    (tokens[next].kind == Token::Ascii40 && (!alias.columns.is_empty() || has_column_definitions))
         || tokens[next].kind == Token::Ascii44
         || tokens[next].kind == Token::Ascii59
         || tokens[next].kind == Token::On
@@ -2315,7 +2328,7 @@ fn bind_expected_name(
         })
 }
 
-fn token_matches_identifier(token: &SqlToken<'_>, expected: &str) -> bool {
+pub(super) fn token_matches_identifier(token: &SqlToken<'_>, expected: &str) -> bool {
     if let Some(quoted) = token
         .text
         .strip_prefix('"')

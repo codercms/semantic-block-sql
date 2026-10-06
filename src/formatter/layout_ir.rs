@@ -8,6 +8,7 @@ use super::ownership::{
 use super::structure::TokenStructure;
 use super::tokens::SqlToken;
 
+mod function_calls;
 mod migration_ddl;
 mod query;
 mod statement;
@@ -439,6 +440,7 @@ pub(super) struct LayoutDocument {
     set_operations: Vec<SetOperationBlock>,
     window_blocks: Vec<WindowBlock>,
     identifier_tokens: Vec<usize>,
+    function_name_tokens: Vec<usize>,
 }
 
 impl LayoutDocument {
@@ -447,6 +449,16 @@ impl LayoutDocument {
         tokens: &[SqlToken<'_>],
         structure: &TokenStructure,
     ) -> Result<Self, FormatDiagnostic> {
+        let function_name_tokens =
+            function_calls::bind(tokens, structure, document.function_calls())?;
+        // Relation alias binding needs to distinguish a real call name from a
+        // same-spelled alias before expression layout starts. Keep caller tokens
+        // immutable while binding this shared source-role view.
+        let mut owned_tokens = tokens.to_vec();
+        for &index in &function_name_tokens {
+            owned_tokens[index].role = super::tokens::TokenRole::FunctionName;
+        }
+        let tokens = owned_tokens.as_slice();
         let top_level_statements = bind_token_statements(document, tokens, structure.depths())?;
         let top_level_count = top_level_statements.len();
         let mut token_statements = top_level_statements.clone();
@@ -614,6 +626,7 @@ impl LayoutDocument {
             set_operations,
             window_blocks,
             identifier_tokens,
+            function_name_tokens,
         })
     }
 
@@ -648,6 +661,10 @@ impl LayoutDocument {
 
     pub fn identifier_tokens(&self) -> &[usize] {
         &self.identifier_tokens
+    }
+
+    pub fn function_name_tokens(&self) -> &[usize] {
+        &self.function_name_tokens
     }
 
     pub fn statement_spans(&self) -> impl Iterator<Item = TokenSpan> + '_ {

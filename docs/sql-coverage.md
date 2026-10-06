@@ -66,6 +66,11 @@ Fixture-backed coverage includes common PostgreSQL-specific operator families an
 - named function arguments.
 
 The formatter preserves same-spelled identifiers when a token is not parser-owned grammar.
+Explicit function names and their argument lists are bound to AST locations,
+including legal keyword-like names such as `replace`, `left`, and `right`,
+qualified/quoted names, and comments before the argument list. Parser-generated
+LIKE/SIMILAR escape helpers retain operator ownership instead of claiming a
+source function call.
 
 ## Relation sources and joins
 
@@ -95,6 +100,9 @@ aliases, every supported DML alias owner, join forms, CTEs, named windows,
 views, relation alias columns, and function column definitions.
 
 The same typed relation ownership is used in nested queries, CTEs, views, `INSERT ... SELECT`, DML `RETURNING`, `ON CONFLICT`, MERGE expressions, windows, and other reviewed query containers.
+Function aliases may share the call name and omit AS, including aliases followed
+by recordset column-definition lists. AST-bound call names cannot claim alias
+tokens.
 
 ## Data modification
 

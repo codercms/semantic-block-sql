@@ -33,6 +33,16 @@ fn array_subquery_targets_bind_their_select_ownership() {
 }
 
 #[test]
+fn relation_aliases_can_share_their_function_name_without_as() {
+    assert_supported(
+        "SELECT ARRAY(SELECT sample_elements.value FROM sample_elements('[]'::jsonb) sample_elements(value));",
+    );
+    assert_supported(
+        "WITH seed AS MATERIALIZED (SELECT source.id FROM jsonb_to_recordset('[]'::jsonb) source(id integer, label text)) SELECT id FROM seed;",
+    );
+}
+
+#[test]
 fn composite_function_relation_definitions_bind_with_cte_queries() {
     assert_supported(
         "WITH seed AS MATERIALIZED (SELECT source.id, source.label FROM jsonb_to_recordset('[]'::jsonb) AS source(id integer, label text)) SELECT id FROM seed;",
@@ -46,6 +56,36 @@ fn nested_function_arguments_keep_breakable_lines_within_width() {
     });
     assert_supported(&format!(
         "CREATE FUNCTION sample_replace(input_value text) RETURNS text LANGUAGE SQL AS $$\nSELECT {expression};\n$$;"
+    ));
+}
+
+#[test]
+fn keyword_function_names_and_generated_escape_helpers_have_distinct_owners() {
+    for name in [
+        "replace",
+        "left",
+        "right",
+        "language",
+        "returns",
+        "sample_schema.replace",
+        "sample_schema.\"SELECT\"",
+    ] {
+        let source = format!(
+            "SELECT {name}(\n    'first value',\n\n    -- retained argument group\n    'second value'\n);"
+        );
+        assert_supported(&source);
+    }
+    assert_supported(
+        "SELECT label LIKE 'a%' ESCAPE '!', label ILIKE 'b%' ESCAPE '!', label SIMILAR TO '(a|b)%' ESCAPE '!' FROM sample_rows;",
+    );
+    assert_supported("SELECT pg_catalog.similar_to_escape('a%', '!');");
+}
+
+#[test]
+fn commented_function_names_still_own_their_argument_lists() {
+    let value = "sample_value_".repeat(5);
+    assert_supported(&format!(
+        "SELECT replace /* retained call comment */ ('{value}', '{value}', '{value}');"
     ));
 }
 
