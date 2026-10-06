@@ -998,7 +998,10 @@ The default `UnsupportedPolicy::Skip` reports both opaque outcomes as warnings a
 
 Routine bodies are no longer formatted from authored lines. `parse_plpgsql` is adapted into typed parser capability categories, while PostgreSQL scanner tokens are bound into a span-bearing `RoutineBody` IR containing declarations, control headers, statements, comments, and opaque units. A separate procedural layout pass owns indentation and blank-line policy. This enables compact and multi-statement single-line bodies without weakening the outer PostgreSQL parser boundary.
 
-`ASSERT` and `RETURN QUERY` are formatter-owned. Trustworthy opaque transaction-control spans are preserved and diagnosed per statement, so supported routine siblings still format under the default unsupported policy; strict policy restores the complete routine/document.
+`ASSERT`, `RETURN QUERY`, and reviewed COMMIT/ROLLBACK commands are formatter-owned.
+Transaction kind and chain metadata are bound before the shared token emitter is
+used. Unknown parser nodes preserve the enclosing routine with an unsupported
+diagnostic; strict policy restores the complete document.
 
 ## Go interpreted-string and corpus contract
 
@@ -1235,3 +1238,13 @@ Header layout precedes normalization, and the header is reparsed before applying
 location-owned casing so comment whitespace changes cannot invalidate offsets.
 The whole declaration passes structural/protected-token and document idempotence
 gates; external literal contents never enter an embedded SQL formatter.
+
+### Multiline token warning coordinates
+
+Width warnings bind tokens intersecting the output line, including multiline
+comments and dollar bodies. Reviewed SQL/PL routine AS literals are identified
+by their AST metadata and exact body values, including on unchanged second runs.
+Inner warnings map exact token identity and occurrence back to source bytes;
+optional type aliases do not invalidate surrounding token counts. Unprovable
+provenance retains the enclosing token range. Ordinary dollar literals retain
+literal ownership, and multiline comment fragments exclude CRLF terminators.

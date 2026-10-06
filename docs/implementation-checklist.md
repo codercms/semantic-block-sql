@@ -1606,3 +1606,13 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Make all 22 follow-up regression cases green without weakening safety gates.
 - [x] Run full gates, re-audit private copies, and review semantics, architecture,
   idempotence, comments, diagnostics, atomicity, dependencies, and dead code.
+
+## Multiline warning coordinate implementation
+
+- [x] Reproduce routine-body warnings falling back to the entire file/line 1.
+- [x] Bind intersecting tokens and parser-owned routine literals; map inner token
+  identity/occurrence without depending on surrounding alias token cardinality.
+- [x] Cover SQL/PL bodies, repeated formatting, Unicode, CRLF, type aliases,
+  multiline comments, and ordinary dollar literal ownership.
+- [x] Run full gates and private file fmt/check/idempotence audits; review source
+  attribution, safety, module boundaries, comments, and dependency/dead-code status.

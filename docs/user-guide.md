@@ -397,6 +397,9 @@ query.sql:1:1 (bytes 0-6): error[casing.keyword]: SQL keyword or grammar constru
 ```
 
 CLI diagnostics use one-based `line:column` locations followed by a half-open UTF-8 byte range.
+Indivisible-token width warnings inside reviewed SQL/PL routine bodies identify
+the inner token, including on repeated `fmt` runs. Multiline comment warnings
+identify the overlong source line; CRLF terminators are excluded from its range.
 
 Unsupported syntax points to a parser-located construct when a bounded source
 range can be proven, including rejected VALUES derived-table shapes. Otherwise
