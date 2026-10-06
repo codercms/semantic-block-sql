@@ -83,6 +83,9 @@ When expanded:
 - put `AND` and `OR` at the start of continuation lines;
 - do not create lines containing only connector keywords such as `ON` or `THEN`;
 - keep `JOIN ... ON` and `WHEN ... THEN UPDATE SET` on their owner lines;
+- measure a compact JOIN predicate with its full header and display indentation;
+  prefer expansion beyond soft width without splitting valid authored multiline
+  predicate groups solely for that soft-width preference;
 - preserve precedence-significant parentheses.
 - For an expanded predicate enclosed by one complete outer group, prefer its
   opener beside the clause keyword (`WHERE (`, `HAVING (`, `JOIN ... ON (`).

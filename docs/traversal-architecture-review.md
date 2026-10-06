@@ -1,6 +1,6 @@
 # Traversal and coordinate architecture review
 
-Status: foundation implemented and reviewed; JOIN-width behavior change is deferred.
+Status: foundation implemented and reviewed; JOIN-width behavior follow-up is implemented.
 
 ## Original findings
 
@@ -65,7 +65,7 @@ are not reinterpreted by layout consumers.
 
 Every completed batch is committed separately. Formatting behavior stays
 covered by equivalence, comment/literal preservation, idempotence and atomicity
-gates. The JOIN-width expansion policy is a subsequent behavior batch.
+gates. The JOIN-width expansion policy was implemented in its own subsequent behavior batch.
 
 ## Implemented geometry contract and limits
 
@@ -79,9 +79,8 @@ parentheses no longer participate in ancestry discovery.
 
 The backend AST walk is complete for the pinned schema, not a promise of support
 for every PostgreSQL construct. Parser decoding still has its own recursion limit.
-Display policies remain typed owner-specific rules. The remaining long JOIN ON
-predicate decision still needs to include its entire JOIN prefix in the expansion
-budget; that behavior is deliberately deferred until after this foundation review.
+Display policies remain typed owner-specific rules. The subsequent JOIN ON behavior batch measures its entire displayed JOIN prefix
+through shared planned-line geometry after query/relation owner planning.
 
 
 Final foundation validation: 513 tests across 65 targets, one existing ignored;

@@ -49,6 +49,8 @@ use statements::{
 
 #[derive(Debug, Clone, Copy)]
 struct BooleanRange {
+    expanded: bool,
+    join_on: Option<usize>,
     kind: ExpressionOwnerKind,
     introducer: Option<usize>,
     start: usize,
@@ -843,9 +845,11 @@ fn plan_query_clauses(
             .is_some_and(|source| !source.joins.is_empty());
         let has_expanded_boolean = boolean_ranges
             .iter()
+            .filter(|range| range.expanded)
             .any(|range| range.start > select && range.start < end);
         let nested_in_expanded_boolean = boolean_ranges
             .iter()
+            .filter(|range| range.expanded)
             .any(|range| range.start < select && select < range.end);
         let mut has_expanded_clause_list = false;
         for clause in [query.clauses.group_by, query.clauses.order_by]
@@ -900,13 +904,13 @@ fn plan_query_clauses(
         if query.clauses.locking.is_some() {
             for index in select + 1..end {
                 if depths[index] == base_depth && tokens[index].kind == Token::For {
-                    plan.break_before(index, 1, indent);
+                    plan.break_before(index, tokens[index].line_breaks_before.clamp(1, 2), indent);
                 }
             }
         }
         for (index, depth) in depths.iter().enumerate().take(end).skip(select + 1) {
             if *depth == base_depth && is_join_start(tokens, index) {
-                plan.break_before(index, 1, indent);
+                plan.break_before(index, tokens[index].line_breaks_before.clamp(1, 2), indent);
             }
         }
     }
@@ -1027,15 +1031,20 @@ fn boolean_ranges(
         let expanded = layout == GroupLayout::Expanded
             && (expression.kind == ExpressionOwnerKind::Predicate || root_depth.is_some());
 
-        if expanded {
+        let predicate = predicates.iter().find(|predicate| {
+            predicate.start == expression.start && predicate.wrapper_close.is_none()
+        });
+        let join_on = predicate
+            .filter(|predicate| predicate.kind == super::layout_ir::PredicateKind::JoinOn)
+            .map(|predicate| predicate.introducer);
+        // JOIN header geometry is available only after its relation/query owner
+        // is planned. Retain compact candidates for that final width decision.
+        if expanded || join_on.is_some() {
             result.push(BooleanRange {
+                expanded,
+                join_on,
                 kind: expression.kind,
-                introducer: predicates
-                    .iter()
-                    .find(|predicate| {
-                        predicate.start == expression.start && predicate.wrapper_close.is_none()
-                    })
-                    .map(|predicate| predicate.introducer),
+                introducer: predicate.map(|predicate| predicate.introducer),
                 start: expression.start,
                 end: expression.end,
                 base_depth: expression.base_depth,
@@ -1116,6 +1125,25 @@ fn plan_booleans(
     plan: &mut LayoutPlan,
 ) {
     for range in ranges {
+        if let Some(introducer) = range.join_on {
+            let layout = LayoutGroup {
+                compact_line_width: plan.line_width_through(
+                    tokens,
+                    introducer,
+                    range.end,
+                    range.root_indent.saturating_sub(1),
+                    options,
+                ),
+                structurally_complex: false,
+                hard_boundary: false,
+                force_expand: range.expanded,
+                compact_overflow_is_unavoidable: false,
+            }
+            .decide(options);
+            if layout == GroupLayout::Compact {
+                continue;
+            }
+        }
         let root_has_and = range.root_depth.is_some_and(|root_depth| {
             (range.start..range.end)
                 .any(|index| depths[index] == root_depth && tokens[index].kind == Token::And)
@@ -1186,7 +1214,7 @@ fn plan_booleans(
                     plan.set_indent(trivia_start..index, indent);
                     plan.break_before(trivia_start, 1, indent);
                 }
-                plan.break_before(index, 1, indent);
+                plan.break_before(index, tokens[index].line_breaks_before.clamp(1, 2), indent);
             }
             if tokens[index].kind == Token::Ascii40 {
                 let Some(&close) = parens.get(&index) else {
@@ -1270,9 +1298,15 @@ fn plan_booleans(
                         );
                     }
                     for connector in direct_connectors {
+                        if range.preserve_authored_breaks
+                            && range.root_depth == Some(depths[connector])
+                            && tokens[connector].line_breaks_before == 0
+                        {
+                            continue;
+                        }
                         plan.break_before(
                             connector,
-                            1,
+                            tokens[connector].line_breaks_before.clamp(1, 2),
                             root_indent + depths[connector].saturating_sub(range.base_depth),
                         );
                     }

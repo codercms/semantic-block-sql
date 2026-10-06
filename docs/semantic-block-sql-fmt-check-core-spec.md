@@ -201,8 +201,9 @@ The formatter must preserve an existing authored layout when it:
 - keeps nesting and boolean precedence readable.
 
 Do not replace one valid grouping with another solely to canonicalize appearance,
-except for the reviewed JSON key/value grouping preference in section 10.1
-and the configurable predicate-group opener preference in section 12.1.
+except for the reviewed JSON key/value grouping preference in section 10.1,
+the configurable predicate-group opener preference in section 12.1,
+and the one-line JOIN predicate width preference in section 13.1.
 
 ## 6. Rule precedence
 
@@ -402,6 +403,13 @@ change CHECK, EXISTS, IN, FILTER or other grammar-specific parenthesis ownership
 ## 13. Statement-specific requirements
 
 ### 13.1 `JOIN ... ON`
+
+Measure a compact JOIN predicate using its complete rendered JOIN header,
+ON, predicate and displayed indentation. When that one-line owner exceeds soft
+width, prefer expansion at predicate boundaries. This preference does not make
+crossing soft width a violation and does not split valid authored multiline
+predicate groups solely for crossing soft width. Preserve comments and blank
+boundaries; enforce hard width at safe boundaries as usual.
 
 Simple:
 

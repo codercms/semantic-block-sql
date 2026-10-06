@@ -1,6 +1,29 @@
 use semblock::{FormatOptions, check_sql, format_sql_result, validate_equivalent};
 
 #[test]
+fn join_expansion_counts_its_complete_header() {
+    let source = "SELECT * FROM left_rows a LEFT JOIN reference_rows_for_comparison_with_extended_identifier b ON (((b.id = a.id) AND (b.part = a.part) AND (b.seq = a.seq)));";
+    let options = FormatOptions::default();
+    let result = format_sql_result(source, &options);
+    assert!(
+        result.output.contains("\n        AND (b.part = a.part)"),
+        "{}",
+        result.output
+    );
+    assert!(
+        result.diagnostics.iter().all(|d| d.fix_available),
+        "{:?}",
+        result.diagnostics
+    );
+    validate_equivalent(source, &result.output).unwrap();
+    assert_eq!(
+        format_sql_result(&result.output, &options).output,
+        result.output
+    );
+    assert!(check_sql(&result.output, &options).compliant);
+}
+
+#[test]
 fn expanded_join_predicates_show_every_enclosing_wrapper_level() {
     for (wrappers, context) in [(2, 0), (3, 0), (2, 1), (3, 2)] {
         let source = format!(
@@ -126,6 +149,81 @@ fn nested_exists_predicate_is_one_level_below_its_where_clause() {
         let where_indent = lines[from + 1].len() - lines[from + 1].trim_start().len();
         let predicate_indent = lines[from + 2].len() - lines[from + 2].trim_start().len();
         assert_eq!(predicate_indent, where_indent + 4, "{}", result.output);
+        validate_equivalent(&source, &result.output).unwrap();
+        assert_eq!(
+            format_sql_result(&result.output, &options).output,
+            result.output
+        );
+        assert!(check_sql(&result.output, &options).compliant);
+    }
+}
+
+#[test]
+fn join_header_width_uses_displayed_indentation_and_inclusive_soft_boundary() {
+    let source = "SELECT * FROM left_rows a LEFT JOIN comparison_rows b ON ((b.id = a.id) AND (b.part = a.part));";
+    for source in [
+        source.to_owned(),
+        format!("WITH prepared AS NOT MATERIALIZED ({}) SELECT * FROM prepared;", source.trim_end_matches(';')),
+        format!("INSERT INTO destination {source}"),
+        "UPDATE destination SET id = a.id FROM left_rows a LEFT JOIN comparison_rows b ON ((b.id = a.id) AND (b.part = a.part));".to_owned(),
+        "DELETE FROM destination USING left_rows a LEFT JOIN comparison_rows b ON ((b.id = a.id) AND (b.part = a.part));".to_owned(),
+        format!("CREATE FUNCTION sample() RETURNS SETOF left_rows LANGUAGE SQL BEGIN ATOMIC {source} END;"),
+    ] {
+        let wide = FormatOptions { soft_line_width: 400, hard_line_width: 400, ..FormatOptions::default() };
+        let compact = format_sql_result(&source, &wide);
+        assert!(compact.diagnostics.iter().all(|d| d.fix_available), "{:?}", compact.diagnostics);
+        let width = compact.output.lines().find(|line| line.contains("JOIN comparison_rows b ON")).unwrap().trim_end_matches(';').chars().count();
+        for enabled in [true, false] {
+            for (soft, should_expand) in [(width, false), (width - 1, true)] {
+                let options = FormatOptions { soft_line_width: soft, hard_line_width: 400, inline_predicate_group_opener: enabled, ..FormatOptions::default() };
+                let result = format_sql_result(&source, &options);
+                assert!(result.diagnostics.iter().all(|d| d.fix_available), "{:?}\n{}", result.diagnostics, result.output);
+                let expanded = result.output.lines().any(|line| line.trim_start().starts_with("AND "));
+                assert_eq!(expanded, should_expand, "soft={soft}\n{}", result.output);
+                validate_equivalent(&source, &result.output).unwrap();
+                assert_eq!(format_sql_result(&result.output, &options).output, result.output);
+                assert!(check_sql(&result.output, &options).compliant);
+            }
+        }
+    }
+}
+
+#[test]
+fn join_header_expansion_preserves_comments_and_authored_predicate_groups() {
+    for predicate in [
+        "((b.id = a.id) AND (b.part = a.part)\nAND (b.seq = a.seq))",
+        "((b.id = a.id) -- retained\nAND (b.part = a.part)\n\nAND (b.seq = a.seq))",
+    ] {
+        let source =
+            format!("SELECT * FROM left_rows a LEFT JOIN comparison_rows b ON {predicate};");
+        let options = FormatOptions {
+            soft_line_width: 90,
+            hard_line_width: 160,
+            ..FormatOptions::default()
+        };
+        let result = format_sql_result(&source, &options);
+        assert!(
+            result.diagnostics.iter().all(|d| d.fix_available),
+            "{:?}\n{}",
+            result.diagnostics,
+            result.output
+        );
+        if predicate.contains("-- retained") {
+            assert!(
+                result.output.contains("(b.id = a.id) -- retained"),
+                "{}",
+                result.output
+            );
+            assert!(result.output.contains("\n\n"), "{}", result.output);
+        } else {
+            assert!(
+                result
+                    .output
+                    .contains("(b.id = a.id) AND (b.part = a.part)"),
+                "{}",
+                result.output
+            );
+        }
         validate_equivalent(&source, &result.output).unwrap();
         assert_eq!(
             format_sql_result(&result.output, &options).output,

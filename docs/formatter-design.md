@@ -1319,3 +1319,22 @@ fits soft width and no comment or blank gap separates it from the keyword.
 The outer group's contents gain one level relative to the clause, rather than
 another level for a standalone opener. Nested groups retain their own levels.
 CHECK and grammar-specific query/list wrappers keep their existing policies.
+
+
+### Complete JOIN header width
+
+The explicit request to expand the remaining long JOIN ON regression permits
+splitting an otherwise compact one-line JOIN predicate when its complete
+rendered owner line exceeds soft width. Measure the JOIN header, ON, predicate
+and contextual display indentation together; predicate-only width is incorrect.
+Preserve authored multiline predicate groups that fit hard width, plus comments
+and blank gaps. This is a reviewed JOIN-specific readability preference, not a
+soft-width violation or a new PostgreSQL capability.
+
+Retain compact JOIN candidates during structural Boolean classification. After
+relation/query planning establishes their actual displayed owner lines, the
+shared Boolean planner uses `LayoutPlan::line_width_through` and
+`LayoutGroup::decide`. Early query expansion consumers consider only initially
+expanded groups; deferred candidates do not force unrelated clause expansion.
+Nested wrapper planning respects the same root authored-connector boundaries
+and blank gaps as the outer Boolean owner.

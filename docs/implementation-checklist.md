@@ -1907,4 +1907,15 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Review semantic/protected-token preservation, architecture boundaries,
   idempotence, authored groups, diagnostics, atomicity, dependency necessity and
   obsolete helpers; commit the completed foundation batch.
-- [ ] Implement the separate JOIN ON full-prefix expansion regression afterward.
+- [x] Implement the separate JOIN ON full-prefix expansion regression afterward.
+
+
+## Complete JOIN ON width decision
+
+- [x] Reproduce the compact 130-character JOIN line whose predicate alone fits
+  soft width; expand only after actual owner geometry is available.
+- [x] Reuse typed JOIN ownership, shared prefix measurement and group policy;
+  preserve root authored connector groups and blank-line boundaries in wrappers.
+- [x] Cover inclusive soft width across six query/DML/routine contexts with both
+  opener settings; verify comments, groups, equivalence and repeated fmt/check.
+- [x] Complete full gates, private-copy audit, commit, PR and PATH refresh.
