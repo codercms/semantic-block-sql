@@ -1287,8 +1287,9 @@ fn plan_booleans(
                         .iter()
                         .any(|candidate| tokens[*candidate].kind == Token::Or);
                 let contains_nested_sql = (index + 1..close).any(|candidate| {
-                    depths[candidate] == inner_depth
+                    depths[candidate] >= inner_depth
                         && matches!(tokens[candidate].kind, Token::Select | Token::With)
+                        && plan.before.contains_key(&candidate)
                 });
                 let authored_boundary = tokens[index + 1..close]
                     .iter()
@@ -1304,7 +1305,7 @@ fn plan_booleans(
                     && tokens[close + 1..range.end]
                         .iter()
                         .all(|token| token.is_comment() || token.kind == Token::Ascii41);
-                if (contains_boolean || wraps_boolean_root)
+                if (contains_boolean || wraps_boolean_root || contains_nested_sql)
                     && (owns_complete_range
                         || wraps_boolean_root
                         || precedence_boundary

@@ -45,6 +45,17 @@ fn expanded_join_predicates_show_every_enclosing_wrapper_level() {
             .iter()
             .find(|line| line.trim_start().starts_with("AND "))
             .unwrap();
+        assert_eq!(connector.trim(), "AND (", "{}", result.output);
+        let comparison_rhs = lines
+            .iter()
+            .find(|line| line.trim_start().starts_with("b.id <= ("))
+            .unwrap();
+        assert_eq!(
+            comparison_rhs.len() - comparison_rhs.trim_start().len(),
+            predicate_indent + (wrappers + 1) * 4,
+            "{}",
+            result.output
+        );
         assert_eq!(
             comparison.len() - comparison.trim_start().len(),
             predicate_indent + wrappers * 4,
@@ -64,4 +75,28 @@ fn expanded_join_predicates_show_every_enclosing_wrapper_level() {
         );
         assert!(check_sql(&result.output, &options).compliant);
     }
+}
+
+#[test]
+fn subquery_comparison_wrappers_preserve_comments_and_compact_siblings() {
+    let source = "SELECT * FROM rows a WHERE\n(a.id > 0)\nAND (a.id <= ( -- upper bound\nSELECT id\nFROM bounds\n)) -- comparison\nAND (a.enabled = TRUE);";
+    let options = FormatOptions::default();
+    let result = format_sql_result(source, &options);
+    assert!(
+        result.diagnostics.iter().all(|d| d.fix_available),
+        "{:?}",
+        result.diagnostics
+    );
+    assert!(result.output.contains("    AND (\n        a.id <= (-- upper bound\n            SELECT id\n            FROM bounds\n        )\n    ) -- comparison"), "{}", result.output);
+    assert!(
+        result.output.contains("    AND (a.enabled = TRUE)"),
+        "{}",
+        result.output
+    );
+    validate_equivalent(source, &result.output).unwrap();
+    assert_eq!(
+        format_sql_result(&result.output, &options).output,
+        result.output
+    );
+    assert!(check_sql(&result.output, &options).compliant);
 }

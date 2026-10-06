@@ -1800,3 +1800,15 @@ the published 0.3.0 release is unchanged.
   0.3.1 on PATH and verify its hash and installed CLI behavior.
 - [x] Review semantics, ownership, comments, groups, diagnostics, idempotence,
   atomicity, dependencies and dead code; commit and update PR #50.
+
+## Scalar-query comparison wrapper follow-up
+
+- [x] Extend the red JOIN/CTE/INSERT fixture to require visible comparison
+  nesting around its expanded scalar query; add comment and compact-sibling checks.
+- [x] Reuse the existing Boolean planner's expanded-query signal to expand the
+  containing comparison wrapper, preserving syntax and comment attachment.
+- [x] Pass 492 tests across 62 targets, formatting, Clippy, Rustdoc and diff
+  hygiene; private-copy fmt/check/repeat passes without unsupported/skipped/errors.
+- [x] Install optimized 0.3.1 on PATH with matching hash; review ownership,
+  comments, compact siblings, semantics, idempotence, diagnostics, atomicity,
+  dependencies and dead code; scope review, batch commit and PR update.

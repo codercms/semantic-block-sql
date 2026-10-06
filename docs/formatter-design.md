@@ -1295,3 +1295,8 @@ When a Boolean root expands, its complete enclosing parenthesis chain expands
 with it. Each retained wrapper has a visible indentation level; atomic
 parenthesized comparisons stay compact. This corrects layout within existing
 syntax and preserves all authored parentheses.
+
+A parenthesized comparison containing an already expanded scalar query also
+expands its outer wrapper. Query contents indent beneath their opener and each
+closing delimiter aligns with its own owner, rather than combining query and
+comparison closes on one hanging line. Compact atomic siblings remain compact.

@@ -370,3 +370,7 @@ covers expanded JOIN predicates with two and three enclosing Boolean wrappers,
 scalar subqueries, CTE NOT MATERIALIZED and INSERT query sources. Predicate
 ownership excludes enclosing relation delimiters; expanded wrappers and Boolean
 connectors retain consistent indentation, equivalence and idempotence.
+
+The same fixture covers comparison wrappers around expanded scalar queries,
+including comments at query and comparison boundaries and compact neighboring
+comparisons. Each expanded closing delimiter aligns with its own wrapper.
