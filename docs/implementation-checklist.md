@@ -1,5 +1,16 @@
 # Durable implementation checklist
 
+## JSON key/value layout batch
+
+- [x] Resolve the authored-group/one-argument conflict in core section 10.1 and
+  record the latest explicit project requirement in formatter-design.md.
+- [x] Add invented red fixtures for builders, aggregate families, comments,
+  widths, nested values, ordered aggregates, and ordinary-call controls.
+- [ ] Carry reviewed pair/aggregate capabilities through typed call ownership.
+- [ ] Reuse shared list/width planning and turn all new fixtures green.
+- [ ] Update coverage, architecture, README/guide as needed; run full gates.
+- [ ] Re-audit private copies, install the fresh binary, and update the PR.
+
 Status: **0.3.0 migration coverage and regression batches complete**
 
 Update this file during every batch. A checked feature requires focused tests

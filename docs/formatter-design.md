@@ -268,6 +268,13 @@ owned layouts and acceptance fixtures.
 
 ### Authored group model
 
+The explicit project request for JSON object key/value readability supersedes
+the generic one-argument-per-line rule and preservation of a break between a
+reviewed key and its value. Core section 10.1 now defines that limited exception.
+Authored grouping between pairs and all comment/blank boundaries retain priority.
+The preference must be carried from AST call capabilities through typed argument
+ownership into the existing list planner; it is not a renderer name scan.
+
 Core sections 5.4 and 6 take precedence over compact-query preferences:
 authored breaks before typed SELECT and DML clauses remain boundaries even when the
 whole query fits on one line. Preserve blank clause boundaries as well. Keeping
