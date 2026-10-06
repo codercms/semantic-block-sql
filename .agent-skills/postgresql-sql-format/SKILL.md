@@ -84,6 +84,12 @@ When expanded:
 - do not create lines containing only connector keywords such as `ON` or `THEN`;
 - keep `JOIN ... ON` and `WHEN ... THEN UPDATE SET` on their owner lines;
 - preserve precedence-significant parentheses.
+- For an expanded predicate enclosed by one complete outer group, prefer its
+  opener beside the clause keyword (`WHERE (`, `HAVING (`, `JOIN ... ON (`).
+  Indent contents one level below that clause and align the outer close with it.
+  Keep a separate opener across a comment/blank gap or when the header exceeds
+  soft width. Machine formatting can disable this preference through
+  `[layout] inline_predicate_group_opener = false`.
 
 ## Lists and authored groups
 

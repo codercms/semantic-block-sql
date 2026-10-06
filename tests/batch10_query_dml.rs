@@ -102,7 +102,7 @@ fn formats_boolean_result_targets_with_exists_branches() {
 fn formats_boolean_predicates_across_query_clauses() {
     assert_format(
         "SELECT a.id, count(*) FROM a JOIN b ON ((a.x IS NOT NULL AND a.x <> b.x) OR (a.y IS NOT NULL AND a.y <> b.y)) WHERE ((a.ready AND a.visible) OR EXISTS (SELECT 1 FROM c WHERE c.a_id = a.id AND c.active)) GROUP BY a.id HAVING ((count(*) > 1 AND bool_or(b.ready)) OR EXISTS (SELECT 1 FROM d WHERE d.a_id = a.id AND d.active));",
-        "SELECT a.id, COUNT(*)\nFROM a\nJOIN b ON\n    (\n        (a.x IS NOT NULL AND a.x <> b.x)\n        OR (a.y IS NOT NULL AND a.y <> b.y)\n    )\nWHERE\n    (\n        (a.ready AND a.visible)\n        OR EXISTS (\n            SELECT 1\n            FROM c\n            WHERE c.a_id = a.id AND c.active\n        )\n    )\nGROUP BY a.id\nHAVING\n    (\n        (COUNT(*) > 1 AND bool_or(b.ready))\n        OR EXISTS (\n            SELECT 1\n            FROM d\n            WHERE d.a_id = a.id AND d.active\n        )\n    );",
+        "SELECT a.id, COUNT(*)\nFROM a\nJOIN b ON (\n    (a.x IS NOT NULL AND a.x <> b.x)\n    OR (a.y IS NOT NULL AND a.y <> b.y)\n)\nWHERE (\n    (a.ready AND a.visible)\n    OR EXISTS (\n        SELECT 1\n        FROM c\n        WHERE c.a_id = a.id AND c.active\n    )\n)\nGROUP BY a.id\nHAVING (\n    (COUNT(*) > 1 AND bool_or(b.ready))\n    OR EXISTS (\n        SELECT 1\n        FROM d\n        WHERE d.a_id = a.id AND d.active\n    )\n);",
         &FormatOptions::default(),
     );
 }

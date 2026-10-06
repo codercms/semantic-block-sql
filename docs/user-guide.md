@@ -332,6 +332,7 @@ unsupported_policy = "skip"
 [layout]
 soft_line_width = 120
 hard_line_width = 160
+inline_predicate_group_opener = true
 
 [discovery]
 respect_gitignore = true
@@ -352,6 +353,12 @@ raw_strings = true
 interpreted_strings = true
 multiline_string_style = "prefer_raw"
 ```
+
+`[layout] inline_predicate_group_opener` defaults to `true`: an expanded
+predicate enclosed by one complete outer group prefers `WHERE (` (also HAVING,
+JOIN/MERGE ON, conflict predicates and partial-index WHERE). Contents indent
+one level beneath the clause. Comments, blank gaps and soft-width overflow
+prevent joining. Set it to `false` to retain the separate-opener behavior.
 
 Indentation is always four spaces. Authored list groups, blank lines, and comment boundaries are mandatory structural boundaries and are not configurable.
 

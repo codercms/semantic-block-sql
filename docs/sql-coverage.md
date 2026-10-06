@@ -378,3 +378,10 @@ comparisons. Each expanded closing delimiter aligns with its own wrapper.
 Nested EXISTS predicates in CTEs and SQL-standard routine bodies are also
 covered: expanded WHERE contents sit exactly one level beneath their clause,
 including when sibling subqueries have different Boolean layouts.
+
+[`tests/predicate_opener_layout.rs`](../tests/predicate_opener_layout.rs) covers
+the default-enabled, configurable clause/group opener preference across SELECT,
+UPDATE, DELETE, INSERT SELECT, HAVING, JOIN/MERGE ON, both conflict WHERE owners
+and partial indexes. API disabling, config round-trip/strict typing, CLI stdin,
+comments, blank gaps, incomplete groups and soft-width header limits are covered.
+This changes layout preference within existing supported grammar.

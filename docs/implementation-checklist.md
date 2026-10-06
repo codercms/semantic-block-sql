@@ -1825,3 +1825,24 @@ the published 0.3.0 release is unchanged.
 - [x] Review typed ownership, semantic/comment preservation, authored groups,
   nested query shifts, idempotence, diagnostics, atomicity, dependencies and dead
   code; scope review, batch commit and PR update.
+
+## Configurable predicate-group opener preference
+
+- [x] Add a red synthetic matrix across SELECT/DML/conflict/index predicate owners.
+- [x] Join only the complete outer group's opener through the shared Boolean
+  planner; preserve comment/blank boundaries and soft-width header limits.
+- [x] Default-enable `inline_predicate_group_opener` in shared FormatOptions and
+  strict layout config; cover disabling, round-trip and CLI stdin behavior.
+- [x] Record the authored-break exception in the core/design and synchronize
+  user guide, README config and fixture-backed coverage.
+- [x] Pass 498 tests across 63 targets and all engineering checks; private-copy
+  fmt/check/repeat passes in both modes without unsupported/skipped/errors.
+- [x] Install optimized 0.4.0 on PATH with matching hash; reuse signed indentation
+  rebasing for nested queries and remove the unused positive-only helper.
+- [x] Review typed ownership, configured/disabled behavior, comments, authored
+  groups, widths, semantics, idempotence, diagnostics, atomicity, dependencies
+  and dead code; scope review, batch commit and PR update.
+
+0.4.0 release-preparation batch: the application and lockfile versions are bumped
+together for the configurable predicate-group layout feature. PR #50 is described
+under Features, Fixes and Chores; published releases remain unchanged.

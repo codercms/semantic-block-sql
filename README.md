@@ -285,6 +285,7 @@ timestamp_with_time_zone = "timestamptz"
 [layout]
 soft_line_width = 120
 hard_line_width = 160
+inline_predicate_group_opener = true
 
 [go]
 enabled = true

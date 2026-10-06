@@ -146,6 +146,8 @@ pub struct FormatOptions {
     pub style: Style,
     pub soft_line_width: usize,
     pub hard_line_width: usize,
+    /// Prefer a sole outer predicate group's opener beside its clause keyword.
+    pub inline_predicate_group_opener: bool,
     pub semicolon_policy: SemicolonPolicy,
     pub not_equal_policy: NotEqualPolicy,
     pub syntax_diagnostics: SyntaxDiagnostics,
@@ -159,6 +161,7 @@ impl Default for FormatOptions {
             style: Style::SemanticBlock,
             soft_line_width: 120,
             hard_line_width: 160,
+            inline_predicate_group_opener: true,
             semicolon_policy: SemicolonPolicy::Preserve,
             not_equal_policy: NotEqualPolicy::Preserve,
             syntax_diagnostics: SyntaxDiagnostics::ParserAvailable,

@@ -28,10 +28,11 @@ fn expanded_join_predicates_show_every_enclosing_wrapper_level() {
             .iter()
             .position(|line| line.contains("JOIN right_rows b ON"))
             .unwrap();
-        let predicate_indent = lines[join].len() - lines[join].trim_start().len() + 4;
-        for level in 0..wrappers {
+        let predicate_indent = lines[join].len() - lines[join].trim_start().len();
+        assert!(lines[join].ends_with("ON ("), "{}", result.output);
+        for level in 1..wrappers {
             assert_eq!(
-                lines[join + 1 + level],
+                lines[join + level],
                 format!("{}(", " ".repeat(predicate_indent + level * 4)),
                 "{}",
                 result.output

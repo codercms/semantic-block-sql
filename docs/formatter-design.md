@@ -1306,3 +1306,16 @@ anchor. Their first line sits one level below the introducer's displayed
 indentation after enclosing query movement. Raw lexical depth plus accumulated
 offsets remains a fallback for non-clause expressions and CHECK wrappers; it
 must not override the contextual WHERE/ON owner and add an extra level.
+
+### Configurable predicate-group opener preference
+
+The explicit project request for reducing indentation supersedes authored
+clause/opener break preservation only for one complete outer predicate group.
+The preference is enabled by default and can be disabled with
+`[layout] inline_predicate_group_opener = false`. The shared Boolean planner
+uses its typed introducer and matching parenthesis owner; no clause-specific
+keyword scan is added. It joins the opener only when the displayed owner line
+fits soft width and no comment or blank gap separates it from the keyword.
+The outer group's contents gain one level relative to the clause, rather than
+another level for a standalone opener. Nested groups retain their own levels.
+CHECK and grammar-specific query/list wrappers keep their existing policies.

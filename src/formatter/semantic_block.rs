@@ -113,10 +113,6 @@ impl LayoutPlan {
             .unwrap_or_else(|| self.indent_for(index, fallback))
     }
 
-    fn shift_indents(&mut self, range: std::ops::Range<usize>, levels: usize) {
-        self.rebase_indents(range, 0, levels);
-    }
-
     fn rebase_indents(&mut self, range: std::ops::Range<usize>, current: usize, desired: usize) {
         if current == desired {
             return;
@@ -1211,7 +1207,7 @@ fn plan_booleans(
             (range.start..range.end)
                 .any(|index| depths[index] == root_depth && tokens[index].kind == Token::And)
         });
-        let root_indent = range.introducer.map_or_else(
+        let mut root_indent = range.introducer.map_or_else(
             || {
                 plan.line_indent_for(
                     range.start,
@@ -1221,14 +1217,46 @@ fn plan_booleans(
             },
             |introducer| plan.line_indent_for(introducer, range.root_indent.saturating_sub(1)) + 1,
         );
+        let joined_opener = options.inline_predicate_group_opener
+            && range.introducer.is_some_and(|introducer| {
+                let last = (range.start..range.end).rfind(|index| !tokens[*index].is_comment());
+                let line_start = plan
+                    .before
+                    .keys()
+                    .copied()
+                    .filter(|index| *index <= introducer)
+                    .max()
+                    .unwrap_or(0);
+                tokens[range.start].kind == Token::Ascii40
+                    && parens.get(&range.start).copied() == last
+                    && tokens[range.start].line_breaks_before <= 1
+                    && plan
+                        .before
+                        .get(&range.start)
+                        .is_none_or(|line| line.lines <= 1)
+                    && plan.line_indent_for(line_start, root_indent.saturating_sub(1))
+                        * INDENT_WIDTH
+                        + compact_width(tokens, line_start, range.start + 1, options)
+                        <= options.soft_line_width
+            });
+        if joined_opener {
+            plan.before.remove(&range.start);
+            root_indent = root_indent.saturating_sub(1);
+        }
 
-        if !matches!(
-            range.kind,
-            ExpressionOwnerKind::AssignmentValue
-                | ExpressionOwnerKind::CaseCondition
-                | ExpressionOwnerKind::CaseResult
-        ) {
-            plan.break_before(range.start, 1, root_indent);
+        if !joined_opener
+            && !matches!(
+                range.kind,
+                ExpressionOwnerKind::AssignmentValue
+                    | ExpressionOwnerKind::CaseCondition
+                    | ExpressionOwnerKind::CaseResult
+            )
+        {
+            plan.break_before(
+                range.start,
+                tokens[range.start].line_breaks_before.clamp(1, 2),
+                root_indent,
+            );
         }
         for index in range.start..range.end {
             if range.root_depth == Some(depths[index])
@@ -1269,10 +1297,7 @@ fn plan_booleans(
                         let query_indent =
                             root_indent + 1 + depths[index].saturating_sub(range.base_depth);
                         let current_indent = plan.line_indent_for(query_start, query_indent);
-                        plan.shift_indents(
-                            query_start..close,
-                            query_indent.saturating_sub(current_indent),
-                        );
+                        plan.rebase_indents(query_start..close, current_indent, query_indent);
                         plan.break_before(
                             close,
                             1,

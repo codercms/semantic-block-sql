@@ -66,6 +66,7 @@ The concrete programming-language API is out of scope.
 ```text
 soft_line_width = 120
 hard_line_width = 160
+inline_predicate_group_opener = true
 
 semicolon_policy = preserve
 not_equal_policy = preserve
@@ -200,7 +201,8 @@ The formatter must preserve an existing authored layout when it:
 - keeps nesting and boolean precedence readable.
 
 Do not replace one valid grouping with another solely to canonicalize appearance,
-except for the reviewed JSON key/value grouping preference in section 10.1.
+except for the reviewed JSON key/value grouping preference in section 10.1
+and the configurable predicate-group opener preference in section 12.1.
 
 ## 6. Rule precedence
 
@@ -372,6 +374,30 @@ AND (
 ```
 
 Expand a child group further only when it is independently long or complex.
+
+### 12.1 Predicate-group opener preference
+
+With `inline_predicate_group_opener = true` (the default), prefer a sole outer
+parenthesized predicate group's opener beside its owning clause keyword:
+
+```sql
+WHERE (
+    (a.id = b.id)
+    AND (a.active = TRUE)
+)
+```
+
+This applies to expanded predicates owned by WHERE, HAVING, JOIN/MERGE ON,
+conflict predicates and partial-index WHERE. The complete predicate must be
+enclosed by that group. Keep the contents one level below the clause owner and
+align the outer close with that owner; retain every nested parenthesis and its
+own indentation. The owner line including the opener must fit the soft width.
+Comments or blank lines between the keyword and opener prevent joining.
+Comments and blank boundaries inside the group remain protected.
+
+Setting this option to false retains ordinary authored clause/opener boundaries
+and the separate-opener layout for expanded groups. This preference does not
+change CHECK, EXISTS, IN, FILTER or other grammar-specific parenthesis ownership.
 
 ## 13. Statement-specific requirements
 
