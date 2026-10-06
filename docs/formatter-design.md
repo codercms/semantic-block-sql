@@ -1224,3 +1224,14 @@ Enabling VALUES CTEs exposed a CASE branch whose condition and result each fit
 but whose combined WHEN/THEN line did not. Typed CASE result ranges now include
 the current planned line prefix in their hard-width budget and may begin a
 separate result line. No expression syntax is added, moved, or split.
+
+### External routine declaration ownership
+
+C and internal declarations have explicit language and AS literal cardinality
+capabilities. Bound library/symbol tokens remain protected, while signatures,
+options, and long AS argument groups reuse shared header planning. Common option
+validation is shared with SQL routines; unknown languages remain unsupported.
+Header layout precedes normalization, and the header is reparsed before applying
+location-owned casing so comment whitespace changes cannot invalidate offsets.
+The whole declaration passes structural/protected-token and document idempotence
+gates; external literal contents never enter an embedded SQL formatter.

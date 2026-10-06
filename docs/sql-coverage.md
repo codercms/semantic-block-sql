@@ -220,6 +220,12 @@ by synthetic fixtures. Single-quoted and escape-string SQL bodies remain
 unsupported; their contents are never decoded and rewritten speculatively.
 Parser-backed PL/pgSQL support is described below.
 
+External C declarations support one library literal or a library/symbol pair;
+`internal` declarations support one symbol literal. Their signatures and
+reviewed options share routine header layout. Body literals remain byte-identical
+and are never treated as SQL. `tests/external_routine_coverage.rs` covers both
+languages, comments, options, long literal lists, and an unreviewed language.
+
 PL/pgSQL coverage includes:
 
 - declarations, including parser-owned `%TYPE` and `%ROWTYPE` references;

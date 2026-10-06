@@ -1,4 +1,5 @@
 mod diagnostics;
+mod external_routine;
 mod layout_ir;
 mod ownership;
 mod procedural;
@@ -759,6 +760,14 @@ fn format_statement_once(
     options: &FormatOptions,
 ) -> Result<FormattedSql, StatementFormatError> {
     if is_routine_statement(raw) {
+        if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(statement)) =
+            raw.stmt.as_deref().and_then(|node| node.node.as_ref())
+            && statement.options.iter().any(|node| {
+                matches!(node.node.as_ref(), Some(pg_query::protobuf::node::Node::DefElem(option))
+                    if option.defname == "language" && procedural::option_string(option).is_some_and(|value| matches!(value.as_str(), "c" | "internal")))
+            }) {
+            return external_routine::format_single_routine(source, options);
+        }
         if let Some(pg_query::protobuf::node::Node::CreateFunctionStmt(statement)) =
             raw.stmt.as_deref().and_then(|node| node.node.as_ref())
             && (statement.sql_body.is_some() || statement.options.iter().any(|node| {

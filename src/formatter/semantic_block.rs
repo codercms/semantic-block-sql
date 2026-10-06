@@ -569,6 +569,7 @@ pub(super) fn format_routine_header(
     source: &str,
     owned_lists: &[(usize, usize)],
     clause_starts: &[usize],
+    literal_arguments: &[usize],
     options: &FormatOptions,
 ) -> Result<String, FormatDiagnostic> {
     let mut tokens = tokenize(source)?;
@@ -608,6 +609,25 @@ pub(super) fn format_routine_header(
     plan_parenthesized_lists(&tokens, depths, &[], &lists, options, &mut plan);
     for &index in clause_starts {
         plan.break_before(index, tokens[index].line_breaks_before.max(1), 0);
+    }
+    if let (Some(&first), Some(&last)) = (literal_arguments.first(), literal_arguments.last()) {
+        let as_index = clause_starts
+            .iter()
+            .copied()
+            .find(|&index| index < first && tokens[index].kind == Token::As)
+            .ok_or_else(|| {
+                FormatDiagnostic::Ownership("external literals have no owned AS clause".into())
+            })?;
+        let width = compact_width(&tokens, as_index, last + 1, options);
+        if width > options.soft_line_width
+            || literal_arguments
+                .iter()
+                .any(|&index| tokens[index].line_breaks_before > 0)
+        {
+            for &index in literal_arguments {
+                plan.break_before(index, tokens[index].line_breaks_before.max(1), 1);
+            }
+        }
     }
     let mut output = render_plan(
         &tokens,

@@ -1596,3 +1596,13 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   prefix width failure using a generic nested-query fixture.
 - [x] Run full gates, repeat private audits, and review safety/module boundaries,
   idempotence, groups, diagnostics, atomicity, dependencies, and dead code.
+
+## External routine declaration implementation
+
+- [x] Add failing C/internal, body-argument, long-list, comment, and unknown-language
+  controls; bind exact AS literal cardinality without interpreting their contents.
+- [x] Reuse shared option validation and header layout, with protected AS argument
+  groups; reparse layout before location-owned casing/whitespace normalization.
+- [x] Make all 22 follow-up regression cases green without weakening safety gates.
+- [x] Run full gates, re-audit private copies, and review semantics, architecture,
+  idempotence, comments, diagnostics, atomicity, dependencies, and dead code.

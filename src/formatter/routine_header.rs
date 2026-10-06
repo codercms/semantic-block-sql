@@ -8,6 +8,24 @@ pub(super) fn format(
     statement: &CreateFunctionStmt,
     options: &FormatOptions,
 ) -> Result<String, FormatDiagnostic> {
+    format_bound(source, statement, options, &[])
+}
+
+pub(super) fn format_external(
+    source: &str,
+    statement: &CreateFunctionStmt,
+    options: &FormatOptions,
+    literal_starts: &[usize],
+) -> Result<String, FormatDiagnostic> {
+    format_bound(source, statement, options, literal_starts)
+}
+
+fn format_bound(
+    source: &str,
+    statement: &CreateFunctionStmt,
+    options: &FormatOptions,
+    literal_starts: &[usize],
+) -> Result<String, FormatDiagnostic> {
     let tokens = tokenize(source)?;
     let structure = TokenStructure::new(&tokens);
     let kind_location = super::procedural::routine_kind_location(source, statement.is_procedure)?;
@@ -63,7 +81,49 @@ pub(super) fn format(
             clauses.push(index);
         }
     }
-    super::semantic_block::format_routine_header(source, &lists, &clauses, options)
+    let literals = literal_starts
+        .iter()
+        .map(|location| {
+            tokens
+                .iter()
+                .position(|token| token.start == *location && token.kind == Token::Sconst)
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("external literal token is missing".into())
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    super::semantic_block::format_routine_header(source, &lists, &clauses, &literals, options)
+}
+
+pub(super) fn validate_options(
+    statement: &CreateFunctionStmt,
+    source: &str,
+) -> Result<Option<String>, FormatDiagnostic> {
+    let mut language = None;
+    for node in &statement.options {
+        let Some(Node::DefElem(option)) = node.node.as_ref() else {
+            return Err(unsupported(source, "unrecognized routine option"));
+        };
+        match option.defname.as_str() {
+            "language" => language = super::procedural::option_string(option),
+            "as" | "volatility" | "strict" | "security" | "leakproof" | "cost" | "rows"
+            | "support" | "set" => {}
+            "parallel"
+                if super::procedural::option_string(option).is_some_and(|value| {
+                    matches!(value.as_str(), "safe" | "restricted" | "unsafe")
+                }) => {}
+            _ => return Err(unsupported(source, "unreviewed routine option")),
+        }
+    }
+    Ok(language)
+}
+
+fn unsupported(source: &str, feature: &str) -> FormatDiagnostic {
+    FormatDiagnostic::UnsupportedSyntax {
+        feature: feature.into(),
+        start: 0,
+        end: source.len(),
+    }
 }
 
 fn verify_list(

@@ -442,22 +442,11 @@ fn validate(statement: &CreateFunctionStmt, source: &str) -> Result<BodySpec, Fo
             ));
         }
     };
-    let mut language = None;
-    for option in &statement.options {
-        let Some(Node::DefElem(option)) = option.node.as_ref() else {
-            return Err(unsupported(source, "unrecognized SQL routine option"));
-        };
-        match option.defname.as_str() {
-            "language" => language = super::procedural::option_string(option),
-            "volatility" | "strict" | "security" | "leakproof" | "cost" | "rows" | "support"
-            | "set" => {}
-            "as" if matches!(spec, BodySpec::Dollar { .. }) => {}
-            "parallel"
-                if super::procedural::option_string(option).is_some_and(|value| {
-                    matches!(value.as_str(), "safe" | "restricted" | "unsafe")
-                }) => {}
-            _ => return Err(unsupported(source, "unreviewed SQL routine option")),
-        }
+    let language = super::routine_header::validate_options(statement, source)?;
+    if !matches!(spec, BodySpec::Dollar { .. }) && statement.options.iter().any(|node| {
+        matches!(node.node.as_ref(), Some(Node::DefElem(option)) if option.defname == "as")
+    }) {
+        return Err(unsupported(source, "AS option on SQL-standard body"));
     }
     if language.as_deref() != Some("sql") {
         return Err(unsupported(source, "non-SQL standard routine body"));
