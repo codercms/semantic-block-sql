@@ -403,6 +403,17 @@ pub(super) fn plan_utility_statements(
         let expanded = authored || width > context.options.soft_line_width;
 
         match utility.kind {
+            UtilityStatementKind::CreateSequence(_) | UtilityStatementKind::CreateTrigger(_)
+                if expanded =>
+            {
+                for &index in &utility.clauses {
+                    plan.break_before(
+                        index,
+                        context.tokens[index].line_breaks_before.max(1),
+                        span.base_depth,
+                    );
+                }
+            }
             UtilityStatementKind::Explain => {
                 if let Some(statement) = (span.start + 1..span.end).find(|index| {
                     context.depths[*index] == span.base_depth

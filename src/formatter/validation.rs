@@ -18,12 +18,12 @@ pub use equivalence::validate_equivalent;
 use super::ownership::{
     AggregateSignatureSpec, AliasSpec, AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec,
     ConflictActionSpec, ConflictSpec, CreateIndexSpec, CreateTableElementSpec, CreateTableSpec,
-    CteStatementSpec, DeleteSpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec,
-    MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec,
-    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
-    RelationListSpec, SelectSpec, StatementSpec, SupportedDocument, UpdateSpec,
-    UtilityStatementKind, ValuesRelationSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
-    source_statement,
+    CteStatementSpec, DeleteSpec, ForeignKeyAction, ForeignKeySpec, InsertSourceSpec, InsertSpec,
+    MaterializedViewSpec, MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec,
+    RelationIdentifierSpec, RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec,
+    RelationJoinTypeSpec, RelationListSpec, SelectSpec, SequenceOptionKind, SequenceSpec,
+    StatementSpec, SupportedDocument, TriggerSpec, TriggerTiming, UpdateSpec, UtilityStatementKind,
+    ValuesRelationSpec, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -418,14 +418,12 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
             validate_domain(statement)?;
             Ok(StatementSpec::Utility(UtilityStatementKind::CreateDomain))
         }
-        NodeEnum::CreateSeqStmt(statement) => {
-            validate_sequence(statement)?;
-            Ok(StatementSpec::Utility(UtilityStatementKind::CreateSequence))
-        }
-        NodeEnum::CreateTrigStmt(statement) => {
-            validate_trigger(statement)?;
-            Ok(StatementSpec::Utility(UtilityStatementKind::CreateTrigger))
-        }
+        NodeEnum::CreateSeqStmt(statement) => Ok(StatementSpec::Utility(
+            UtilityStatementKind::CreateSequence(validate_sequence(statement)?),
+        )),
+        NodeEnum::CreateTrigStmt(statement) => Ok(StatementSpec::Utility(
+            UtilityStatementKind::CreateTrigger(validate_trigger(statement)?),
+        )),
         NodeEnum::CreatePolicyStmt(statement) => {
             validate_policy(statement)?;
             Ok(StatementSpec::Utility(UtilityStatementKind::CreatePolicy))
@@ -990,35 +988,77 @@ fn validate_domain(statement: &CreateDomainStmt) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn validate_sequence(statement: &CreateSeqStmt) -> Result<(), &'static str> {
+fn validate_sequence(statement: &CreateSeqStmt) -> Result<SequenceSpec, &'static str> {
     if statement.sequence.is_none() || statement.for_identity {
         return Err("unreviewed CREATE SEQUENCE form");
     }
-    for option in &statement.options {
+    let mut options = [None; 8];
+    if statement.options.len() > options.len() {
+        return Err("too many sequence options");
+    }
+    for (slot, option) in options.iter_mut().zip(&statement.options) {
         let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
             return Err("unrecognized sequence option");
         };
-        if !matches!(
-            option.defname.as_str(),
-            "as" | "increment" | "minvalue" | "maxvalue" | "start" | "cache" | "cycle" | "owned_by"
-        ) {
-            return Err("unreviewed sequence option");
-        }
+        let kind = match option.defname.as_str() {
+            "as" => SequenceOptionKind::As,
+            "increment" => SequenceOptionKind::Increment,
+            "minvalue" => SequenceOptionKind::MinValue,
+            "maxvalue" => SequenceOptionKind::MaxValue,
+            "start" => SequenceOptionKind::Start,
+            "cache" => SequenceOptionKind::Cache,
+            "cycle" => SequenceOptionKind::Cycle,
+            "owned_by" => SequenceOptionKind::OwnedBy,
+            _ => return Err("unreviewed sequence option"),
+        };
+        *slot = Some((
+            kind,
+            usize::try_from(option.location).map_err(|_| "unlocated sequence option")?,
+        ));
     }
-    Ok(())
+    Ok(SequenceSpec { options })
 }
 
-fn validate_trigger(statement: &CreateTrigStmt) -> Result<(), &'static str> {
+fn validate_trigger(statement: &CreateTrigStmt) -> Result<TriggerSpec, &'static str> {
     if statement.relation.is_none() || statement.funcname.is_empty() {
         return Err("incomplete CREATE TRIGGER");
     }
-    if !statement.transition_rels.is_empty() {
-        return Err("transition tables in CREATE TRIGGER");
+    let mut old_table = false;
+    let mut new_table = false;
+    for transition in &statement.transition_rels {
+        let Some(NodeEnum::TriggerTransition(transition)) = transition.node.as_ref() else {
+            return Err("unrecognized trigger transition relation");
+        };
+        if !transition.is_table || transition.name.is_empty() {
+            return Err("unreviewed trigger transition relation");
+        }
+        let slot = if transition.is_new {
+            &mut new_table
+        } else {
+            &mut old_table
+        };
+        if *slot {
+            return Err("duplicate trigger transition relation");
+        }
+        *slot = true;
     }
     if let Some(expression) = statement.when_clause.as_deref() {
         validate_ddl_expression(expression)?;
     }
-    Ok(())
+    Ok(TriggerSpec {
+        // PostgreSQL's trigger timing bit flags: BEFORE=2, INSTEAD=64,
+        // AFTER=0. These are part of the pinned PostgreSQL AST contract.
+        timing: match statement.timing {
+            0 => TriggerTiming::After,
+            2 => TriggerTiming::Before,
+            64 => TriggerTiming::InsteadOf,
+            _ => return Err("unreviewed trigger timing"),
+        },
+        old_table,
+        new_table,
+        columns: statement.columns.len(),
+        has_when: statement.when_clause.is_some(),
+    })
 }
 
 fn validate_policy(statement: &CreatePolicyStmt) -> Result<(), &'static str> {
@@ -1497,6 +1537,20 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
             group,
             relation_options,
             check_constraints,
+            foreign_key: match command.def.as_deref().and_then(|node| node.node.as_ref()) {
+                Some(NodeEnum::Constraint(constraint))
+                    if ConstrType::try_from(constraint.contype)
+                        == Ok(ConstrType::ConstrForeign) =>
+                {
+                    Some(ForeignKeySpec {
+                        keys: constraint.fk_attrs.len(),
+                        referenced_keys: constraint.pk_attrs.len(),
+                        update_action: foreign_key_action(&constraint.fk_upd_action)?,
+                        delete_action: foreign_key_action(&constraint.fk_del_action)?,
+                    })
+                }
+                _ => None,
+            },
         });
     }
 
@@ -1504,6 +1558,17 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
         if_exists: alter.missing_ok,
         actions,
     })
+}
+
+fn foreign_key_action(value: &str) -> Result<ForeignKeyAction, &'static str> {
+    match value {
+        "a" => Ok(ForeignKeyAction::NoAction),
+        "r" => Ok(ForeignKeyAction::Restrict),
+        "c" => Ok(ForeignKeyAction::Cascade),
+        "n" => Ok(ForeignKeyAction::SetNull),
+        "d" => Ok(ForeignKeyAction::SetDefault),
+        _ => Err("unreviewed foreign key action"),
+    }
 }
 
 fn alter_action_group(subtype: AlterTableType) -> Result<AlterTableActionGroup, &'static str> {

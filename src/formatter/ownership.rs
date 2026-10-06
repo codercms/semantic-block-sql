@@ -302,6 +302,57 @@ pub(super) struct AlterTableActionSpec {
     pub group: AlterTableActionGroup,
     pub relation_options: Option<usize>,
     pub check_constraints: usize,
+    pub foreign_key: Option<ForeignKeySpec>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ForeignKeySpec {
+    pub keys: usize,
+    pub referenced_keys: usize,
+    pub update_action: ForeignKeyAction,
+    pub delete_action: ForeignKeyAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ForeignKeyAction {
+    NoAction,
+    Restrict,
+    Cascade,
+    SetNull,
+    SetDefault,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SequenceOptionKind {
+    As,
+    Increment,
+    MinValue,
+    MaxValue,
+    Start,
+    Cache,
+    Cycle,
+    OwnedBy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SequenceSpec {
+    pub options: [Option<(SequenceOptionKind, usize)>; 8],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TriggerSpec {
+    pub timing: TriggerTiming,
+    pub old_table: bool,
+    pub new_table: bool,
+    pub columns: usize,
+    pub has_when: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TriggerTiming {
+    Before,
+    After,
+    InsteadOf,
 }
 
 /// Exact ALTER TABLE capabilities proven by PostgreSQL AST validation.
@@ -341,8 +392,8 @@ pub(super) enum UtilityStatementKind {
     Set,
     AttachIndexPartition,
     CreateDomain,
-    CreateSequence,
-    CreateTrigger,
+    CreateSequence(SequenceSpec),
+    CreateTrigger(TriggerSpec),
     CreatePolicy,
     Copy,
     Call,
@@ -394,8 +445,8 @@ impl UtilityStatementKind {
             | Self::CreateCompositeType { .. }
             | Self::CreateAggregate { .. }
             | Self::CreateDomain
-            | Self::CreateSequence
-            | Self::CreateTrigger
+            | Self::CreateSequence(_)
+            | Self::CreateTrigger(_)
             | Self::CreatePolicy
             | Self::CreateExtension
             | Self::CreateRule
@@ -423,8 +474,8 @@ impl UtilityStatementKind {
             Self::Set => "SET",
             Self::AttachIndexPartition => "ALTER INDEX ATTACH PARTITION",
             Self::CreateDomain => "CREATE DOMAIN",
-            Self::CreateSequence => "CREATE SEQUENCE",
-            Self::CreateTrigger => "CREATE TRIGGER",
+            Self::CreateSequence(_) => "CREATE SEQUENCE",
+            Self::CreateTrigger(_) => "CREATE TRIGGER",
             Self::CreatePolicy => "CREATE POLICY",
             Self::Copy => "COPY",
             Self::Call => "CALL",

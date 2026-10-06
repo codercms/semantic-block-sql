@@ -1149,3 +1149,12 @@ token emitter. Option clauses are located through their DefElem metadata.
 The declaration prefix is isolated from its body; header wrapping does not
 change body tokens or recase identifiers/types. Original comments, list groups,
 defaults, and framing gaps remain subject to the existing safety gates.
+
+### Reviewed migration DDL clause layout
+
+The requested remaining DDL support carries explicit sequence-option kinds and
+locations, trigger timing/column/transition-table capabilities, and foreign-key
+key counts and action kinds. Token binders verify these capabilities before
+producing clause boundaries for the existing planners. This replaces neither
+the PostgreSQL parser nor the closed ownership model. Trigger ROW transition
+aliases remain unreviewed; OLD/NEW TABLE aliases are separately identifier-owned.

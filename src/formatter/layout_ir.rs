@@ -8,6 +8,7 @@ use super::ownership::{
 use super::structure::TokenStructure;
 use super::tokens::SqlToken;
 
+mod migration_ddl;
 mod query;
 mod statement;
 
@@ -392,6 +393,7 @@ pub(super) struct AlterTableAction {
     pub group: AlterTableActionGroup,
     pub relation_options: Option<AlterTableOptionList>,
     pub checks: Vec<CheckPredicateBlock>,
+    pub foreign_key_clauses: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -400,11 +402,13 @@ pub(super) struct AlterTableBlock {
     pub actions: Vec<AlterTableAction>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UtilityBlock {
     pub span: TokenSpan,
     pub kind: UtilityStatementKind,
     pub lists: [Option<(usize, usize)>; 2],
+    pub clauses: Vec<usize>,
+    pub identifier_tokens: Vec<usize>,
 }
 
 /// Exhaustive top-level layout dispatcher.
@@ -801,6 +805,7 @@ fn statement_identifier_tokens<'a>(
                 .chain(block.source.identifier_tokens.iter().copied()),
         ),
         StatementLayout::View(block) => Box::new(owned_list(block.aliases)),
+        StatementLayout::Utility(block) => Box::new(block.identifier_tokens.iter().copied()),
         StatementLayout::MaterializedView(block) => Box::new(owned_list(block.aliases)),
         _ => Box::new(std::iter::empty()),
     }

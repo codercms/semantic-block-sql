@@ -259,6 +259,16 @@ pub(super) fn bind_utility(
             ));
         }
     }
+    let (clauses, identifier_tokens) = match kind {
+        UtilityStatementKind::CreateSequence(spec) => (
+            super::migration_ddl::bind_sequence(tokens, structure, statement, spec)?,
+            Vec::new(),
+        ),
+        UtilityStatementKind::CreateTrigger(spec) => {
+            super::migration_ddl::bind_trigger(tokens, structure, statement, spec)?
+        }
+        _ => (Vec::new(), Vec::new()),
+    };
     Ok(UtilityBlock {
         span: TokenSpan {
             start: statement.range.start,
@@ -267,6 +277,8 @@ pub(super) fn bind_utility(
         },
         kind,
         lists,
+        clauses,
+        identifier_tokens,
     })
 }
 
@@ -1001,6 +1013,13 @@ pub(super) fn bind_alter_table(
                 range,
                 group: action.group,
                 relation_options,
+                foreign_key_clauses: action
+                    .foreign_key
+                    .map(|spec| {
+                        super::migration_ddl::bind_foreign_key(tokens, structure, range, base, spec)
+                    })
+                    .transpose()?
+                    .unwrap_or_default(),
                 checks: bind_check_predicates(
                     tokens,
                     structure,

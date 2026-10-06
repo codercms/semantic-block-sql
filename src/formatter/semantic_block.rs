@@ -232,7 +232,7 @@ pub(super) fn format(
     let create_tables = layout.create_tables().cloned().collect::<Vec<_>>();
     let create_indexes = layout.create_indexes().cloned().collect::<Vec<_>>();
     let alter_tables = layout.alter_tables().cloned().collect::<Vec<_>>();
-    let utilities = layout.utilities().copied().collect::<Vec<_>>();
+    let utilities = layout.utilities().cloned().collect::<Vec<_>>();
     let mut join_using_lists = layout
         .queries()
         .iter()

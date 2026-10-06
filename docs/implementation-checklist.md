@@ -1499,3 +1499,18 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Run focused tests and all-target gates; remaining original red cases are
   the four desired DDL cases. Review semantic preservation, module boundaries,
   idempotence, comments, diagnostics, atomicity, dependencies, and dead code.
+
+## Reviewed migration DDL clause implementation
+
+- [x] Carry typed sequence-option locations, trigger timing/column/transition
+  capabilities, and foreign-key key counts/action kinds through ownership IR.
+- [x] Bind and verify clause boundaries; preserve order, authored gaps/comments,
+  and transition aliases before planning long DDL lines.
+- [x] Turn all four original DDL cases green: all 36 original desired-support
+  and regression cases now pass. Add nearby positive and unsupported controls.
+- [x] Run focused tests, full all-target testing, formatting, locked Clippy,
+  Rustdoc, and diff hygiene; review semantic preservation, module boundaries,
+  idempotence, comments/groups, diagnostics, atomicity, dependencies/dead code.
+- [x] Re-audit private schema copies; remaining issues include identity options,
+  nested query/call layout, procedural INTO/transaction nodes, and a VALUES
+  suffix. Keep all private source and output artifacts outside the repository.

@@ -259,6 +259,17 @@ pub(super) fn plan_alter_tables(
                     plan,
                 );
             }
+            if !action.foreign_key_clauses.is_empty() {
+                let clause_indent = indent + 1;
+                for &index in &action.foreign_key_clauses {
+                    plan.break_before(
+                        index,
+                        context.tokens[index].line_breaks_before.max(1),
+                        clause_indent,
+                    );
+                    plan.set_indent(index..action.range.end, clause_indent);
+                }
+            }
         }
     }
 }

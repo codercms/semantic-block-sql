@@ -6,11 +6,10 @@ It describes **fixture-backed structural support**, not every grammar production
 
 For exact machine behavior, see the [core `fmt` / `check` specification](semantic-block-sql-fmt-check-core-spec.md). For implementation progress and engineering gates, see the [implementation checklist](implementation-checklist.md).
 
-Two intentionally failing test targets track pending work:
-`tests/synthetic_layout_regressions.rs` covers layout and routine safety bugs;
-`tests/desired_sql_coverage.rs` records desired support for currently rejected
-syntax and additional safety skips. All examples are synthetic. These tests
-do not change the current support states listed below.
+`tests/synthetic_layout_regressions.rs` and `tests/desired_sql_coverage.rs`
+cover the original layout failures and requested syntax expansions. Their
+original 36 cases now pass. All examples are synthetic; support states below
+remain scoped to reviewed AST shapes and executable fixtures.
 
 ## Coverage model
 
@@ -162,6 +161,14 @@ Fixture-backed support includes:
 - `CREATE VIEW`, including CTE-led queries and wrapped set-operation branches;
 - `CREATE MATERIALIZED VIEW`, including reviewed storage options, CTE-led
   queries, and wrapped set-operation branches with owned data clauses.
+
+Sequence options retain their authored order and wrap at parser-owned locations.
+Trigger headers own timing, UPDATE OF columns, relation, condition, execution,
+and OLD/NEW transition-table clauses, including keyword-like transition aliases.
+ALTER TABLE foreign-key clauses wrap at verified key/reference/action boundaries.
+Synthetic controls cover NO ACTION, RESTRICT, CASCADE, SET NULL/DEFAULT,
+deferrability, and omission of referenced-column lists. Transition ROW aliases
+remain unsupported.
 
 ## Operational and migration statements
 
