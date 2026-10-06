@@ -197,6 +197,7 @@ struct ParenthesizedList {
     close: usize,
     expanded: bool,
     base_indent: Option<usize>,
+    arguments: super::layout_ir::FunctionArgumentLayout,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -613,6 +614,7 @@ pub(super) fn format_routine_header(
                     .decide(options)
                         == GroupLayout::Expanded,
                 base_indent: Some(0),
+                arguments: super::layout_ir::FunctionArgumentLayout::Ordinary,
             }
         })
         .collect::<Vec<_>>();

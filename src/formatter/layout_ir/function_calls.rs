@@ -1,7 +1,10 @@
 use pg_query::protobuf::Token;
 
 use super::{FormatDiagnostic, SqlToken, TokenStructure};
-use crate::formatter::{ownership::FunctionCallSpec, tokens::next_non_comment};
+use crate::formatter::{
+    ownership::{FunctionArgumentSpec, FunctionCallSpec},
+    tokens::next_non_comment,
+};
 
 pub(super) fn bind(
     tokens: &[SqlToken<'_>],
@@ -10,8 +13,12 @@ pub(super) fn bind(
 ) -> Result<Vec<super::FunctionCallBlock>, FormatDiagnostic> {
     let mut names = Vec::new();
     for spec in specs {
-        let (location, name) = match spec {
-            FunctionCallSpec::Named { location, name } => (*location, name),
+        let (location, name, arguments) = match spec {
+            FunctionCallSpec::Named {
+                location,
+                name,
+                arguments,
+            } => (*location, name, arguments),
             FunctionCallSpec::OperatorEscape { location, keyword } => {
                 let index = tokens
                     .iter()
@@ -71,14 +78,61 @@ pub(super) fn bind(
         let close = structure.matching_parenthesis(open).ok_or_else(|| {
             FormatDiagnostic::Ownership("function argument list is unclosed".into())
         })?;
+        let arguments = bind_arguments(tokens, structure, open, close, *arguments)?;
         names.push(super::FunctionCallBlock {
             start,
             name: cursor,
             open,
             close,
+            arguments,
         });
     }
     names.sort_unstable();
     names.dedup();
     Ok(names)
+}
+
+fn bind_arguments(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    open: usize,
+    close: usize,
+    spec: FunctionArgumentSpec,
+) -> Result<super::FunctionArgumentLayout, FormatDiagnostic> {
+    let FunctionArgumentSpec::KeyValuePairs { pairs, order_items } = spec else {
+        return Ok(super::FunctionArgumentLayout::Ordinary);
+    };
+    let depth = structure.depth(open) + 1;
+    let order_by = if order_items > 0 {
+        Some(
+            (open + 1..close)
+                .find(|&index| {
+                    structure.depth(index) == depth
+                        && tokens[index].kind == Token::Order
+                        && next_non_comment(tokens, index)
+                            .is_some_and(|next| tokens[next].kind == Token::By)
+                })
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("JSON aggregate ORDER BY is missing".into())
+                })?,
+        )
+    } else {
+        None
+    };
+    let end = order_by.unwrap_or(close);
+    let count = |start: usize, end: usize| {
+        1 + (start..end)
+            .filter(|&index| {
+                tokens[index].kind == Token::Ascii44 && structure.depth(index) == depth
+            })
+            .count()
+    };
+    if count(open + 1, end) != pairs * 2
+        || order_by.is_some_and(|order| count(order + 2, close) != order_items)
+    {
+        return Err(FormatDiagnostic::Ownership(
+            "JSON key/value arguments disagree with their AST".into(),
+        ));
+    }
+    Ok(super::FunctionArgumentLayout::KeyValuePairs { end, order_by })
 }

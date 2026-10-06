@@ -6,12 +6,12 @@
   record the latest explicit project requirement in formatter-design.md.
 - [x] Add invented red fixtures for builders, aggregate families, comments,
   widths, nested values, ordered aggregates, and ordinary-call controls.
-- [ ] Carry reviewed pair/aggregate capabilities through typed call ownership.
-- [ ] Reuse shared list/width planning and turn all new fixtures green.
-- [ ] Update coverage, architecture, README/guide as needed; run full gates.
-- [ ] Re-audit private copies, install the fresh binary, and update the PR.
+- [x] Carry reviewed pair/aggregate capabilities through typed call ownership.
+- [x] Reuse shared list/width planning and turn all new fixtures green.
+- [x] Update coverage, architecture, README/guide as needed; run full gates.
+- [x] Re-audit private copies, install the fresh binary, and update the PR.
 
-Status: **0.3.0 migration coverage and regression batches complete**
+Status: **0.3.0 migration coverage and JSON key/value layout complete**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
@@ -1682,3 +1682,13 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Self-review semantic preservation, module/ownership boundaries, idempotence,
   comments/groups, diagnostic frames, atomicity, dependencies and dead code.
   No parser/fallback/dependency or safety exemption was added.
+
+JSON pair batch verification: all 482 tests across 59 targets pass, including
+13 new pair fixtures and SQL/Go/Rust parity. Formatting, locked Clippy, Rustdoc
+and diff checks pass. Fresh private copies have no unsupported/skipped/errors,
+pass check and repeated fmt byte identity, retain all 873 header gaps and eight
+correctly located permitted width warnings. The optimized 0.3.0 is on PATH with
+a matching release hash and a paired-layout CLI smoke test; PR #49 is updated.
+Self-review covered semantic preservation, typed ownership/module boundaries,
+idempotence, comments/authored groups, diagnostics, atomicity, dependencies and
+dead code. No dependencies or safety exemptions were added.

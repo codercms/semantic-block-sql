@@ -1,9 +1,9 @@
 # 0.3.0 formatter coverage and regression report
 
-The migration coverage work adds **122 tests** relative to the main branch after
+The formatter coverage work adds **135 tests** relative to the main branch after
 the authored-layout fix. The original 36 regression/desired-support cases and
 all 22 follow-up migration cases are green. The complete local suite passes
-**469 tests** across 58 all-target test invocations, including Go/Rust SQL parity.
+**482 tests** across 59 all-target test invocations, including Go/Rust SQL parity.
 
 Fixtures use invented schema, object, parameter, and literal names. Production
 SQL and domains were not copied into the repository. Private audits ran on local
@@ -94,3 +94,25 @@ width, statement/gap and token-aware indentation, and routine header/list/litera
 expansion uses LayoutGroup::decide. A related atomic multiline-literal regression
 is covered. Unsupported VALUES subquery elements remain an explicit negative
 boundary rather than gaining accidental support.
+
+## JSON key/value readability
+
+Core specification 1.1 section 10.1 resolves the generic authored-group and
+one-argument-per-line conflicts for reviewed JSON pairs. Expanded builders and
+object aggregates keep keys beside values when safe. Ordinary breaks within a
+pair may regroup; comments, blank boundaries and authored groups between pairs
+remain authoritative. Short calls stay compact, long pairs split safely, and
+nested values use their own planners.
+
+[Thirteen fixtures](../tests/json_key_value_layout.rs) cover both builders,
+pg_catalog/quoted spelling, all eight object-aggregate names, ordered/DISTINCT/
+FILTER/OVER forms, prefix widths, nested values, dynamic/duplicate keys, hard and
+soft limits, leading/inline comments, blank boundaries and generic-call controls.
+Explicit VARIADIC, named arguments, odd builder arity and other schemas keep
+ordinary argument layout. hstore and array-based constructors were not added.
+
+AST capabilities retain pair and sort cardinalities; typed binding verifies
+arguments separately from aggregate ORDER BY. The shared list planner creates
+compatible key/value units, and its owned prefix budget includes ORDER BY.
+The existing generic JSON golden fixture now reflects this explicit preference.
+No parser, dependency, safety exemption or renderer name scan was added.

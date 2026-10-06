@@ -73,6 +73,15 @@ Fixture-backed coverage includes common PostgreSQL-specific operator families an
 - `IS UNKNOWN`;
 - named function arguments.
 
+Reviewed JSON object builders and object aggregates carry typed key/value
+argument groups into the shared list planner. The two builders and both object
+aggregate families (including strict/unique variants), aggregate ordering,
+DISTINCT/FILTER/OVER, nested values, comments, widths and ordinary-call controls
+are covered by [JSON pair fixtures](../tests/json_key_value_layout.rs). This is a
+layout preference for existing supported calls, not runtime overload resolution;
+other qualified schemas, explicit VARIADIC, named arguments and odd-arity
+builders keep ordinary layout.
+
 The formatter preserves same-spelled identifiers when a token is not parser-owned grammar.
 Explicit function names and their argument lists are bound to AST locations,
 including legal keyword-like names such as `replace`, `left`, and `right`,

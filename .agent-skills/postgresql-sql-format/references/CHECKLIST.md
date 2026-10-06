@@ -8,6 +8,8 @@
 - Safely breakable lines stay within 160; crossing 120 alone did not force an authored group to split.
 - Mixed `AND` / `OR`, nested SQL, and complex parentheses are visible.
 - Authored groups, blank lines, and comment boundaries are preserved.
+- Reviewed JSON keys and values share a line when safe; only ordinary breaks
+  inside a pair may regroup, never comments or blank boundaries.
 - No line contains only `ON` or `THEN`.
 - `CASE` expressions and PL/pgSQL statement blocks use their distinct indentation rules.
 - Multiple `EXCEPTION` handlers are separated by blank lines.

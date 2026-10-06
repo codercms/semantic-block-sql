@@ -2,7 +2,7 @@
 
 Status: **Runnable CLI and raw-Go MVP complete**
 
-Last updated: **2026-08-18**
+Last updated: **2026-10-06**
 
 ## Purpose
 

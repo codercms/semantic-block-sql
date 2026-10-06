@@ -229,6 +229,14 @@ pub(super) struct FunctionCallBlock {
     pub name: usize,
     pub open: usize,
     pub close: usize,
+    pub arguments: FunctionArgumentLayout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Token-index bounds are half-open; pair `end` excludes aggregate ORDER BY.
+pub(super) enum FunctionArgumentLayout {
+    Ordinary,
+    KeyValuePairs { end: usize, order_by: Option<usize> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

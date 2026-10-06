@@ -518,6 +518,10 @@ When protected non-SQL regions are provided:
 
 `check` reports non-compliance with mandatory rules.
 
+The reviewed JSON pair preference in section 10.1 produces fixable list-grouping
+diagnostics when a key/value break can be safely regrouped. Authored groups
+between pairs and preserved hard boundaries do not produce such diagnostics.
+
 It must not report:
 
 - a line only for crossing the soft limit;

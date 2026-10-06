@@ -152,6 +152,10 @@ pub(super) fn parenthesized_lists(
                 .iter()
                 .find_map(|(using_open, indent)| (*using_open == open).then_some(*indent))
                 .or_else(|| definition_header.map(|&(_, _, indent)| indent)),
+            arguments: sources.calls.iter().find(|call| call.open == open).map_or(
+                crate::formatter::layout_ir::FunctionArgumentLayout::Ordinary,
+                |call| call.arguments,
+            ),
         });
     }
 
@@ -236,6 +240,27 @@ pub(super) fn plan_keyword_list_at_indent(
     force_expand: bool,
     plan: &mut LayoutPlan,
 ) -> bool {
+    plan_keyword_list_with_prefix(
+        context,
+        TokenRange::new(keyword, keyword + 1).expect("owned list keyword"),
+        end,
+        syntax_depth,
+        owner_indent,
+        force_expand,
+        plan,
+    )
+}
+
+fn plan_keyword_list_with_prefix(
+    context: &PlanningContext<'_, '_>,
+    prefix: TokenRange,
+    end: usize,
+    syntax_depth: usize,
+    owner_indent: usize,
+    force_expand: bool,
+    plan: &mut LayoutPlan,
+) -> bool {
+    let keyword = prefix.end - 1;
     let tokens = context.tokens;
     let depths = context.depths;
     let cases = context.cases;
@@ -269,7 +294,7 @@ pub(super) fn plan_keyword_list_at_indent(
             .any(|item| tokens[item.start].line_breaks_before > 0);
     let has_complex = items.iter().any(|item| item.complex);
     let compact_line_width =
-        owner_indent * INDENT_WIDTH + compact_width(tokens, keyword, list_end, options);
+        owner_indent * INDENT_WIDTH + compact_width(tokens, prefix.start, list_end, options);
     let layout = LayoutGroup {
         compact_line_width,
         structurally_complex: has_complex,
@@ -636,13 +661,20 @@ pub(super) fn plan_parenthesized_lists(
 ) {
     for list in lists.iter().filter(|list| list.expanded) {
         let inner_depth = depths[list.open] + 1;
+        let (argument_end, order_by) = match list.arguments {
+            crate::formatter::layout_ir::FunctionArgumentLayout::Ordinary => (list.close, None),
+            crate::formatter::layout_ir::FunctionArgumentLayout::KeyValuePairs {
+                end,
+                order_by,
+            } => (end, order_by),
+        };
         let mut items = split_list_items(
             tokens,
             depths,
             cases,
             lists,
             list.open + 1,
-            list.close,
+            argument_end,
             inner_depth,
         );
         if items.is_empty() {
@@ -652,6 +684,12 @@ pub(super) fn plan_parenthesized_lists(
             .base_indent
             .unwrap_or_else(|| plan.indent_for(list.open, depths[list.open]));
         let indent = base_indent + 1;
+        if matches!(
+            list.arguments,
+            crate::formatter::layout_ir::FunctionArgumentLayout::KeyValuePairs { .. }
+        ) {
+            items = key_value_items(tokens, cases, lists, &items, indent, options);
+        }
         for item in &items {
             set_contextual_indent(plan, depths, item.start..item.end, inner_depth, indent);
             if let Some(comma) = item.comma {
@@ -681,6 +719,29 @@ pub(super) fn plan_parenthesized_lists(
             );
         }
         plan.break_before(list.close, 1, base_indent);
+        if let Some(order) = order_by {
+            plan.break_before(order, tokens[order].line_breaks_before.max(1), indent);
+            let by =
+                crate::formatter::tokens::next_non_comment(tokens, order).expect("bound ORDER BY");
+            let context = PlanningContext {
+                tokens,
+                depths,
+                cases,
+                lists,
+                options,
+            };
+            // Include ORDER in the keyword owner's width budget, while BY stays
+            // with its prefix and sort expressions retain ordinary list groups.
+            plan_keyword_list_with_prefix(
+                &context,
+                TokenRange::new(order, by + 1).expect("bound ORDER BY prefix"),
+                list.close,
+                inner_depth,
+                indent,
+                false,
+                plan,
+            );
+        }
 
         for item in &mut items {
             if tokens[item.start..item.end]
@@ -691,6 +752,62 @@ pub(super) fn plan_parenthesized_lists(
             }
         }
     }
+}
+
+/// Prefer intrinsic key/value units without merging across comments or blank gaps.
+fn key_value_items(
+    tokens: &[SqlToken<'_>],
+    cases: &[CaseRange],
+    lists: &[ParenthesizedList],
+    items: &[ListItem],
+    indent: usize,
+    options: &FormatOptions,
+) -> Vec<ListItem> {
+    let mut result = Vec::new();
+    for pair in items.chunks_exact(2) {
+        let key = pair[0];
+        let value = pair[1];
+        let first_key = (key.start..key.end)
+            .find(|&index| !tokens[index].is_comment())
+            .unwrap_or(key.start);
+        let first_value = (value.start..value.end)
+            .find(|&index| !tokens[index].is_comment())
+            .unwrap_or(value.start);
+        let boundary = key.complex
+            || tokens[first_key + 1..first_value + 1]
+                .iter()
+                .any(|token| token.is_comment() || token.line_breaks_before > 1);
+        let prefix_end = lists
+            .iter()
+            .filter(|list| list.expanded && value.start <= list.open && list.close < value.end)
+            .map(|list| list.open + 1)
+            .chain(
+                cases
+                    .iter()
+                    .filter(|case| {
+                        case.expanded && value.start <= case.start && case.end < value.end
+                    })
+                    .map(|case| case.start + 1),
+            )
+            .min()
+            .unwrap_or(value.end);
+        let width = indent * INDENT_WIDTH
+            + compact_width(tokens, first_key, prefix_end, options)
+            + usize::from(
+                prefix_end == value.end && value.comma.is_some_and(|comma| comma >= value.end),
+            );
+        if !boundary && width <= options.hard_line_width {
+            result.push(ListItem {
+                start: key.start,
+                end: value.end,
+                comma: value.comma,
+                complex: key.complex || value.complex,
+            });
+        } else {
+            result.extend_from_slice(pair);
+        }
+    }
+    result
 }
 
 fn set_contextual_indent(

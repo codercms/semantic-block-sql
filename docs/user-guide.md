@@ -16,6 +16,16 @@ stays together. Authored blank boundaries in reviewed table, index, view,
 materialized-view, and ALTER layouts are retained alongside mandatory nesting
 and action-group separation.
 
+Expanded `json_build_object`/`jsonb_build_object` calls prefer a key and its value
+on the same line. The same rule applies to `json_object_agg`/`jsonb_object_agg`
+and their strict/unique variants. Existing separate argument lines may regroup
+within a pair; comments, blank lines and authored groups between pairs remain
+boundaries. A long pair may split safely, while nested values expand below their
+opening expression. Short inline calls remain compact. Exact names are recognized
+unqualified or under `pg_catalog`; other schemas, explicit VARIADIC, named
+arguments and odd-arity builders retain ordinary argument layout. No runtime
+function resolution or argument repair is performed.
+
 Format files in place:
 
 ```bash

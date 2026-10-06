@@ -36,8 +36,21 @@ pub(super) struct QuerySpec {
 /// expression syntax retains its separate grammar-owned rendering path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum FunctionCallSpec {
-    Named { location: usize, name: Vec<String> },
-    OperatorEscape { location: usize, keyword: Token },
+    Named {
+        location: usize,
+        name: Vec<String>,
+        arguments: FunctionArgumentSpec,
+    },
+    OperatorEscape {
+        location: usize,
+        keyword: Token,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FunctionArgumentSpec {
+    Ordinary,
+    KeyValuePairs { pairs: usize, order_items: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

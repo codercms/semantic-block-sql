@@ -11,6 +11,7 @@ It understands PostgreSQL structure instead of formatting by keyword heuristics,
 - **Fail-safe** — unsupported or ambiguous statements remain byte-identical by default.
 - **SQL + Go + Rust** — formats `.sql` files and complete PostgreSQL queries inside Go and Rust strings, including Rust `const` values and reviewed SQLx macros.
 - **Migration coverage** — reviewed SQL/PL routines, sequence and identity options, transition-table triggers, and VALUES-backed queries share the canonical formatter.
+- **Readable JSON objects** — expanded JSON builders and object aggregates keep keys beside their values where widths and comment boundaries allow.
 - **Repository-friendly** — recursive discovery, `.gitignore`, `.semblockignore`, staged files, and `--changed-since`.
 - **Deterministic** — successful rewrites pass semantic-equivalence and byte-idempotence safety gates.
 

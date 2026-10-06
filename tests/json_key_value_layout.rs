@@ -138,3 +138,79 @@ fn aggregate_ordering_and_filter_keep_their_owners() {
     assert!(output.contains("ORDER BY item.rank, item.id"), "{output}");
     assert!(output.contains("FILTER (WHERE item.active)"), "{output}");
 }
+
+#[test]
+fn aggregate_order_prefix_is_included_in_the_width_budget() {
+    let options = FormatOptions {
+        soft_line_width: 68,
+        hard_line_width: 68,
+        ..FormatOptions::default()
+    };
+    let output = reviewed(
+        "SELECT\n    jsonb_object_agg(\n        item.key,\n        item.value ORDER BY item.first_ordering_column, item.second_ordering_column\n    )\nFROM sample_rows item;",
+        &options,
+    );
+    assert!(
+        output.lines().all(|line| line.chars().count() <= 68),
+        "{output}"
+    );
+}
+
+#[test]
+fn authored_groups_between_pairs_and_duplicate_keys_are_preserved() {
+    let source = "SELECT\n    jsonb_build_object(\n        'id', 1, 'id', 2,\n\n        'label', 'sample'\n    );";
+    assert_sql(source, source);
+    let source = "SELECT\n    json_build_object(\n        item.key,\n        item.value,\n        'other',\n        2\n    )\nFROM sample_rows item;";
+    let output = reviewed(source, &FormatOptions::default());
+    assert!(output.contains("item.key, item.value,"), "{output}");
+}
+
+#[test]
+fn aggregate_distinct_window_and_comment_boundaries_are_preserved() {
+    let source = "SELECT\n    pg_catalog.jsonb_object_agg(\n        DISTINCT item.key,\n        item.value\n        ORDER /* ordering */ BY item.key, item.value\n    ) OVER (PARTITION BY item.group_id)\nFROM sample_rows item;";
+    let output = reviewed(source, &FormatOptions::default());
+    assert!(output.contains("DISTINCT item.key, item.value"), "{output}");
+    assert!(output.contains("ORDER /* ordering */ BY"), "{output}");
+    assert!(
+        output.contains("OVER (PARTITION BY item.group_id)"),
+        "{output}"
+    );
+    reviewed(
+        "SELECT jsonb_object_agg(item.key, item.value ORDER BY item.rank, -- rank note\nitem.id) FROM sample_rows item;",
+        &FormatOptions::default(),
+    );
+}
+
+#[test]
+fn nested_case_array_and_query_values_remain_safe() {
+    for value in [
+        "CASE\nWHEN item.active THEN 1\nELSE 0\nEND",
+        "ARRAY[\n1,\n2\n]",
+        "(SELECT COUNT(*) FROM sample_rows)",
+        "COALESCE(\nitem.value,\n'sample'\n)",
+    ] {
+        let source = format!(
+            "SELECT\n    jsonb_build_object(\n        'value',\n        {value},\n        'active',\n        TRUE\n    )\nFROM sample_rows item;"
+        );
+        let output = reviewed(&source, &FormatOptions::default());
+        assert!(output.contains("'active', TRUE"), "{output}");
+    }
+}
+
+#[test]
+fn named_and_explicit_variadic_forms_keep_ordinary_arguments() {
+    let source = "SELECT\n    jsonb_build_object(\n        first_arg => 'id',\n        second_arg => 1\n    );";
+    assert_sql(source, source);
+    let source = "SELECT\n    jsonb_build_object(\n        VARIADIC ARRAY['id', '1', 'title', 'sample']\n    );";
+    assert_sql(source, source);
+}
+
+#[test]
+fn a_leading_comment_does_not_consume_the_pair_line_width() {
+    let source = format!(
+        "SELECT\n    jsonb_build_object(\n        -- {}\n        'id',\n        1\n    );",
+        "note ".repeat(40)
+    );
+    let output = reviewed(&source, &FormatOptions::default());
+    assert!(output.contains("'id', 1"), "{output}");
+}

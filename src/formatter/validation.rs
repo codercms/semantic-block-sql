@@ -272,7 +272,11 @@ fn collect_query_specs(
                     };
                     function_calls.push(match operator_escape {
                         Some(keyword) => FunctionCallSpec::OperatorEscape { location, keyword },
-                        None => FunctionCallSpec::Named { location, name },
+                        None => FunctionCallSpec::Named {
+                            location,
+                            arguments: function_argument_spec(call, &name),
+                            name,
+                        },
                     });
                 }
                 // PostgreSQL synthesizes unlocated helper calls for LIKE /
@@ -318,6 +322,55 @@ fn collect_query_specs(
         }
         Ok(())
     })
+}
+
+fn function_argument_spec(
+    call: &pg_query::protobuf::FuncCall,
+    name: &[String],
+) -> super::ownership::FunctionArgumentSpec {
+    use super::ownership::FunctionArgumentSpec;
+    let function = match name {
+        [function] => function.as_str(),
+        [schema, function] if schema == "pg_catalog" => function.as_str(),
+        _ => return FunctionArgumentSpec::Ordinary,
+    };
+    if call.func_variadic
+        || call.agg_star
+        || call.agg_within_group
+        || call
+            .args
+            .iter()
+            .any(|arg| matches!(arg.node.as_ref(), Some(NodeEnum::NamedArgExpr(_))))
+    {
+        return FunctionArgumentSpec::Ordinary;
+    }
+    let pairs = match function {
+        "json_build_object" | "jsonb_build_object"
+            if !call.args.is_empty()
+                && call.args.len() % 2 == 0
+                && call.agg_order.is_empty()
+                && !call.agg_distinct =>
+        {
+            call.args.len() / 2
+        }
+        "json_object_agg"
+        | "jsonb_object_agg"
+        | "json_object_agg_strict"
+        | "jsonb_object_agg_strict"
+        | "json_object_agg_unique"
+        | "jsonb_object_agg_unique"
+        | "json_object_agg_unique_strict"
+        | "jsonb_object_agg_unique_strict"
+            if call.args.len() == 2 =>
+        {
+            1
+        }
+        _ => return FunctionArgumentSpec::Ordinary,
+    };
+    FunctionArgumentSpec::KeyValuePairs {
+        pairs,
+        order_items: call.agg_order.len(),
+    }
 }
 
 fn push_query_spec(

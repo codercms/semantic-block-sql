@@ -743,6 +743,19 @@ The body budget includes its four-space framing indentation. Authored groups and
 comments are preserved, and nested unsupported ranges are shifted into the
 routine's coordinates without permitting a partial routine rewrite.
 
+## JSON argument grouping
+
+Reviewed function names and AST argument/aggregate cardinalities produce a closed
+FunctionArgumentSpec variant. The function-call binder verifies pair counts and
+binds aggregate ORDER BY separately from actual arguments before producing the
+corresponding FunctionArgumentLayout. ParenthesizedList carries that ownership
+to the shared list planner; routine signatures and other lists remain ordinary.
+The planner coalesces a compatible key/value unit at the hard-width budget,
+retains child expansion and all comment/blank boundaries, then reuses authored
+group splitting. The keyword-list planner accepts an owned prefix range so an
+aggregate ORDER BY budget includes both keywords without changing existing
+single-keyword callers. No renderer function-name lookup is used.
+
 ## Routine body and header ownership
 
 SQL atomic and dollar bodies share one statement assembler. Parser-proven
