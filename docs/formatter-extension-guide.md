@@ -181,6 +181,10 @@ formatter fails closed until `REVIEWED_POSTGRESQL_VERSION` is updated.
 Upgrade procedure:
 
 1. Inspect protobuf changes for all currently supported nodes.
+   Review `ast/children.rs` through `scripts/generate-ast-children.py`: update
+   the reviewed API fingerprints, regenerate, and run `--check` against the
+   pinned crate source. Never add an independent NodeEnum::nodes() consumer or
+   another omitted-field list. Use `ast::DepthFirst` or `walk_complete_tree`.
 2. Review newly added enum variants and fields.
 3. Run the complete characterization and golden suite.
 4. Add unsupported fixtures for newly parsed but unowned syntax.

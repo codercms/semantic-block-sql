@@ -52,7 +52,7 @@ are not reinterpreted by layout consumers.
 
 - [x] Review/pin pg_query 6.2.1 independently; adapt the PostgreSQL 17.7 version
   gate and new source metadata without broadening supported grammar.
-- [ ] Replace the supplemented/incomplete AST walks with the canonical child
+- [x] Replace the supplemented/incomplete AST walks with the canonical child
   traversal; route validation, capability collection, type aliases and source
   anchors through it. Verify ordering, missing child families and unsupported
   neighbors with synthetic fixtures.

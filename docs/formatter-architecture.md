@@ -28,6 +28,8 @@ The formatter is designed around five constraints:
 ```text
 src/formatter/
 ├── mod.rs                      public facade and safety pipeline
+├── ast.rs                      canonical borrowed AST traversal and metadata
+├── ast/children.rs             generated exhaustive protobuf child enumeration
 ├── validation.rs               PostgreSQL AST support classification
 ├── validation/
 │   └── equivalence.rs          canonical AST and protected-token checks
@@ -168,14 +170,24 @@ exactly matches the remaining lexical queries with that shape. Contextual
 grammar such as `GRANT SELECT` and `CREATE POLICY ... FOR SELECT` consequently
 cannot be borrowed from another statement to satisfy query ownership.
 
-`pg_query`'s convenience node traversal does not visit every expression-bearing
-protobuf field. One validation adapter completes the reviewed traversal for
-SELECT suffixes/windows, DML `RETURNING`, `ON CONFLICT`, MERGE branches, and
-rule actions. Both nested unsupported-syntax validation and `QuerySpec`
-collection use that same completed walk, so a field cannot contribute layout
-ownership while bypassing the support boundary. Each discovered SELECT still
-passes the existing `validate_select` capability check; this is traversal
-completion, not a second SQL parser.
+`ast::DepthFirst` is the canonical borrowed, iterative preorder traversal.
+`ast/children.rs` enumerates every child field of all 268 NodeRef variants from
+the pinned pg_query 6.2.1 API, including fields omitted by its convenience walk.
+Visits carry the exact parent and structural depth; protobuf field/list order
+defines deterministic traversal. AST depth is not display indentation.
+Validation, query/function/array collection, type-alias normalization and
+expression source anchors all use this traversal. VALUES relation provenance
+uses the actual RangeSubselect parent. The old omitted-child adapter and
+parent-specific datatype discovery are removed. Each discovered SELECT still
+passes the existing capability check; traversal does not grant syntax support.
+
+`scripts/generate-ast-children.py` is an offline maintainer tool using only Python's
+standard library and Rustfmt. It accepts the reviewed schema/API fingerprints,
+checks complete field enumeration, and emits exhaustive Rust dispatch. Runtime
+and normal builds have no Python dependency. Parser upgrades must review the
+schema, update the fingerprints and regenerate/check the table. Existing parser
+decoding depth limits remain in force; the formatter's walk uses an explicit
+stack rather than recursive Rust calls.
 
 `SupportedDocument` is produced by `validation::parse_supported_postgresql`. It
 proves that every top-level statement and every checked nested construct belongs

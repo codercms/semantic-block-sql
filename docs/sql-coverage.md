@@ -385,3 +385,12 @@ UPDATE, DELETE, INSERT SELECT, HAVING, JOIN/MERGE ON, both conflict WHERE owners
 and partial indexes. API disabling, config round-trip/strict typing, CLI stdin,
 comments, blank gaps, incomplete groups and soft-width header limits are covered.
 This changes layout preference within existing supported grammar.
+
+Canonical AST traversal is covered by `tests/ast_traversal_consistency.rs` and
+the structural tests in `formatter/ast.rs`. Type-alias preferences now reach
+array elements, aggregate filters, CASE operands, DDL defaults/CHECK expressions
+and query suffixes through the same complete traversal. Unsupported SQL/JSON
+inside aggregate FILTER/order or CASE operands is preserved and diagnosed like
+the same expression in a SELECT target or DML RETURNING. These child contexts
+no longer bypass existing unsupported-syntax checks; no new SQL/JSON grammar
+is claimed.

@@ -1,3 +1,4 @@
+use super::ast::DepthFirst;
 use pg_query::NodeRef;
 use serde::Deserialize;
 
@@ -200,8 +201,8 @@ pub(super) fn normalize(
         else {
             continue;
         };
-        for (node, _, _, _) in root.nodes() {
-            for type_name in owned_type_names(node) {
+        for visit in DepthFirst::new(root) {
+            if let NodeRef::TypeName(type_name) = visit.node {
                 let Ok(start) = usize::try_from(type_name.location) else {
                     continue;
                 };
@@ -279,38 +280,6 @@ fn relative_ranges(ranges: &[SourceRange], start: usize, end: usize) -> Vec<Sour
         .filter(|range| range.start >= start && range.end <= end)
         .map(|range| SourceRange::new(range.start - start, range.end - start))
         .collect()
-}
-
-fn owned_type_names(node: NodeRef<'_>) -> Vec<&pg_query::protobuf::TypeName> {
-    match node {
-        NodeRef::TypeName(type_name) => vec![type_name],
-        NodeRef::TypeCast(cast) => cast.type_name.iter().collect(),
-        NodeRef::ColumnDef(column) => column.type_name.iter().collect(),
-        NodeRef::FunctionParameter(parameter) => parameter.arg_type.iter().collect(),
-        NodeRef::CreateFunctionStmt(function) => function
-            .parameters
-            .iter()
-            .filter_map(|node| match node.node.as_ref() {
-                Some(pg_query::protobuf::node::Node::FunctionParameter(parameter)) => {
-                    parameter.arg_type.as_ref()
-                }
-                _ => None,
-            })
-            .chain(function.return_type.iter())
-            .collect(),
-        NodeRef::CreateStmt(statement) => statement
-            .table_elts
-            .iter()
-            .filter_map(|node| match node.node.as_ref() {
-                Some(pg_query::protobuf::node::Node::ColumnDef(column)) => {
-                    column.type_name.as_ref()
-                }
-                _ => None,
-            })
-            .collect(),
-        NodeRef::CreateDomainStmt(domain) => domain.type_name.iter().collect(),
-        _ => Vec::new(),
-    }
 }
 
 fn contains(outer: SourceRange, inner: SourceRange) -> bool {

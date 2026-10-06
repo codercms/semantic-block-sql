@@ -1860,3 +1860,19 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Commit the reviewed backend baseline before traversal implementation.
 - [ ] Complete canonical AST traversal, source-index and owner-geometry batches
   before implementing the separate JOIN-width behavior change.
+
+## Canonical complete AST traversal
+
+- [x] Observe red cases for aliases in ARRAY and unsupported aggregate FILTER
+  children before replacing traversal.
+- [x] Generate one complete child table from the pinned protobuf API; expose
+  deterministic borrowed DFS with exact parents/depths and an explicit stack.
+- [x] Route validation, query/function/array collection, type aliases and source
+  anchors through it; remove incomplete convenience walks and datatype adapters.
+- [x] Cover traversal order, expression/statement child families, parsed nesting
+  and a 512-level synthetic tree; retain backend decoding limits.
+- [x] Pass 505 tests across 65 targets and all engineering checks; verify exact
+  schema regeneration and preserve required upstream attribution/license.
+- [x] Review capability boundaries, alias uniqueness, VALUES provenance,
+  comments/protected tokens, semantics, idempotence, diagnostics, atomicity,
+  dependencies and dead code; commit before source-coordinate work.
