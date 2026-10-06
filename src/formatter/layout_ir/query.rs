@@ -271,10 +271,10 @@ fn lexical_query_block(
     let end = statement_query_suffix(tokens, depths, statement, select, base_depth)
         .map_or(structural_end, |suffix| structural_end.min(suffix));
     let list_start = select_list_start(tokens, structure, select, end);
-    let wrapper = (statement.range.start..select)
-        .rev()
+    let wrapper = structure
+        .ancestor_parentheses(select)
         .find(|open| {
-            tokens[*open].kind == Token::Ascii40
+            *open >= statement.range.start
                 && structure
                     .matching_parenthesis(*open)
                     .is_some_and(|close| close >= end && close < statement.range.end)
@@ -402,21 +402,18 @@ fn predicate_subquery_nesting(
     structure: &TokenStructure,
     select: usize,
 ) -> usize {
-    (0..select)
+    structure
+        .ancestor_parentheses(select)
         .filter(|open| {
-            tokens[*open].kind == Token::Ascii40
-                && structure
-                    .matching_parenthesis(*open)
-                    .is_some_and(|close| close > select)
-                && (0..*open)
-                    .rev()
-                    .find(|previous| !tokens[*previous].is_comment())
-                    .is_some_and(|previous| {
-                        matches!(
-                            tokens[previous].kind,
-                            Token::InP | Token::Exists | Token::Any | Token::All
-                        )
-                    })
+            (0..*open)
+                .rev()
+                .find(|previous| !tokens[*previous].is_comment())
+                .is_some_and(|previous| {
+                    matches!(
+                        tokens[previous].kind,
+                        Token::InP | Token::Exists | Token::Any | Token::All
+                    )
+                })
         })
         .count()
 }

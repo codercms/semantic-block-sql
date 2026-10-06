@@ -1,8 +1,8 @@
 # Traversal and coordinate architecture review
 
-Status: implementation in progress; JOIN-width behavior change is deferred.
+Status: foundation implemented and reviewed; JOIN-width behavior change is deferred.
 
-## Findings
+## Original findings
 
 The parser/token/ownership/layout/safety separation remains useful. The repeated
 regressions reveal inconsistencies within those boundaries:
@@ -58,11 +58,37 @@ are not reinterpreted by layout consumers.
   neighbors with synthetic fixtures.
 - [x] Centralize text line/column indexing and coordinate calculations used by
   diagnostics; cover UTF-8, CRLF, statement prefixes and nested routine adapters.
-- [ ] Extract shared layout owner/line geometry operations, migrate duplicate
+- [x] Extract shared layout owner/line geometry operations, migrate duplicate
   calculations and verify contextual indentation through nested combinations.
-- [ ] Re-audit traversal callers and remove obsolete helpers. Run full gates,
+- [x] Re-audit traversal callers and remove obsolete helpers. Run full gates,
   private-copy audits, and update architecture/extension documentation.
 
 Every completed batch is committed separately. Formatting behavior stays
 covered by equivalence, comment/literal preservation, idempotence and atomicity
 gates. The JOIN-width expansion policy is a subsequent behavior batch.
+
+## Implemented geometry contract and limits
+
+`semantic_block::geometry` owns the layout plan, ordered break positions,
+rendered compact widths and planned-line prefix measurement. Predicate opener
+and CASE result decisions share this measurement. Relative fallback indentation
+uses signed offsets; nested outward/inward rebasing retains the source coordinate
+rather than discarding a negative adjustment. Delimiter ancestors are indexed
+once and reused for query wrappers and predicate-subquery nesting; sibling
+parentheses no longer participate in ancestry discovery.
+
+The backend AST walk is complete for the pinned schema, not a promise of support
+for every PostgreSQL construct. Parser decoding still has its own recursion limit.
+Display policies remain typed owner-specific rules. The remaining long JOIN ON
+predicate decision still needs to include its entire JOIN prefix in the expansion
+budget; that behavior is deliberately deferred until after this foundation review.
+
+
+Final foundation validation: 513 tests across 65 targets, one existing ignored;
+formatting, locked Clippy, Rustdoc, schema reproduction and diff hygiene pass
+on Rust 1.88. Both private SQL copies pass fmt/check and byte-identical repeat
+formatting in both opener modes without unsupported/skipped/errors. Original
+hashes are unchanged. No private SQL or domain-specific fixture is tracked.
+Self-review covers semantic preservation, typed ownership/protected spans,
+idempotence, comments/authored groups, diagnostics/source frames, atomicity,
+dependency necessity and removal of obsolete traversal/coordinate helpers.

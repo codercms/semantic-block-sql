@@ -259,3 +259,11 @@ Every new syntax family must distinguish valid-but-unowned syntax from malformed
 ## Extending PL/pgSQL after the IR rewrite
 
 A new procedural feature must first be mapped from its exact `parse_plpgsql` node name into a typed parser category, then classified into a source-span `BodyNodeKind`, and finally rendered by the procedural layout/leaf layers. Include compact and multiline fixtures, nested control flow, comment/protected-literal cases, parser-alignment tests, equivalence, idempotence, and an unsupported sibling. Do not reintroduce line-prefix syntax discovery.
+
+
+For displayed prefix measurements, reuse `LayoutPlan::line_width_through` and
+`geometry::compact_width`; do not reconstruct unordered predecessor scans.
+Use `relative_indent` for rebased lexical fallback coordinates and
+`rebase_indents` for relocating planned children. For lexical ancestry use
+`TokenStructure::ancestor_parentheses`, not a statement-wide opener scan. These
+helpers do not override typed ownership or the shared group decision policy.

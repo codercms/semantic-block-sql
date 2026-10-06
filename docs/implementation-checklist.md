@@ -1858,7 +1858,7 @@ under Features, Fixes and Chores; published releases remain unchanged.
   Rust 1.88; review source metadata, unsupported boundaries, protected tokens,
   semantics, idempotence, diagnostics, atomicity and unchanged dependency surface.
 - [x] Commit the reviewed backend baseline before traversal implementation.
-- [ ] Complete canonical AST traversal, source-index and owner-geometry batches
+- [x] Complete canonical AST traversal, source-index and owner-geometry batches
   before implementing the separate JOIN-width behavior change.
 
 ## Canonical complete AST traversal
@@ -1889,3 +1889,22 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Pass 509 tests across 65 targets and all engineering gates; review source
   frames, semantic/protected-token preservation, idempotence, diagnostics,
   atomicity, dependencies and dead helpers before committing this batch.
+
+
+## Shared layout geometry and architecture review
+
+- [x] Reproduce lost negative fallback offsets with an outward/inward rebase test.
+- [x] Extract one layout plan/width module; use ordered planned-line lookups and
+  one owner-prefix measurement for predicate openers and CASE results.
+- [x] Keep signed fallback offsets through nested rebasing; verify direct versus
+  composed movement, unchanged siblings and displayed-prefix widths.
+- [x] Index parenthesis ancestors once and reuse them for query ownership and
+  predicate nesting; verify siblings, closing tokens and array nesting.
+- [x] Pass 513 tests across 65 targets (one ignored), all engineering gates and
+  schema reproduction on Rust 1.88; audit both private copies in both modes with
+  fmt/check and byte-identical repeats, preserving original hashes.
+- [x] Rebuild/install matching 0.4.0 PATH binary and synchronize PR documentation.
+- [x] Review semantic/protected-token preservation, architecture boundaries,
+  idempotence, authored groups, diagnostics, atomicity, dependency necessity and
+  obsolete helpers; commit the completed foundation batch.
+- [ ] Implement the separate JOIN ON full-prefix expansion regression afterward.

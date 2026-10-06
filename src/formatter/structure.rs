@@ -13,6 +13,7 @@ use super::tokens::SqlToken;
 pub(super) struct TokenStructure {
     depths: Vec<usize>,
     parenthesis_pairs: HashMap<usize, usize>,
+    parenthesis_parents: Vec<Option<usize>>,
 }
 
 impl TokenStructure {
@@ -20,6 +21,7 @@ impl TokenStructure {
         let mut depths = Vec::with_capacity(tokens.len());
         let mut parenthesis_pairs = HashMap::new();
         let mut stack = Vec::new();
+        let mut parenthesis_parents = Vec::with_capacity(tokens.len());
         let mut depth = 0usize;
 
         for (index, token) in tokens.iter().enumerate() {
@@ -27,17 +29,19 @@ impl TokenStructure {
                 depth = depth.saturating_sub(1);
             }
             depths.push(depth);
+            // A closing parenthesis belongs to its enclosing owner, not itself.
+            if token.kind == Token::Ascii41 {
+                if let Some(open) = stack.pop() {
+                    parenthesis_pairs.insert(open, index);
+                }
+            }
+            parenthesis_parents.push(stack.last().copied());
             match token.kind {
                 Token::Ascii40 => {
                     stack.push(index);
                     depth += 1;
                 }
                 Token::Ascii91 => depth += 1,
-                Token::Ascii41 => {
-                    if let Some(open) = stack.pop() {
-                        parenthesis_pairs.insert(open, index);
-                    }
-                }
                 _ => {}
             }
         }
@@ -45,6 +49,7 @@ impl TokenStructure {
         Self {
             depths,
             parenthesis_pairs,
+            parenthesis_parents,
         }
     }
 
@@ -63,12 +68,39 @@ impl TokenStructure {
     pub fn matching_parenthesis(&self, open: usize) -> Option<usize> {
         self.parenthesis_pairs.get(&open).copied()
     }
+
+    /// Enclosing parentheses in nearest-owner-first order; siblings are excluded.
+    pub fn ancestor_parentheses(&self, index: usize) -> impl Iterator<Item = usize> + '_ {
+        std::iter::successors(self.parenthesis_parents[index], |&open| {
+            self.parenthesis_parents[open]
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::formatter::tokens::tokenize;
+
+    #[test]
+    fn ancestors_exclude_siblings_and_closing_delimiters() {
+        let tokens = tokenize("SELECT f(1), g((ARRAY[2]), 3);").unwrap();
+        let structure = TokenStructure::new(&tokens);
+        for index in 0..tokens.len() {
+            let expected = (0..index)
+                .rev()
+                .filter(|&open| {
+                    structure
+                        .matching_parenthesis(open)
+                        .is_some_and(|close| close > index)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                structure.ancestor_parentheses(index).collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
 
     #[test]
     fn indexes_depths_and_matching_parentheses_once() {

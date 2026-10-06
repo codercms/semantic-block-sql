@@ -17,7 +17,10 @@ use super::{
 
 mod ddl;
 mod expressions;
+mod geometry;
 mod groups;
+
+use geometry::{LayoutPlan, compact_width};
 mod lists;
 mod render;
 mod statements;
@@ -43,101 +46,6 @@ use statements::{
     plan_delete_statements, plan_insert_statements, plan_merge_statements, plan_relation_source,
     plan_update_statements, plan_utility_statements,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Break {
-    lines: usize,
-    indent: usize,
-}
-
-#[derive(Debug)]
-struct LayoutPlan {
-    before: HashMap<usize, Break>,
-    token_indents: Vec<Option<usize>>,
-    indent_offsets: Vec<usize>,
-}
-
-impl LayoutPlan {
-    fn new(token_count: usize) -> Self {
-        Self {
-            before: HashMap::new(),
-            token_indents: vec![None; token_count],
-            indent_offsets: vec![0; token_count],
-        }
-    }
-
-    fn break_before(&mut self, index: usize, lines: usize, indent: usize) {
-        if index >= self.token_indents.len() {
-            return;
-        }
-        let candidate = Break {
-            lines: lines.max(1),
-            indent,
-        };
-        self.before
-            .entry(index)
-            .and_modify(|current| {
-                if candidate.lines >= current.lines {
-                    *current = candidate;
-                }
-            })
-            .or_insert(candidate);
-    }
-
-    fn set_indent(&mut self, range: std::ops::Range<usize>, indent: usize) {
-        for slot in &mut self.token_indents[range] {
-            *slot = Some(indent);
-        }
-    }
-
-    fn set_fallback_indent(
-        &mut self,
-        range: std::ops::Range<usize>,
-        depths: &[usize],
-        base_depth: usize,
-        indent: usize,
-    ) {
-        for index in range {
-            self.token_indents[index]
-                .get_or_insert(indent + depths[index].saturating_sub(base_depth));
-        }
-    }
-
-    fn indent_for(&self, index: usize, fallback: usize) -> usize {
-        self.token_indents[index].unwrap_or(fallback)
-    }
-
-    fn line_indent_for(&self, index: usize, fallback: usize) -> usize {
-        self.before
-            .get(&index)
-            .map(|line_break| line_break.indent)
-            .unwrap_or_else(|| self.indent_for(index, fallback))
-    }
-
-    fn rebase_indents(&mut self, range: std::ops::Range<usize>, current: usize, desired: usize) {
-        if current == desired {
-            return;
-        }
-        let adjust = |indent: usize| {
-            if desired > current {
-                indent + desired - current
-            } else {
-                indent.saturating_sub(current - desired)
-            }
-        };
-        for (index, line_break) in &mut self.before {
-            if range.contains(index) {
-                line_break.indent = adjust(line_break.indent);
-            }
-        }
-        for indent in self.token_indents[range.clone()].iter_mut().flatten() {
-            *indent = adjust(*indent);
-        }
-        for offset in &mut self.indent_offsets[range] {
-            *offset = adjust(*offset);
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 struct BooleanRange {
@@ -1216,22 +1124,15 @@ fn plan_booleans(
             || {
                 plan.line_indent_for(
                     range.start,
-                    range.root_indent + plan.indent_offsets[range.start],
+                    plan.relative_indent(range.start, range.root_indent),
                 )
-                .max(range.root_indent + plan.indent_offsets[range.start])
+                .max(plan.relative_indent(range.start, range.root_indent))
             },
             |introducer| plan.line_indent_for(introducer, range.root_indent.saturating_sub(1)) + 1,
         );
         let joined_opener = options.inline_predicate_group_opener
             && range.introducer.is_some_and(|introducer| {
                 let last = (range.start..range.end).rfind(|index| !tokens[*index].is_comment());
-                let line_start = plan
-                    .before
-                    .keys()
-                    .copied()
-                    .filter(|index| *index <= introducer)
-                    .max()
-                    .unwrap_or(0);
                 tokens[range.start].kind == Token::Ascii40
                     && parens.get(&range.start).copied() == last
                     && tokens[range.start].line_breaks_before <= 1
@@ -1239,10 +1140,13 @@ fn plan_booleans(
                         .before
                         .get(&range.start)
                         .is_none_or(|line| line.lines <= 1)
-                    && plan.line_indent_for(line_start, root_indent.saturating_sub(1))
-                        * INDENT_WIDTH
-                        + compact_width(tokens, line_start, range.start + 1, options)
-                        <= options.soft_line_width
+                    && plan.line_width_through(
+                        tokens,
+                        introducer,
+                        range.start + 1,
+                        root_indent.saturating_sub(1),
+                        options,
+                    ) <= options.soft_line_width
             });
         if joined_opener {
             plan.before.remove(&range.start);
@@ -1396,12 +1300,7 @@ fn plan_case_result_boundaries(
         .iter()
         .filter(|range| range.kind == ExpressionOwnerKind::CaseResult)
     {
-        let Some((&line_start, line_break)) = plan
-            .before
-            .iter()
-            .filter(|(index, _)| **index <= result.start)
-            .max_by_key(|(index, _)| **index)
-        else {
+        let Some((&line_start, line_break)) = plan.before.range(..=result.start).next_back() else {
             continue;
         };
         if line_start == result.start {
@@ -1415,7 +1314,7 @@ fn plan_case_result_boundaries(
             .filter(|index| result.start < *index && *index < result.end)
             .min()
             .unwrap_or(result.end);
-        if indent * INDENT_WIDTH + compact_width(tokens, line_start, line_end, options)
+        if plan.line_width_through(tokens, result.start, line_end, indent, options)
             > options.hard_line_width
         {
             plan.break_before(result.start, 1, indent + 1);
@@ -1533,24 +1432,6 @@ fn range_is_unavoidably_over_hard(
         previous = Some(index);
     }
     false
-}
-
-fn compact_width(
-    tokens: &[SqlToken<'_>],
-    start: usize,
-    end: usize,
-    options: &FormatOptions,
-) -> usize {
-    let mut width = 0usize;
-    let mut previous = None;
-    for index in start..end {
-        if needs_space(tokens, previous, index) {
-            width += 1;
-        }
-        width += render_token(tokens, index, options).chars().count();
-        previous = Some(index);
-    }
-    width
 }
 
 struct Writer {

@@ -843,3 +843,16 @@ Comma-separated sources add their list level. Direct wrapper tokens, including
 comments, receive that contextual indentation; nested query/expression owners
 remain separate. Raw scanner depth does not replace an expanded query's display
 indentation.
+
+
+### Shared layout geometry
+
+`semantic_block/geometry.rs` owns `LayoutPlan`, compact rendered-token widths,
+planned-line prefix widths and signed relative indentation offsets. Planned
+breaks use an ordered map; predecessor queries have one deterministic source of
+truth. Owner planners choose grouping through `LayoutGroup::decide`; geometry
+measures an already-owned span without deciding SQL grammar or expansion policy.
+Nested rebasing updates planned breaks, contextual token indentation and signed
+fallback offsets together. TokenStructure additionally exposes nearest-first
+parenthesis ancestors, reused by query wrappers and predicate-subquery nesting.
+AST depth, lexical depth, display indentation and text coordinates stay separate.
