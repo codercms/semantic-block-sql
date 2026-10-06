@@ -1,4 +1,6 @@
 use super::FormatDiagnostic;
+use super::ast::{DepthFirst, walk_complete_tree};
+use pg_query::NodeRef;
 use pg_query::protobuf::a_const::Val as AConstValue;
 use pg_query::protobuf::node::Node as NodeEnum;
 use pg_query::protobuf::{
@@ -10,7 +12,6 @@ use pg_query::protobuf::{
     SelectStmt, SetOperation, TransactionStmt, TransactionStmtKind, TruncateStmt, UpdateStmt,
     ViewCheckOption, ViewStmt,
 };
-use pg_query::{Context, NodeRef};
 pub(super) mod equivalence;
 
 pub use equivalence::validate_equivalent;
@@ -30,7 +31,7 @@ use super::ownership::{
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
 /// backend. A dependency upgrade must update this constant deliberately after
 /// the support classifier and fixtures have been reviewed against the new AST.
-const REVIEWED_POSTGRESQL_VERSION: i32 = 170004;
+const REVIEWED_POSTGRESQL_VERSION: i32 = 170007;
 
 pub(super) fn parse_supported_postgresql(
     source: &str,
@@ -113,116 +114,8 @@ pub(super) fn parse_supported_postgresql(
     ))
 }
 
-/// Walk every reviewed PostgreSQL child field that semblock depends on.
-///
-/// `pg_query::NodeEnum::nodes()` deliberately omits several expression-bearing
-/// protobuf fields. Query ownership and unsupported-syntax validation must use
-/// the same completed traversal contract; otherwise a nested SELECT can be
-/// discovered in a field whose unsupported expression nodes were never checked.
-fn walk_complete_tree<F>(root: &NodeEnum, visitor: &mut F) -> Result<(), &'static str>
-where
-    F: for<'a> FnMut(NodeRef<'a>, Context) -> Result<(), &'static str>,
-{
-    for (node, _, context, _) in root.nodes() {
-        visitor(node, context)?;
-        walk_omitted_children(node, visitor)?;
-    }
-    Ok(())
-}
-
-fn walk_omitted_children<F>(node: NodeRef<'_>, visitor: &mut F) -> Result<(), &'static str>
-where
-    F: for<'a> FnMut(NodeRef<'a>, Context) -> Result<(), &'static str>,
-{
-    match node {
-        NodeRef::CreateStmt(statement) => walk_nodes(&statement.table_elts, visitor)?,
-        NodeRef::AlterTableStmt(statement) => walk_nodes(&statement.cmds, visitor)?,
-        NodeRef::AlterTableCmd(action) => walk_optional_node(action.def.as_deref(), visitor)?,
-        NodeRef::ColumnDef(column) => {
-            walk_optional_node(column.raw_default.as_deref(), visitor)?;
-            walk_nodes(&column.constraints, visitor)?;
-        }
-        NodeRef::CreateDomainStmt(statement) => walk_nodes(&statement.constraints, visitor)?,
-        NodeRef::CreateTrigStmt(statement) => {
-            walk_optional_node(statement.when_clause.as_deref(), visitor)?
-        }
-        NodeRef::CreatePolicyStmt(statement) => {
-            walk_optional_node(statement.qual.as_deref(), visitor)?;
-            walk_optional_node(statement.with_check.as_deref(), visitor)?;
-        }
-        NodeRef::AlterPolicyStmt(statement) => {
-            walk_optional_node(statement.qual.as_deref(), visitor)?;
-            walk_optional_node(statement.with_check.as_deref(), visitor)?;
-        }
-        NodeRef::AArrayExpr(array) => walk_nodes(&array.elements, visitor)?,
-        NodeRef::Constraint(constraint) => {
-            walk_optional_node(constraint.raw_expr.as_deref(), visitor)?;
-            walk_optional_node(constraint.where_clause.as_deref(), visitor)?;
-            walk_nodes(&constraint.exclusions, visitor)?;
-        }
-        NodeRef::SelectStmt(select) => {
-            walk_nodes(&select.distinct_clause, visitor)?;
-            walk_nodes(&select.window_clause, visitor)?;
-            walk_nodes(&select.values_lists, visitor)?;
-            walk_optional_node(select.limit_offset.as_deref(), visitor)?;
-            walk_optional_node(select.limit_count.as_deref(), visitor)?;
-        }
-        NodeRef::InsertStmt(insert) => walk_nodes(&insert.returning_list, visitor)?,
-        NodeRef::UpdateStmt(update) => walk_nodes(&update.returning_list, visitor)?,
-        NodeRef::DeleteStmt(delete) => walk_nodes(&delete.returning_list, visitor)?,
-        NodeRef::MergeStmt(merge) => walk_nodes(&merge.returning_list, visitor)?,
-        NodeRef::MergeWhenClause(branch) => {
-            walk_optional_node(branch.condition.as_deref(), visitor)?;
-            walk_nodes(&branch.target_list, visitor)?;
-            walk_nodes(&branch.values, visitor)?;
-        }
-        NodeRef::OnConflictClause(conflict) => {
-            if let Some(infer) = conflict.infer.as_deref() {
-                walk_nodes(&infer.index_elems, visitor)?;
-                walk_optional_node(infer.where_clause.as_deref(), visitor)?;
-            }
-            walk_nodes(&conflict.target_list, visitor)?;
-            walk_optional_node(conflict.where_clause.as_deref(), visitor)?;
-        }
-        NodeRef::WindowDef(window) => {
-            walk_nodes(&window.partition_clause, visitor)?;
-            walk_nodes(&window.order_clause, visitor)?;
-            walk_optional_node(window.start_offset.as_deref(), visitor)?;
-            walk_optional_node(window.end_offset.as_deref(), visitor)?;
-        }
-        NodeRef::RuleStmt(rule) => {
-            walk_optional_node(rule.where_clause.as_deref(), visitor)?;
-            walk_nodes(&rule.actions, visitor)?;
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn walk_nodes<F>(nodes: &[Node], visitor: &mut F) -> Result<(), &'static str>
-where
-    F: for<'a> FnMut(NodeRef<'a>, Context) -> Result<(), &'static str>,
-{
-    for node in nodes {
-        walk_optional_node(Some(node), visitor)?;
-    }
-    Ok(())
-}
-
-fn walk_optional_node<F>(node: Option<&Node>, visitor: &mut F) -> Result<(), &'static str>
-where
-    F: for<'a> FnMut(NodeRef<'a>, Context) -> Result<(), &'static str>,
-{
-    let Some(root) = node.and_then(|node| node.node.as_ref()) else {
-        return Ok(());
-    };
-    walk_complete_tree(root, visitor)
-}
-
 fn validate_complete_tree(root: &NodeEnum) -> Result<(), &'static str> {
-    walk_complete_tree(root, &mut |node, context| {
-        validate_nested_node(node, context)
-    })
+    walk_complete_tree(root, &mut |node| validate_nested_node(node))
 }
 
 /// Retain parser-validated ownership for every lexical SELECT that the ordinary
@@ -237,7 +130,8 @@ fn collect_query_specs(
     function_calls: &mut Vec<FunctionCallSpec>,
     arrays: &mut Vec<ArrayListSpec>,
 ) -> Result<(), &'static str> {
-    walk_complete_tree(root, &mut |node, _| {
+    DepthFirst::new(root).try_for_each(|visit| {
+        let node = visit.node;
         if let NodeRef::AArrayExpr(array) = node {
             arrays.push(ArrayListSpec {
                 location: usize::try_from(array.location)
@@ -291,11 +185,8 @@ fn collect_query_specs(
         if let NodeRef::SelectStmt(select) = node {
             push_query_spec(select, statement_index, queries)?;
         }
-        if let NodeRef::RangeSubselect(source) = node
-            && let Some(NodeEnum::SelectStmt(query)) = source
-                .subquery
-                .as_deref()
-                .and_then(|node| node.node.as_ref())
+        if let NodeRef::SelectStmt(query) = node
+            && matches!(visit.parent, Some(NodeRef::RangeSubselect(_)))
             && is_values_select_shape(query)
         {
             validate_values_select(query)?;
@@ -1885,11 +1776,11 @@ fn column_check_constraint_count(column: &ColumnDef) -> usize {
 
 fn validate_ddl_expression(expression: &Node) -> Result<(), &'static str> {
     let root = expression.node.as_ref().ok_or("empty DDL expression")?;
-    walk_complete_tree(root, &mut |node, context| {
+    walk_complete_tree(root, &mut |node| {
         if matches!(node, NodeRef::SubLink(_)) {
             return Err("subquery in DDL expression");
         }
-        validate_nested_node(node, context)
+        validate_nested_node(node)
     })
 }
 
@@ -2703,7 +2594,7 @@ fn validate_select_fields(select: &SelectStmt, allow_values: bool) -> Result<(),
     Ok(())
 }
 
-fn validate_nested_node(node: NodeRef<'_>, _context: Context) -> Result<(), &'static str> {
+fn validate_nested_node(node: NodeRef<'_>) -> Result<(), &'static str> {
     match node {
         NodeRef::SelectStmt(select) => validate_nested_select(select),
         NodeRef::JsonObjectConstructor(constructor) => {
@@ -2792,7 +2683,7 @@ fn is_values_select_shape(select: &SelectStmt) -> bool {
 fn unsupported_values_range(source: &str, raw: &RawStmt, feature: &str) -> Option<(usize, usize)> {
     let root = raw.stmt.as_deref()?.node.as_ref()?;
     let mut anchors = Vec::new();
-    walk_complete_tree(root, &mut |node, _| {
+    walk_complete_tree(root, &mut |node| {
         if let NodeRef::SelectStmt(query) = node
             && !query.values_lists.is_empty()
             && validate_select(query, false).err() == Some(feature)
@@ -2832,10 +2723,9 @@ fn unsupported_values_range(source: &str, raw: &RawStmt, feature: &str) -> Optio
 }
 
 fn first_expression_location(expression: &NodeEnum) -> Option<usize> {
-    expression
-        .nodes()
-        .into_iter()
-        .filter_map(|(node, _, _, _)| {
+    DepthFirst::new(expression)
+        .filter_map(|visit| {
+            let node = visit.node;
             let location = match node {
                 NodeRef::AConst(value) => value.location,
                 NodeRef::ColumnRef(value) => value.location,

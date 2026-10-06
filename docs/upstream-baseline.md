@@ -23,6 +23,25 @@ actually introduced.
 The versions above were verified from upstream manifests and current commits,
 not inferred from the original handoff.
 
+## Reviewed backend update (2026-10-06)
+
+The current backend is exactly pinned `pg_query 6.2.1`, upstream source commit
+[`c780e49`](https://github.com/pganalyze/pg_query.rs/commit/c780e49d095c7c97def832e45ada3f559d5b42cf),
+MIT, edition 2021, with PostgreSQL 17.7 (`170007`). The crate declares no MSRV;
+the project validates it on Rust 1.88. The historical table above records the
+original selection rather than the current lockfile.
+
+The protobuf node enum and NodeRef variants are unchanged. New AST metadata is
+`DefElem.arg_location`, `NotifyStmt.payload_location` and subscription
+`conninfo_location`; summary-result messages are new but are not used by this
+formatter. SQL and procedural equivalence share the reviewed location remover.
+The convenience walker now uses VecDeque but retains its incomplete child-field
+contract; it cannot serve as the formatter's complete AST traversal.
+
+The update includes the upstream normalization security fix; semblock uses
+parse/scan/parse_plpgsql and does not call the normalization or deparser APIs.
+See the [upstream advisory](https://github.com/pganalyze/libpg_query/security/advisories/GHSA-6ggm-xmc9-8ffg).
+
 ## CLI MVP support crates
 
 | Crate | Selected version | License | Notes |

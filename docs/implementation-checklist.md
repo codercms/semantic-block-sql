@@ -11,7 +11,7 @@
 - [x] Update coverage, architecture, README/guide as needed; run full gates.
 - [x] Re-audit private copies, install the fresh binary, and update the PR.
 
-Status: **0.3.0 migration coverage and JSON key/value layout complete**
+Status: **0.3.1 nested relation indentation and temporal type casing fixes complete**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
@@ -1751,3 +1751,171 @@ Self-review checked typed outcomes, canonical metadata retention, declaration
 source frames, source/output ranges, comments/groups, safety/idempotence and
 strict atomicity. Public behavior, dependency surface and reviewed syntax remain
 unchanged. Existing fixtures validate behavior preservation for this refactor.
+
+## Nested relation indentation regression
+
+- [x] Reproduce wrapped JOIN indentation escaping its expanded query owner with
+  invented scalar/view/LATERAL fixtures, without private SQL or domains.
+- [x] Add red neighboring cases for comment termination and comma-list wrappers;
+  cover nested wrapper levels using exact output, equivalence and idempotence.
+- [x] Derive relation indentation from the contextual query clause and retain
+  relative typed JOIN/wrapper depths; indent direct wrapper tokens only.
+- [x] Pass all 487 tests across 60 targets and all five engineering gates;
+  audit current/original private copies with zero unsupported/skipped/errors,
+  clean check and byte-identical repeated formatting.
+- [x] Review typed relation ownership, contextual/relative indentation, comments,
+  nested query/expression boundaries, semantics, idempotence, diagnostics, atomic
+  rewriting, dependencies and dead code. No parser or dependency was added.
+- [x] Prepare the coherent batch and follow-up PR; install the fresh build on
+  PATH with a matching optimized release hash.
+
+0.3.1 version batch: application and lockfile versions are bumped together;
+the optimized PATH executable reports 0.3.1 and matches the build hash. All 487
+tests and required engineering gates pass. PR #50 includes the version bump;
+the published 0.3.0 release is unchanged.
+
+## Temporal type suffix casing
+
+- [x] Reproduce uppercase WITH inside a lowercase temporal type with a red
+  declaration/cast fixture; cover precision, SQL/PL routines and comments.
+- [x] Recognize the bounded time-zone suffix in the existing contextual
+  type-word classifier; retain CTE WITH and AT TIME ZONE keyword casing.
+- [x] Pass focused casing/lexical tests and preserve NOW() whitelist behavior.
+- [x] Pass all 490 tests across 61 targets and five engineering gates; private
+  copy fmt/check and byte-identical repeat audit have no unsupported/skipped/errors.
+- [x] Review bounded contextual casing, quoted/protected names, grammar/type
+  distinctions, comments, semantics, idempotence, diagnostics, atomicity,
+  module boundaries and unchanged dependencies; update PR #50.
+- [x] Rebuild/install optimized 0.3.1 on PATH and verify version, hash and
+  installed CLI casing smoke test. Correct older goldens to core section 7.
+
+## Nested JOIN predicate indentation
+
+- [x] Add a failing synthetic regression for complete Boolean wrapper chains.
+- [x] Bound JOIN predicates within their typed relation owner and expand the
+  enclosing Boolean wrappers through the existing planner.
+- [x] Cover scalar subqueries, NOT MATERIALIZED CTEs and INSERT sources.
+- [x] Pass 491 tests across 62 targets and all engineering gates; private-copy
+  fmt/check/repeat passes with no unsupported/skipped/errors. Install optimized
+  0.3.1 on PATH and verify its hash and installed CLI behavior.
+- [x] Review semantics, ownership, comments, groups, diagnostics, idempotence,
+  atomicity, dependencies and dead code; commit and update PR #50.
+
+## Scalar-query comparison wrapper follow-up
+
+- [x] Extend the red JOIN/CTE/INSERT fixture to require visible comparison
+  nesting around its expanded scalar query; add comment and compact-sibling checks.
+- [x] Reuse the existing Boolean planner's expanded-query signal to expand the
+  containing comparison wrapper, preserving syntax and comment attachment.
+- [x] Pass 492 tests across 62 targets, formatting, Clippy, Rustdoc and diff
+  hygiene; private-copy fmt/check/repeat passes without unsupported/skipped/errors.
+- [x] Install optimized 0.3.1 on PATH with matching hash; review ownership,
+  comments, compact siblings, semantics, idempotence, diagnostics, atomicity,
+  dependencies and dead code; scope review, batch commit and PR update.
+
+## Contextual nested WHERE indentation
+
+- [x] Reproduce the extra predicate level with synthetic sibling EXISTS
+  subqueries in a CTE and SQL-standard routine body.
+- [x] Carry typed predicate introducers into Boolean ranges and derive their
+  final indentation from the displayed clause owner.
+- [x] Pass 493 tests across 62 targets and all engineering checks; private-copy
+  fmt/check/repeat passes without unsupported/skipped/errors. Verify the reported
+  WHERE/condition indentation is 28/32 spaces and install optimized 0.3.1 on PATH.
+- [x] Review typed ownership, semantic/comment preservation, authored groups,
+  nested query shifts, idempotence, diagnostics, atomicity, dependencies and dead
+  code; scope review, batch commit and PR update.
+
+## Configurable predicate-group opener preference
+
+- [x] Add a red synthetic matrix across SELECT/DML/conflict/index predicate owners.
+- [x] Join only the complete outer group's opener through the shared Boolean
+  planner; preserve comment/blank boundaries and soft-width header limits.
+- [x] Default-enable `inline_predicate_group_opener` in shared FormatOptions and
+  strict layout config; cover disabling, round-trip and CLI stdin behavior.
+- [x] Record the authored-break exception in the core/design and synchronize
+  user guide, README config and fixture-backed coverage.
+- [x] Pass 498 tests across 63 targets and all engineering checks; private-copy
+  fmt/check/repeat passes in both modes without unsupported/skipped/errors.
+- [x] Install optimized 0.4.0 on PATH with matching hash; reuse signed indentation
+  rebasing for nested queries and remove the unused positive-only helper.
+- [x] Review typed ownership, configured/disabled behavior, comments, authored
+  groups, widths, semantics, idempotence, diagnostics, atomicity, dependencies
+  and dead code; scope review, batch commit and PR update.
+
+0.4.0 release-preparation batch: the application and lockfile versions are bumped
+together for the configurable predicate-group layout feature. PR #50 is described
+under Features, Fixes and Chores; published releases remain unchanged.
+
+## Traversal architecture review and backend baseline
+
+- [x] Trace independent AST walks, text source frames, token depth and layout
+  indentation/width consumers; record the staged review and acceptance criteria.
+- [x] Review pg_query 6.2.1 schema/NodeRef differences and pin the backend.
+- [x] Observe the parser-version guard failing before review and a red fixture
+  for new PostgreSQL 17.7 source metadata; share SQL/procedural location stripping.
+- [x] Pass all 499 tests across 64 targets and full backend-upgrade gates on
+  Rust 1.88; review source metadata, unsupported boundaries, protected tokens,
+  semantics, idempotence, diagnostics, atomicity and unchanged dependency surface.
+- [x] Commit the reviewed backend baseline before traversal implementation.
+- [x] Complete canonical AST traversal, source-index and owner-geometry batches
+  before implementing the separate JOIN-width behavior change.
+
+## Canonical complete AST traversal
+
+- [x] Observe red cases for aliases in ARRAY and unsupported aggregate FILTER
+  children before replacing traversal.
+- [x] Generate one complete child table from the pinned protobuf API; expose
+  deterministic borrowed DFS with exact parents/depths and an explicit stack.
+- [x] Route validation, query/function/array collection, type aliases and source
+  anchors through it; remove incomplete convenience walks and datatype adapters.
+- [x] Cover traversal order, expression/statement child families, parsed nesting
+  and a 512-level synthetic tree; retain backend decoding limits.
+- [x] Pass 505 tests across 65 targets and all engineering checks; verify exact
+  schema regeneration and preserve required upstream attribution/license.
+- [x] Review capability boundaries, alias uniqueness, VALUES provenance,
+  comments/protected tokens, semantics, idempotence, diagnostics, atomicity,
+  dependencies and dead code; commit before source-coordinate work.
+
+## Shared immutable text coordinates
+
+- [x] Observe the red LF/CRLF width-boundary case before migrating consumers.
+- [x] Introduce SourceIndex for physical lines, Unicode columns, byte ranges and
+  content widths; move SourceRange out of the facade while preserving exports.
+- [x] Migrate CLI diagnostics, directive spans, warning ranges, protected token
+  line ordinals, document/COPY offsets and width validation to the shared index.
+- [x] Verify UTF-8 offsets, CRLF/blank/EOF ranges, distinct input/output frames,
+  routine warning mapping, strict mode, protected leaves and repeated fmt/check.
+- [x] Pass 509 tests across 65 targets and all engineering gates; review source
+  frames, semantic/protected-token preservation, idempotence, diagnostics,
+  atomicity, dependencies and dead helpers before committing this batch.
+
+
+## Shared layout geometry and architecture review
+
+- [x] Reproduce lost negative fallback offsets with an outward/inward rebase test.
+- [x] Extract one layout plan/width module; use ordered planned-line lookups and
+  one owner-prefix measurement for predicate openers and CASE results.
+- [x] Keep signed fallback offsets through nested rebasing; verify direct versus
+  composed movement, unchanged siblings and displayed-prefix widths.
+- [x] Index parenthesis ancestors once and reuse them for query ownership and
+  predicate nesting; verify siblings, closing tokens and array nesting.
+- [x] Pass 513 tests across 65 targets (one ignored), all engineering gates and
+  schema reproduction on Rust 1.88; audit both private copies in both modes with
+  fmt/check and byte-identical repeats, preserving original hashes.
+- [x] Rebuild/install matching 0.4.0 PATH binary and synchronize PR documentation.
+- [x] Review semantic/protected-token preservation, architecture boundaries,
+  idempotence, authored groups, diagnostics, atomicity, dependency necessity and
+  obsolete helpers; commit the completed foundation batch.
+- [x] Implement the separate JOIN ON full-prefix expansion regression afterward.
+
+
+## Complete JOIN ON width decision
+
+- [x] Reproduce the compact 130-character JOIN line whose predicate alone fits
+  soft width; expand only after actual owner geometry is available.
+- [x] Reuse typed JOIN ownership, shared prefix measurement and group policy;
+  preserve root authored connector groups and blank-line boundaries in wrappers.
+- [x] Cover inclusive soft width across six query/DML/routine contexts with both
+  opener settings; verify comments, groups, equivalence and repeated fmt/check.
+- [x] Complete full gates, private-copy audit, commit, PR and PATH refresh.

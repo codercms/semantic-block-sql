@@ -1,3 +1,4 @@
+use crate::formatter::ast::strip_locations;
 mod capabilities;
 mod ir;
 mod layout;
@@ -808,21 +809,6 @@ fn canonical_postgresql(source: &str) -> Result<Value, FormatDiagnostic> {
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
     strip_locations(&mut canonical);
     Ok(canonical)
-}
-
-fn strip_locations(value: &mut Value) {
-    match value {
-        Value::Object(fields) => {
-            for name in ["location", "stmt_location", "stmt_len"] {
-                fields.remove(name);
-            }
-            for child in fields.values_mut() {
-                strip_locations(child);
-            }
-        }
-        Value::Array(items) => items.iter_mut().for_each(strip_locations),
-        _ => {}
-    }
 }
 
 fn unsupported(source: &str, feature: impl Into<String>) -> FormatDiagnostic {

@@ -78,7 +78,7 @@ pub(super) fn plan_update_statements(
             plan,
         );
         if let Some(from) = &update.from {
-            plan_relation_source(from, plan);
+            plan_relation_source(from, context.depths, plan);
         }
     }
 }
@@ -142,7 +142,7 @@ pub(super) fn plan_delete_statements(
             plan,
         );
         if let Some(using) = &delete.using {
-            plan_relation_source(using, plan);
+            plan_relation_source(using, context.depths, plan);
         }
     }
 }
@@ -179,7 +179,7 @@ pub(super) fn plan_merge_statements(
     let lists = context.lists;
     for merge in merges {
         plan.break_before(merge.source.introducer, 1, merge.span.base_depth);
-        plan_relation_source(&merge.source, plan);
+        plan_relation_source(&merge.source, context.depths, plan);
         if !merge.source.joins.is_empty()
             || merge
                 .source
@@ -235,8 +235,14 @@ pub(super) fn plan_merge_statements(
     }
 }
 
-pub(super) fn plan_relation_source(source: &RelationSourceBlock, plan: &mut LayoutPlan) {
-    let item_indent = source.base_depth + 1;
+pub(super) fn plan_relation_source(
+    source: &RelationSourceBlock,
+    depths: &[usize],
+    plan: &mut LayoutPlan,
+) {
+    let owner_indent = plan.indent_for(source.introducer, source.base_depth);
+    let relative_indent = |depth: usize| owner_indent + depth.saturating_sub(source.base_depth);
+    let item_indent = owner_indent + 1;
     if source.items.len() > 1 {
         for item in &source.items {
             plan.break_before(item.start, 1, item_indent);
@@ -247,14 +253,23 @@ pub(super) fn plan_relation_source(source: &RelationSourceBlock, plan: &mut Layo
     let minimum_join_indent = if source.items.len() > 1 {
         item_indent
     } else {
-        source.base_depth
+        owner_indent
     };
-    for join in &source.joins {
-        plan.break_before(join.start, 1, join.depth.max(minimum_join_indent));
-    }
     for &(open, close, inner_depth) in &source.wrappers {
-        plan.break_before(open + 1, 1, inner_depth);
-        plan.break_before(close, 1, inner_depth.saturating_sub(1));
+        let indent = relative_indent(inner_depth) + usize::from(source.items.len() > 1);
+        // Only direct tokens belong to this relation wrapper. Nested query and
+        // expression owners establish their own contextual indentation later.
+        for (index, &depth) in depths.iter().enumerate().take(close).skip(open + 1) {
+            if depth == inner_depth {
+                plan.token_indents[index] = Some(indent);
+            }
+        }
+        plan.break_before(open + 1, 1, indent);
+        plan.break_before(close, 1, indent.saturating_sub(1));
+    }
+    for join in &source.joins {
+        let indent = plan.indent_for(join.start, relative_indent(join.depth));
+        plan.break_before(join.start, 1, indent.max(minimum_join_indent));
     }
 }
 

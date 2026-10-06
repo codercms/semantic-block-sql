@@ -350,3 +350,55 @@ and 160 columns, including strict policy and CRLF. Supported siblings still wrap
 breakable predicates and report indivisible-width warnings. The protected output
 ranges survive routine-header and preceding-statement shifts into document
 validation; see the over-width fixture in `tests/review_combinations.rs`.
+
+Nested relation indentation is covered by
+[`tests/nested_relation_indentation.rs`](../tests/nested_relation_indentation.rs):
+scalar queries, views with JSON aggregation, LATERAL nesting, comments, nested
+JOIN wrappers and comma-separated wrapped sources. Wrapper contents indent one
+level beneath their owner and closing parentheses align with it. These fixtures
+strengthen layout coverage without expanding the PostgreSQL grammar boundary.
+
+[`tests/temporal_type_casing.rs`](../tests/temporal_type_casing.rs) verifies lowercase
+`timestamp`/`time` names and their complete `with/without time zone` suffixes in
+table/ALTER declarations, casts, SQL signatures and PL/pgSQL declarations,
+including precision modifiers and parser-accepted comments before the suffix.
+CTE `WITH` and expression `AT TIME ZONE` remain uppercase; `NOW()` remains on the
+built-in uppercase whitelist. This is a casing correction within existing syntax.
+
+[`tests/nested_join_predicate_layout.rs`](../tests/nested_join_predicate_layout.rs)
+covers expanded JOIN predicates with two and three enclosing Boolean wrappers,
+scalar subqueries, CTE NOT MATERIALIZED and INSERT query sources. Predicate
+ownership excludes enclosing relation delimiters; expanded wrappers and Boolean
+connectors retain consistent indentation, equivalence and idempotence.
+
+The same fixture covers comparison wrappers around expanded scalar queries,
+including comments at query and comparison boundaries and compact neighboring
+comparisons. Each expanded closing delimiter aligns with its own wrapper.
+
+Nested EXISTS predicates in CTEs and SQL-standard routine bodies are also
+covered: expanded WHERE contents sit exactly one level beneath their clause,
+including when sibling subqueries have different Boolean layouts.
+
+[`tests/predicate_opener_layout.rs`](../tests/predicate_opener_layout.rs) covers
+the default-enabled, configurable clause/group opener preference across SELECT,
+UPDATE, DELETE, INSERT SELECT, HAVING, JOIN/MERGE ON, both conflict WHERE owners
+and partial indexes. API disabling, config round-trip/strict typing, CLI stdin,
+comments, blank gaps, incomplete groups and soft-width header limits are covered.
+This changes layout preference within existing supported grammar.
+
+Canonical AST traversal is covered by `tests/ast_traversal_consistency.rs` and
+the structural tests in `formatter/ast.rs`. Type-alias preferences now reach
+array elements, aggregate filters, CASE operands, DDL defaults/CHECK expressions
+and query suffixes through the same complete traversal. Unsupported SQL/JSON
+inside aggregate FILTER/order or CASE operands is preserved and diagnosed like
+the same expression in a SELECT target or DML RETURNING. These child contexts
+no longer bypass existing unsupported-syntax checks; no new SQL/JSON grammar
+is claimed.
+
+
+JOIN predicate width regression coverage uses the complete rendered owner header
+and displayed indentation. Synthetic fixtures exercise inclusive soft boundaries
+across SELECT, NOT MATERIALIZED CTEs, INSERT, UPDATE FROM, DELETE USING and SQL
+routines with the opener preference enabled/disabled. Root inline authored groups,
+comment attachment, blank gaps, structural equivalence and repeated fmt/check
+are covered; no PostgreSQL syntax capability changes are introduced.

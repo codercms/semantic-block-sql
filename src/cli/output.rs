@@ -1,3 +1,4 @@
+use semblock::text::SourceIndex;
 use std::env;
 use std::path::Path;
 
@@ -20,6 +21,7 @@ pub(super) fn emit_diagnostics(
     if quiet {
         return;
     }
+    let source_index = SourceIndex::new(source);
     for diagnostic in diagnostics {
         if !include_style_errors && diagnostic.severity == Severity::Error {
             continue;
@@ -28,7 +30,7 @@ pub(super) fn emit_diagnostics(
             Severity::Error => "error",
             Severity::Warning => "warning",
         };
-        let location = source_location(source, diagnostic.source_range.start);
+        let location = source_index.location(diagnostic.source_range.start);
         eprintln!(
             "{}:{}:{} (bytes {}-{}): {severity}[{}]: {}",
             path.display(),
@@ -39,26 +41,6 @@ pub(super) fn emit_diagnostics(
             diagnostic.rule_id,
             diagnostic.message
         );
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SourceLocation {
-    line: usize,
-    column: usize,
-}
-
-fn source_location(source: &str, byte_offset: usize) -> SourceLocation {
-    let mut offset = byte_offset.min(source.len());
-    while !source.is_char_boundary(offset) {
-        offset -= 1;
-    }
-
-    let prefix = &source[..offset];
-    let line_start = prefix.rfind('\n').map_or(0, |newline| newline + 1);
-    SourceLocation {
-        line: prefix.bytes().filter(|byte| *byte == b'\n').count() + 1,
-        column: prefix[line_start..].chars().count() + 1,
     }
 }
 

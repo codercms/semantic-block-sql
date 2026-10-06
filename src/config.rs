@@ -150,6 +150,7 @@ struct FileFormatConfig {
 struct LayoutConfig {
     soft_line_width: Option<usize>,
     hard_line_width: Option<usize>,
+    inline_predicate_group_opener: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -211,13 +212,14 @@ impl Config {
             })
             .collect::<String>();
         let mut output = format!(
-            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\nunsupported_policy = \"{}\"\n\n[format.type_aliases]\n{}\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nignore_generated_files = {}\nraw_strings = {}\ninterpreted_strings = {}\nmultiline_string_style = \"{}\"\n",
+            "dialect = \"postgresql\"\n\n[format]\nsemicolon_policy = \"{}\"\nnot_equal_policy = \"{}\"\nsyntax_diagnostics = \"parser_available\"\nunsupported_policy = \"{}\"\n\n[format.type_aliases]\n{}\n[layout]\nsoft_line_width = {}\nhard_line_width = {}\ninline_predicate_group_opener = {}\n\n[discovery]\nrespect_gitignore = {}\nignore_file = \"{}\"\n\n[go]\nenabled = {}\nauto_detect = {}\nignore_generated_files = {}\nraw_strings = {}\ninterpreted_strings = {}\nmultiline_string_style = \"{}\"\n",
             semicolon_policy_name(self.format.semicolon_policy),
             not_equal_policy_name(self.format.not_equal_policy),
             unsupported_policy_name(self.format.unsupported_policy),
             aliases,
             self.format.soft_line_width,
             self.format.hard_line_width,
+            self.format.inline_predicate_group_opener,
             self.discovery.respect_gitignore,
             toml_string(&self.discovery.ignore_file),
             self.go.enabled,
@@ -270,6 +272,9 @@ impl Config {
         }
         if let Some(value) = file.layout.hard_line_width {
             config.format.hard_line_width = value;
+        }
+        if let Some(value) = file.layout.inline_predicate_group_opener {
+            config.format.inline_predicate_group_opener = value;
         }
         if let Some(value) = file.discovery.respect_gitignore {
             config.discovery.respect_gitignore = value;

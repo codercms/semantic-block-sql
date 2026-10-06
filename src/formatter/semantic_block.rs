@@ -1,3 +1,4 @@
+use crate::text::SourceIndex;
 use std::collections::{HashMap, HashSet};
 
 use pg_query::protobuf::Token;
@@ -16,7 +17,10 @@ use super::{
 
 mod ddl;
 mod expressions;
+mod geometry;
 mod groups;
+
+use geometry::{LayoutPlan, compact_width};
 mod lists;
 mod render;
 mod statements;
@@ -43,108 +47,12 @@ use statements::{
     plan_update_statements, plan_utility_statements,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Break {
-    lines: usize,
-    indent: usize,
-}
-
-#[derive(Debug)]
-struct LayoutPlan {
-    before: HashMap<usize, Break>,
-    token_indents: Vec<Option<usize>>,
-    indent_offsets: Vec<usize>,
-}
-
-impl LayoutPlan {
-    fn new(token_count: usize) -> Self {
-        Self {
-            before: HashMap::new(),
-            token_indents: vec![None; token_count],
-            indent_offsets: vec![0; token_count],
-        }
-    }
-
-    fn break_before(&mut self, index: usize, lines: usize, indent: usize) {
-        if index >= self.token_indents.len() {
-            return;
-        }
-        let candidate = Break {
-            lines: lines.max(1),
-            indent,
-        };
-        self.before
-            .entry(index)
-            .and_modify(|current| {
-                if candidate.lines >= current.lines {
-                    *current = candidate;
-                }
-            })
-            .or_insert(candidate);
-    }
-
-    fn set_indent(&mut self, range: std::ops::Range<usize>, indent: usize) {
-        for slot in &mut self.token_indents[range] {
-            *slot = Some(indent);
-        }
-    }
-
-    fn set_fallback_indent(
-        &mut self,
-        range: std::ops::Range<usize>,
-        depths: &[usize],
-        base_depth: usize,
-        indent: usize,
-    ) {
-        for index in range {
-            self.token_indents[index]
-                .get_or_insert(indent + depths[index].saturating_sub(base_depth));
-        }
-    }
-
-    fn indent_for(&self, index: usize, fallback: usize) -> usize {
-        self.token_indents[index].unwrap_or(fallback)
-    }
-
-    fn line_indent_for(&self, index: usize, fallback: usize) -> usize {
-        self.before
-            .get(&index)
-            .map(|line_break| line_break.indent)
-            .unwrap_or_else(|| self.indent_for(index, fallback))
-    }
-
-    fn shift_indents(&mut self, range: std::ops::Range<usize>, levels: usize) {
-        self.rebase_indents(range, 0, levels);
-    }
-
-    fn rebase_indents(&mut self, range: std::ops::Range<usize>, current: usize, desired: usize) {
-        if current == desired {
-            return;
-        }
-        let adjust = |indent: usize| {
-            if desired > current {
-                indent + desired - current
-            } else {
-                indent.saturating_sub(current - desired)
-            }
-        };
-        for (index, line_break) in &mut self.before {
-            if range.contains(index) {
-                line_break.indent = adjust(line_break.indent);
-            }
-        }
-        for indent in self.token_indents[range.clone()].iter_mut().flatten() {
-            *indent = adjust(*indent);
-        }
-        for offset in &mut self.indent_offsets[range] {
-            *offset = adjust(*offset);
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 struct BooleanRange {
+    expanded: bool,
+    join_on: Option<usize>,
     kind: ExpressionOwnerKind,
+    introducer: Option<usize>,
     start: usize,
     end: usize,
     base_depth: usize,
@@ -368,6 +276,7 @@ pub(super) fn format(
         depths,
         &expression_ranges,
         layout.queries(),
+        layout.predicates(),
         parens,
         options,
     );
@@ -415,7 +324,7 @@ pub(super) fn format(
             {
                 expanded_selects.insert(select.query_start);
             }
-            plan_relation_source(source, &mut plan);
+            plan_relation_source(source, depths, &mut plan);
         }
     }
     let insert_query_starts = plan_insert_statements(&context, &inserts, &mut plan);
@@ -802,14 +711,15 @@ pub(super) fn validate_hard_width_except(
 ) -> Result<Vec<FormatWarning>, FormatDiagnostic> {
     let tokens = tokenize(output)?;
     let mut warnings = Vec::new();
-    let mut line_start = 0usize;
+    let source_index = SourceIndex::new(output);
 
-    for (line_index, line_with_newline) in output.split_inclusive('\n').enumerate() {
-        let line = line_with_newline
-            .strip_suffix('\n')
-            .unwrap_or(line_with_newline);
-        let width = line.chars().count();
-        let line_end = line_start + line.len();
+    for (line_number, range) in source_index.lines() {
+        let line_start = range.start;
+        let line_end = range.end;
+        let line = &output[line_start..line_end];
+        let width = source_index
+            .line_width(line_number)
+            .expect("indexed physical line");
         let ignored = ignored_ranges
             .iter()
             .any(|range| range.start < line_end && range.end > line_start);
@@ -828,23 +738,26 @@ pub(super) fn validate_hard_width_except(
                 token_indent + output[start..end].chars().count() > options.hard_line_width
                     || (token.is_comment()
                         && token.start >= line_start
-                        && token.end <= line_end
+                        && token.end
+                            <= source_index
+                                .line_span(line_number)
+                                .expect("indexed physical line")
+                                .end
                         && output[line_start..end].chars().count() > options.hard_line_width)
             });
             if indivisible {
                 warnings.push(FormatWarning::IndivisibleTokenExceedsHardWidth {
-                    line: line_index + 1,
+                    line: line_number,
                     width,
                 });
             } else {
                 return Err(FormatDiagnostic::HardLineExceeded {
-                    line: line_index + 1,
+                    line: line_number,
                     width,
                     hard_limit: options.hard_line_width,
                 });
             }
         }
-        line_start += line_with_newline.len();
     }
 
     Ok(warnings)
@@ -920,10 +833,11 @@ fn plan_query_clauses(
     for query in queries {
         let select = query.select;
         let base_depth = query.base_depth;
-        if let Some(source) = &query.from {
-            plan_relation_source(source, plan);
-        }
         let indent = query_indent(query, plan);
+        if let Some(source) = &query.from {
+            plan.token_indents[source.introducer] = Some(indent);
+            plan_relation_source(source, depths, plan);
+        }
         let end = query.end;
         let has_join = query
             .from
@@ -931,9 +845,11 @@ fn plan_query_clauses(
             .is_some_and(|source| !source.joins.is_empty());
         let has_expanded_boolean = boolean_ranges
             .iter()
+            .filter(|range| range.expanded)
             .any(|range| range.start > select && range.start < end);
         let nested_in_expanded_boolean = boolean_ranges
             .iter()
+            .filter(|range| range.expanded)
             .any(|range| range.start < select && select < range.end);
         let mut has_expanded_clause_list = false;
         for clause in [query.clauses.group_by, query.clauses.order_by]
@@ -988,13 +904,13 @@ fn plan_query_clauses(
         if query.clauses.locking.is_some() {
             for index in select + 1..end {
                 if depths[index] == base_depth && tokens[index].kind == Token::For {
-                    plan.break_before(index, 1, indent);
+                    plan.break_before(index, tokens[index].line_breaks_before.clamp(1, 2), indent);
                 }
             }
         }
         for (index, depth) in depths.iter().enumerate().take(end).skip(select + 1) {
             if *depth == base_depth && is_join_start(tokens, index) {
-                plan.break_before(index, 1, indent);
+                plan.break_before(index, tokens[index].line_breaks_before.clamp(1, 2), indent);
             }
         }
     }
@@ -1073,6 +989,7 @@ fn boolean_ranges(
     depths: &[usize],
     expressions: &[ExpressionRange],
     queries: &[QueryBlock],
+    predicates: &[PredicateBlock],
     parens: &HashMap<usize, usize>,
     options: &FormatOptions,
 ) -> Vec<BooleanRange> {
@@ -1114,9 +1031,20 @@ fn boolean_ranges(
         let expanded = layout == GroupLayout::Expanded
             && (expression.kind == ExpressionOwnerKind::Predicate || root_depth.is_some());
 
-        if expanded {
+        let predicate = predicates.iter().find(|predicate| {
+            predicate.start == expression.start && predicate.wrapper_close.is_none()
+        });
+        let join_on = predicate
+            .filter(|predicate| predicate.kind == super::layout_ir::PredicateKind::JoinOn)
+            .map(|predicate| predicate.introducer);
+        // JOIN header geometry is available only after its relation/query owner
+        // is planned. Retain compact candidates for that final width decision.
+        if expanded || join_on.is_some() {
             result.push(BooleanRange {
+                expanded,
+                join_on,
                 kind: expression.kind,
+                introducer: predicate.map(|predicate| predicate.introducer),
                 start: expression.start,
                 end: expression.end,
                 base_depth: expression.base_depth,
@@ -1197,24 +1125,75 @@ fn plan_booleans(
     plan: &mut LayoutPlan,
 ) {
     for range in ranges {
+        if let Some(introducer) = range.join_on {
+            let layout = LayoutGroup {
+                compact_line_width: plan.line_width_through(
+                    tokens,
+                    introducer,
+                    range.end,
+                    range.root_indent.saturating_sub(1),
+                    options,
+                ),
+                structurally_complex: false,
+                hard_boundary: false,
+                force_expand: range.expanded,
+                compact_overflow_is_unavoidable: false,
+            }
+            .decide(options);
+            if layout == GroupLayout::Compact {
+                continue;
+            }
+        }
         let root_has_and = range.root_depth.is_some_and(|root_depth| {
             (range.start..range.end)
                 .any(|index| depths[index] == root_depth && tokens[index].kind == Token::And)
         });
-        let root_indent = plan
-            .line_indent_for(
-                range.start,
-                range.root_indent + plan.indent_offsets[range.start],
-            )
-            .max(range.root_indent + plan.indent_offsets[range.start]);
+        let mut root_indent = range.introducer.map_or_else(
+            || {
+                plan.line_indent_for(
+                    range.start,
+                    plan.relative_indent(range.start, range.root_indent),
+                )
+                .max(plan.relative_indent(range.start, range.root_indent))
+            },
+            |introducer| plan.line_indent_for(introducer, range.root_indent.saturating_sub(1)) + 1,
+        );
+        let joined_opener = options.inline_predicate_group_opener
+            && range.introducer.is_some_and(|introducer| {
+                let last = (range.start..range.end).rfind(|index| !tokens[*index].is_comment());
+                tokens[range.start].kind == Token::Ascii40
+                    && parens.get(&range.start).copied() == last
+                    && tokens[range.start].line_breaks_before <= 1
+                    && plan
+                        .before
+                        .get(&range.start)
+                        .is_none_or(|line| line.lines <= 1)
+                    && plan.line_width_through(
+                        tokens,
+                        introducer,
+                        range.start + 1,
+                        root_indent.saturating_sub(1),
+                        options,
+                    ) <= options.soft_line_width
+            });
+        if joined_opener {
+            plan.before.remove(&range.start);
+            root_indent = root_indent.saturating_sub(1);
+        }
 
-        if !matches!(
-            range.kind,
-            ExpressionOwnerKind::AssignmentValue
-                | ExpressionOwnerKind::CaseCondition
-                | ExpressionOwnerKind::CaseResult
-        ) {
-            plan.break_before(range.start, 1, root_indent);
+        if !joined_opener
+            && !matches!(
+                range.kind,
+                ExpressionOwnerKind::AssignmentValue
+                    | ExpressionOwnerKind::CaseCondition
+                    | ExpressionOwnerKind::CaseResult
+            )
+        {
+            plan.break_before(
+                range.start,
+                tokens[range.start].line_breaks_before.clamp(1, 2),
+                root_indent,
+            );
         }
         for index in range.start..range.end {
             if range.root_depth == Some(depths[index])
@@ -1235,7 +1214,7 @@ fn plan_booleans(
                     plan.set_indent(trivia_start..index, indent);
                     plan.break_before(trivia_start, 1, indent);
                 }
-                plan.break_before(index, 1, indent);
+                plan.break_before(index, tokens[index].line_breaks_before.clamp(1, 2), indent);
             }
             if tokens[index].kind == Token::Ascii40 {
                 let Some(&close) = parens.get(&index) else {
@@ -1255,10 +1234,7 @@ fn plan_booleans(
                         let query_indent =
                             root_indent + 1 + depths[index].saturating_sub(range.base_depth);
                         let current_indent = plan.line_indent_for(query_start, query_indent);
-                        plan.shift_indents(
-                            query_start..close,
-                            query_indent.saturating_sub(current_indent),
-                        );
+                        plan.rebase_indents(query_start..close, current_indent, query_indent);
                         plan.break_before(
                             close,
                             1,
@@ -1286,8 +1262,9 @@ fn plan_booleans(
                         .iter()
                         .any(|candidate| tokens[*candidate].kind == Token::Or);
                 let contains_nested_sql = (index + 1..close).any(|candidate| {
-                    depths[candidate] == inner_depth
+                    depths[candidate] >= inner_depth
                         && matches!(tokens[candidate].kind, Token::Select | Token::With)
+                        && plan.before.contains_key(&candidate)
                 });
                 let authored_boundary = tokens[index + 1..close]
                     .iter()
@@ -1296,8 +1273,16 @@ fn plan_booleans(
                     + compact_width(tokens, index, close + 1, options)
                     > options.soft_line_width;
                 let owns_complete_range = index == range.start && close + 1 == range.end;
-                if contains_boolean
+                let wraps_boolean_root = range.root_depth.is_some_and(|depth| depth >= inner_depth)
+                    && tokens[range.start..index]
+                        .iter()
+                        .all(|token| token.is_comment() || token.kind == Token::Ascii40)
+                    && tokens[close + 1..range.end]
+                        .iter()
+                        .all(|token| token.is_comment() || token.kind == Token::Ascii41);
+                if (contains_boolean || wraps_boolean_root || contains_nested_sql)
                     && (owns_complete_range
+                        || wraps_boolean_root
                         || precedence_boundary
                         || independently_complex
                         || mixed_boolean
@@ -1313,9 +1298,15 @@ fn plan_booleans(
                         );
                     }
                     for connector in direct_connectors {
+                        if range.preserve_authored_breaks
+                            && range.root_depth == Some(depths[connector])
+                            && tokens[connector].line_breaks_before == 0
+                        {
+                            continue;
+                        }
                         plan.break_before(
                             connector,
-                            1,
+                            tokens[connector].line_breaks_before.clamp(1, 2),
                             root_indent + depths[connector].saturating_sub(range.base_depth),
                         );
                     }
@@ -1343,12 +1334,7 @@ fn plan_case_result_boundaries(
         .iter()
         .filter(|range| range.kind == ExpressionOwnerKind::CaseResult)
     {
-        let Some((&line_start, line_break)) = plan
-            .before
-            .iter()
-            .filter(|(index, _)| **index <= result.start)
-            .max_by_key(|(index, _)| **index)
-        else {
+        let Some((&line_start, line_break)) = plan.before.range(..=result.start).next_back() else {
             continue;
         };
         if line_start == result.start {
@@ -1362,7 +1348,7 @@ fn plan_case_result_boundaries(
             .filter(|index| result.start < *index && *index < result.end)
             .min()
             .unwrap_or(result.end);
-        if indent * INDENT_WIDTH + compact_width(tokens, line_start, line_end, options)
+        if plan.line_width_through(tokens, result.start, line_end, indent, options)
             > options.hard_line_width
         {
             plan.break_before(result.start, 1, indent + 1);
@@ -1482,24 +1468,6 @@ fn range_is_unavoidably_over_hard(
     false
 }
 
-fn compact_width(
-    tokens: &[SqlToken<'_>],
-    start: usize,
-    end: usize,
-    options: &FormatOptions,
-) -> usize {
-    let mut width = 0usize;
-    let mut previous = None;
-    for index in start..end {
-        if needs_space(tokens, previous, index) {
-            width += 1;
-        }
-        width += render_token(tokens, index, options).chars().count();
-        previous = Some(index);
-    }
-    width
-}
-
 struct Writer {
     output: String,
     pending_layout: String,
@@ -1575,6 +1543,25 @@ impl Writer {
 #[cfg(test)]
 mod hard_width_tests {
     use super::*;
+
+    #[test]
+    fn physical_line_width_excludes_lf_and_crlf_terminators() {
+        let options = FormatOptions {
+            soft_line_width: 9,
+            hard_line_width: 9,
+            ..FormatOptions::default()
+        };
+        assert!(
+            validate_hard_width("SELECT 1;\n", &options)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            validate_hard_width("SELECT 1;\r\n", &options)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn short_indivisible_token_past_the_limit_does_not_excuse_a_breakable_line() {

@@ -6,7 +6,7 @@ use semblock::{FormatOptions, TypeAliasFamily, check_sql, format_sql};
 
 #[test]
 fn preserves_type_aliases_by_default() {
-    let source = "SELECT NULL::integer, NULL::character varying, NULL::timestamp WITH time zone;";
+    let source = "SELECT NULL::integer, NULL::character varying, NULL::timestamp with time zone;";
     let formatted = format_sql(source, &FormatOptions::default()).expect("formatting succeeds");
 
     assert_eq!(formatted.output, source);
@@ -96,7 +96,7 @@ fn supports_every_real_type_alias_family_and_preserves_modifiers() {
     let formatted = format_sql(source, &options).expect("formatting succeeds");
     assert_eq!(
         formatted.output,
-        "SELECT\n    NULL::smallint,\n    NULL::int,\n    NULL::bigint,\n    NULL::boolean,\n    NULL::character(4),\n    NULL::varchar(12),\n    NULL::bit varying(8),\n    NULL::numeric(10, 2),\n    NULL::real,\n    NULL::double precision,\n    NULL::time WITH time zone,\n    NULL::timestamp,\n    NULL::timestamp WITH time zone;"
+        "SELECT\n    NULL::smallint,\n    NULL::int,\n    NULL::bigint,\n    NULL::boolean,\n    NULL::character(4),\n    NULL::varchar(12),\n    NULL::bit varying(8),\n    NULL::numeric(10, 2),\n    NULL::real,\n    NULL::double precision,\n    NULL::time with time zone,\n    NULL::timestamp,\n    NULL::timestamp with time zone;"
     );
     assert!(check_sql(&formatted.output, &options).compliant);
 }

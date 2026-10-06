@@ -1278,3 +1278,62 @@ diagnostics, warnings and source/output protection across adapters. Declaration
 ownership and generic helpers belong to `routine_header`, with one AST-backed
 constructor used by SQL, external and procedural routines. These changes clarify
 module responsibilities without changing public behavior or the core contract.
+
+### Temporal type suffix casing correction
+
+Core specification section 7 lowercases the complete type name, including
+`with/without time zone`. Older expression/type-alias goldens incorrectly retained
+uppercase WITH in those names; their expectations are corrected to the core
+contract. CTE WITH and expression AT TIME ZONE remain uppercase grammar. NOW()
+retains the explicit built-in whitelist casing. This adds no syntax capability.
+
+### Expanded JOIN predicate wrappers
+
+JOIN predicate ownership ends before a closing parenthesis of its enclosing
+relation, as determined by the token depth within the typed relation owner.
+When a Boolean root expands, its complete enclosing parenthesis chain expands
+with it. Each retained wrapper has a visible indentation level; atomic
+parenthesized comparisons stay compact. This corrects layout within existing
+syntax and preserves all authored parentheses.
+
+A parenthesized comparison containing an already expanded scalar query also
+expands its outer wrapper. Query contents indent beneath their opener and each
+closing delimiter aligns with its own owner, rather than combining query and
+comparison closes on one hanging line. Compact atomic siblings remain compact.
+
+Expanded predicates retain their typed clause introducer as an indentation
+anchor. Their first line sits one level below the introducer's displayed
+indentation after enclosing query movement. Raw lexical depth plus accumulated
+offsets remains a fallback for non-clause expressions and CHECK wrappers; it
+must not override the contextual WHERE/ON owner and add an extra level.
+
+### Configurable predicate-group opener preference
+
+The explicit project request for reducing indentation supersedes authored
+clause/opener break preservation only for one complete outer predicate group.
+The preference is enabled by default and can be disabled with
+`[layout] inline_predicate_group_opener = false`. The shared Boolean planner
+uses its typed introducer and matching parenthesis owner; no clause-specific
+keyword scan is added. It joins the opener only when the displayed owner line
+fits soft width and no comment or blank gap separates it from the keyword.
+The outer group's contents gain one level relative to the clause, rather than
+another level for a standalone opener. Nested groups retain their own levels.
+CHECK and grammar-specific query/list wrappers keep their existing policies.
+
+
+### Complete JOIN header width
+
+A compact one-line JOIN predicate splits when its complete rendered owner line
+exceeds soft width. Measure the JOIN header, ON, predicate and contextual
+display indentation together; predicate-only width is incorrect. Preserve
+authored multiline predicate groups that fit hard width, plus comments and
+blank gaps. This is a reviewed JOIN-specific readability preference, not a
+soft-width violation or a new PostgreSQL capability.
+
+Retain compact JOIN candidates during structural Boolean classification. After
+relation/query planning establishes their actual displayed owner lines, the
+shared Boolean planner uses `LayoutPlan::line_width_through` and
+`LayoutGroup::decide`. Early query expansion consumers consider only initially
+expanded groups; deferred candidates do not force unrelated clause expansion.
+Nested wrapper planning respects the same root authored-connector boundaries
+and blank gaps as the outer Boolean owner.

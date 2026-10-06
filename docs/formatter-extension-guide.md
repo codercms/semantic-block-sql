@@ -181,6 +181,10 @@ formatter fails closed until `REVIEWED_POSTGRESQL_VERSION` is updated.
 Upgrade procedure:
 
 1. Inspect protobuf changes for all currently supported nodes.
+   Review `ast/children.rs` through `scripts/generate-ast-children.py`: update
+   the reviewed API fingerprints, regenerate, and run `--check` against the
+   pinned crate source. Never add an independent NodeEnum::nodes() consumer or
+   another omitted-field list. Use `ast::DepthFirst` or `walk_complete_tree`.
 2. Review newly added enum variants and fields.
 3. Run the complete characterization and golden suite.
 4. Add unsupported fixtures for newly parsed but unowned syntax.
@@ -255,3 +259,11 @@ Every new syntax family must distinguish valid-but-unowned syntax from malformed
 ## Extending PL/pgSQL after the IR rewrite
 
 A new procedural feature must first be mapped from its exact `parse_plpgsql` node name into a typed parser category, then classified into a source-span `BodyNodeKind`, and finally rendered by the procedural layout/leaf layers. Include compact and multiline fixtures, nested control flow, comment/protected-literal cases, parser-alignment tests, equivalence, idempotence, and an unsupported sibling. Do not reintroduce line-prefix syntax discovery.
+
+
+For displayed prefix measurements, reuse `LayoutPlan::line_width_through` and
+`geometry::compact_width`; do not reconstruct unordered predecessor scans.
+Use `relative_indent` for rebased lexical fallback coordinates and
+`rebase_indents` for relocating planned children. For lexical ancestry use
+`TokenStructure::ancestor_parentheses`, not a statement-wide opener scan. These
+helpers do not override typed ownership or the shared group decision policy.

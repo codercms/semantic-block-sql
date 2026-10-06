@@ -11,6 +11,7 @@ pub mod git;
 pub mod host;
 pub mod rewrite;
 pub mod source;
+pub mod text;
 
 mod formatter;
 

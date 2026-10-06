@@ -90,7 +90,7 @@ fn uppercases_contextual_operator_grammar_without_reclassifying_types() {
         SqlCase::new(
             "AT TIME ZONE",
             "select created_at at time zone 'UTC',cast(created_at as timestamp with time zone) from items;",
-            "SELECT created_at AT TIME ZONE 'UTC', CAST(created_at AS timestamp WITH time zone) FROM items;",
+            "SELECT created_at AT TIME ZONE 'UTC', CAST(created_at AS timestamp with time zone) FROM items;",
         ),
         SqlCase::new(
             "schema-qualified custom operator",

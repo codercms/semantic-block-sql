@@ -1,3 +1,5 @@
+use crate::text::SourceIndex;
+mod ast;
 mod diagnostics;
 mod external_routine;
 mod layout_ir;
@@ -23,25 +25,7 @@ pub use validation::validate_equivalent;
 
 pub(crate) const INDENT_WIDTH: usize = 4;
 
-/// Byte range in the original source. Offsets are UTF-8 byte offsets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SourceRange {
-    pub start: usize,
-    pub end: usize,
-}
-
-impl SourceRange {
-    pub const fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
-    }
-
-    pub const fn shifted(self, offset: usize) -> Self {
-        Self {
-            start: self.start + offset,
-            end: self.end + offset,
-        }
-    }
-}
+pub use crate::text::SourceRange;
 
 /// Diagnostic severity independent from CLI exit-code policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -146,6 +130,8 @@ pub struct FormatOptions {
     pub style: Style,
     pub soft_line_width: usize,
     pub hard_line_width: usize,
+    /// Prefer a sole outer predicate group's opener beside its clause keyword.
+    pub inline_predicate_group_opener: bool,
     pub semicolon_policy: SemicolonPolicy,
     pub not_equal_policy: NotEqualPolicy,
     pub syntax_diagnostics: SyntaxDiagnostics,
@@ -159,6 +145,7 @@ impl Default for FormatOptions {
             style: Style::SemanticBlock,
             soft_line_width: 120,
             hard_line_width: 160,
+            inline_predicate_group_opener: true,
             semicolon_policy: SemicolonPolicy::Preserve,
             not_equal_policy: NotEqualPolicy::Preserve,
             syntax_diagnostics: SyntaxDiagnostics::ParserAvailable,
@@ -376,12 +363,13 @@ fn format_document_content_at(
     let Some(region) = find_copy_stdin_region(source)? else {
         return format_regular_document_content(source, options, source_line_offset);
     };
+    let source_index = SourceIndex::new(source);
 
     let prefix =
         format_document_content_at(&source[..region.header_start], options, source_line_offset)?;
-    let header_line_offset = completed_line_count(&prefix.output);
+    let header_line_offset = SourceIndex::new(&prefix.output).completed_line_count();
     let header_source_line_offset =
-        source_line_offset + completed_line_count(&source[..region.header_start]);
+        source_line_offset + source_index.location(region.header_start).line - 1;
     let header = format_regular_document_content(
         &source[region.header_start..region.header_end],
         options,
@@ -389,10 +377,11 @@ fn format_document_content_at(
     )
     .map_err(|error| shift_statement_error_lines(error, header_line_offset))?;
     let payload = &source[region.header_end..region.payload_end];
-    let suffix_line_offset =
-        header_line_offset + completed_line_count(&header.output) + completed_line_count(payload);
+    let suffix_line_offset = header_line_offset
+        + SourceIndex::new(&header.output).completed_line_count()
+        + SourceIndex::new(payload).completed_line_count();
     let suffix_source_line_offset =
-        source_line_offset + completed_line_count(&source[..region.payload_end]);
+        source_line_offset + source_index.location(region.payload_end).line - 1;
     let suffix = format_document_content_at(
         &source[region.payload_end..],
         options,
@@ -481,6 +470,7 @@ fn format_regular_document_content(
             "PostgreSQL parser and splitter disagree on statement count".into(),
         ));
     }
+    let source_index = SourceIndex::new(source);
     let mut output = String::with_capacity(source.len());
     let mut cursor = 0usize;
     let mut diagnostics = Vec::new();
@@ -541,8 +531,7 @@ fn format_regular_document_content(
                 output.push_str(statement);
                 opaque_source_ranges.push(SourceRange::new(start, end));
                 opaque_output_ranges.push(SourceRange::new(statement_output_start, output.len()));
-                let statement_line =
-                    source_line_offset + completed_line_count(&source[..start]) + 1;
+                let statement_line = source_line_offset + source_index.location(start).line;
                 diagnostics.push(
                     diagnostics::statement_skipped_diagnostic(
                         statement,
@@ -565,10 +554,6 @@ fn format_regular_document_content(
         opaque_source_ranges,
         opaque_output_ranges,
     })
-}
-
-fn completed_line_count(source: &str) -> usize {
-    source.bytes().filter(|byte| *byte == b'\n').count()
 }
 
 fn shift_statement_error_lines(error: FormatDiagnostic, line_offset: usize) -> FormatDiagnostic {
