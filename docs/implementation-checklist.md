@@ -1485,3 +1485,17 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Repeat the private statement audit without placing private SQL in fixtures.
 - [x] Review semantics, ownership, comments/groups, idempotence, diagnostics,
   atomicity, dependencies, and dead code; no dependencies added.
+
+## Shared routine header implementation
+
+- [x] Bind signatures and RETURNS TABLE lists to AST parameter counts; bind
+  option clause starts to AST locations and keep bodies outside header layout.
+- [x] Reuse the list planner and shared emitter; preserve identifier/type case,
+  defaults, comments, authored groups, and AS literal framing whitespace.
+- [x] Turn both original long routine header cases green (32 of 36 original
+  desired cases pass); cover SQL dollar/atomic/RETURN bodies and table results.
+- [x] Repeat the private audit: seven unsupported diagnostics and 28 statement
+  skips remain, including pending DDL and additional body-layout shapes.
+- [x] Run focused tests and all-target gates; remaining original red cases are
+  the four desired DDL cases. Review semantic preservation, module boundaries,
+  idempotence, comments, diagnostics, atomicity, dependencies, and dead code.

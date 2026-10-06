@@ -92,6 +92,7 @@ pub(super) fn format_single_routine(
         options,
         outer_tokens.within(0, body.header_end),
     )?;
+    let header = super::routine_header::format(&header, statement, options)?;
     let footer = super::procedural::normalize_outer_tokens(
         &source[body.footer_start..],
         options,
@@ -251,6 +252,7 @@ fn format_dollar_body(
         options,
         outer.within(0, body.literal_start),
     )?;
+    let header = super::routine_header::format(&header, statement, options)?;
     let footer = super::procedural::normalize_outer_tokens(
         &source[body.literal_end..],
         options,

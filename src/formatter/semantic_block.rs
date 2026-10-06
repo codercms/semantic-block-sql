@@ -389,6 +389,24 @@ pub(super) fn format(
     plan_ctes(&tokens, depths, layout.with_blocks(), &mut plan);
 
     let terminal_semicolon = terminal_semicolon_plan(&tokens, options.semicolon_policy);
+    Ok(render_plan(
+        &tokens,
+        depths,
+        &plan,
+        terminal_semicolon,
+        options,
+        source.ends_with('\n'),
+    ))
+}
+
+fn render_plan(
+    tokens: &[SqlToken<'_>],
+    depths: &[usize],
+    plan: &LayoutPlan,
+    terminal_semicolon: TerminalSemicolonPlan,
+    options: &FormatOptions,
+    ends_with_newline: bool,
+) -> String {
     let mut writer = Writer::new();
     let mut previous_index = None;
 
@@ -412,10 +430,10 @@ pub(super) fn format(
             writer.newline(lines, plan.indent_for(index, depths[index]));
         }
 
-        if needs_space(&tokens, previous_index, index) {
+        if needs_space(tokens, previous_index, index) {
             writer.space();
         }
-        writer.write(&render_token(&tokens, index, options));
+        writer.write(&render_token(tokens, index, options));
         if terminal_semicolon.insert_after == Some(index) {
             writer.write(";");
         }
@@ -433,13 +451,75 @@ pub(super) fn format(
         previous_index = Some(index);
     }
 
-    Ok(writer.finish(source.ends_with('\n')))
+    writer.finish(ends_with_newline)
 }
 
 fn query_indent(query: &QueryBlock, plan: &LayoutPlan) -> usize {
     query.wrapper.map_or(query.indent, |(open, _close)| {
         plan.line_indent_for(open, query.indent.saturating_sub(1)) + 1
     })
+}
+
+/// Render only a parser-bound routine declaration prefix. Its body is owned
+/// by the SQL/procedural adapter and never enters this whitespace planner.
+pub(super) fn format_routine_header(
+    source: &str,
+    owned_lists: &[(usize, usize)],
+    clause_starts: &[usize],
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
+    let mut tokens = tokenize(source)?;
+    let structure = TokenStructure::new(&tokens);
+    let depths = structure.depths();
+    // Grammar casing has already been normalized by parser-owned locations.
+    // Header layout has no authority to recase identifiers or type names.
+    for token in &mut tokens {
+        token.role = TokenRole::Identifier;
+    }
+    let header_expands = source
+        .lines()
+        .any(|line| line.chars().count() > options.soft_line_width);
+    let lists = owned_lists
+        .iter()
+        .map(|&(open, close)| {
+            let authored = tokens[open + 1..close]
+                .iter()
+                .any(|token| token.line_breaks_before > 0);
+            ParenthesizedList {
+                open,
+                close,
+                expanded: open + 1 < close && (authored || header_expands),
+                base_indent: Some(0),
+            }
+        })
+        .collect::<Vec<_>>();
+    if !header_expands && !lists.iter().any(|list| list.expanded) {
+        return Ok(source.to_owned());
+    }
+    let mut plan = LayoutPlan::new(tokens.len());
+    for (index, token) in tokens.iter().enumerate() {
+        if token.line_breaks_before > 0 {
+            plan.break_before(index, token.line_breaks_before, depths[index]);
+        }
+    }
+    plan_parenthesized_lists(&tokens, depths, &[], &lists, options, &mut plan);
+    for &index in clause_starts {
+        plan.break_before(index, tokens[index].line_breaks_before.max(1), 0);
+    }
+    let mut output = render_plan(
+        &tokens,
+        depths,
+        &plan,
+        TerminalSemicolonPlan::default(),
+        options,
+        source.ends_with('\n'),
+    );
+    // Preserve the framing gap between AS and the literal owned by the body.
+    if let Some(last) = tokens.last() {
+        output.truncate(output.trim_end().len());
+        output.push_str(&source[last.end..]);
+    }
+    Ok(output)
 }
 
 pub(super) fn identifier_spellings(

@@ -198,3 +198,72 @@ fn unreviewed_sql_body_quoting_is_preserved() {
         );
     }
 }
+
+#[test]
+fn shared_headers_cover_sql_bodies_table_columns_and_parameter_defaults() {
+    let arguments = (1..=8)
+        .map(|index| format!("argument_{index} integer DEFAULT (1 + 2)"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    for body in ["AS $$SELECT 1;$$", "BEGIN ATOMIC SELECT 1; END", "RETURN 1"] {
+        let source = format!(
+            "CREATE FUNCTION sample_header({arguments}) RETURNS integer LANGUAGE SQL {body};"
+        );
+        let result = semblock::format_sql(&source, &semblock::FormatOptions::default()).unwrap();
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.fix_available),
+            "{body}: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .output
+                .lines()
+                .all(|line| line.chars().count() <= 160)
+        );
+        assert_sql_layout_only(&result.output, &result.output);
+    }
+    let fields = (1..=8)
+        .map(|index| format!("column_{index} integer"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = format!(
+        "CREATE FUNCTION sample_header(language language, returns returns) RETURNS TABLE ({fields}) LANGUAGE SQL AS $$SELECT 1;$$;"
+    );
+    let result = semblock::format_sql(&source, &semblock::FormatOptions::default()).unwrap();
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.fix_available),
+        "{:?}",
+        result.diagnostics
+    );
+    assert!(result.output.contains("language language,"));
+    assert!(result.output.contains("returns returns"));
+    assert_sql_layout_only(&result.output, &result.output);
+}
+
+#[test]
+fn routine_argument_comments_and_blank_groups_survive_header_expansion() {
+    let source = "CREATE FUNCTION sample_groups(\n    first_value integer,\n\n    -- keep this parameter group\n    second_value integer DEFAULT 2\n) RETURNS integer LANGUAGE SQL RETURN first_value + second_value;";
+    let result = semblock::format_sql(source, &semblock::FormatOptions::default()).unwrap();
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.fix_available),
+        "{:?}",
+        result.diagnostics
+    );
+    assert!(
+        result
+            .output
+            .contains("first_value integer,\n\n    -- keep this parameter group\n    second_value")
+    );
+    semblock::validate_equivalent(source, &result.output).unwrap();
+    assert_sql_layout_only(&result.output, &result.output);
+}

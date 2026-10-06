@@ -2,6 +2,7 @@ mod diagnostics;
 mod layout_ir;
 mod ownership;
 mod procedural;
+mod routine_header;
 mod semantic_block;
 mod sql_standard_routine;
 mod structure;

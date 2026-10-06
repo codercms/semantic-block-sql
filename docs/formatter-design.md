@@ -1140,3 +1140,12 @@ Embedded SQL passes its own structural and protected-token comparison, while
 the outer declaration is compared with its original literal restored. No
 generic literal exemption is introduced. Multiline token continuation bytes
 are never indented. Unreviewed quoting or inner syntax preserves the routine.
+
+### Shared routine header layout
+
+Routine adapters bind declaration signatures and RETURNS TABLE columns against
+AST parameter counts, then reuse the canonical parenthesized list planner and
+token emitter. Option clauses are located through their DefElem metadata.
+The declaration prefix is isolated from its body; header wrapping does not
+change body tokens or recase identifiers/types. Original comments, list groups,
+defaults, and framing gaps remain subject to the existing safety gates.

@@ -28,6 +28,7 @@ pub(super) fn format_single_routine(
     output.push_str(&source[close_end..]);
     let outer_tokens = validate_outer(&output)?;
     let output = normalize_outer_tokens(&output, options, outer_tokens)?;
+    let output = super::routine_header::format_dollar_declaration(&output, options)?;
     warnings.extend(super::semantic_block::validate_hard_width(
         &output, options,
     )?);

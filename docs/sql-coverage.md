@@ -223,6 +223,9 @@ Synthetic fixtures in `tests/procedural_sql_coverage.rs` and the two regression
 targets cover these reviewed shapes and still-unsupported parser neighbors.
 
 Routine grammar such as `FUNCTION` / `PROCEDURE`, `RETURNS`, and `LANGUAGE` is bound to parser-owned locations so same-spelled identifiers and user-defined types remain identifiers.
+Long function/procedure signatures and RETURNS TABLE column lists expand at
+AST-verified item boundaries. SQL and PL/pgSQL declarations share the list
+planner, preserving parameter defaults and authored comment/blank-line groups.
 
 Optional built-in type-alias preferences apply within already-supported syntax
 at parser-owned type locations and typed PL/pgSQL declarations. They do not
