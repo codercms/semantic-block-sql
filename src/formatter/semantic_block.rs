@@ -362,7 +362,14 @@ pub(super) fn format(
             cases: &cases,
         },
     );
-    let boolean_ranges = boolean_ranges(&tokens, depths, &expression_ranges, parens, options);
+    let boolean_ranges = boolean_ranges(
+        &tokens,
+        depths,
+        &expression_ranges,
+        layout.queries(),
+        parens,
+        options,
+    );
     let mut plan = LayoutPlan::new(tokens.len());
 
     for span in layout.statement_spans().skip(1) {
@@ -472,6 +479,23 @@ pub(super) fn format(
         depths,
         &plan,
         terminal_semicolon,
+        options,
+        source.ends_with('\n'),
+    ))
+}
+
+/// Emit a parser-confirmed procedural command without a SQL statement adapter.
+pub(super) fn format_procedural_command(
+    source: &str,
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
+    let tokens = tokenize(source)?;
+    let structure = TokenStructure::new(&tokens);
+    Ok(render_plan(
+        &tokens,
+        structure.depths(),
+        &LayoutPlan::new(tokens.len()),
+        terminal_semicolon_plan(&tokens, SemicolonPolicy::Preserve),
         options,
         source.ends_with('\n'),
     ))
@@ -999,13 +1023,14 @@ fn boolean_ranges(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
     expressions: &[ExpressionRange],
+    queries: &[QueryBlock],
     parens: &HashMap<usize, usize>,
     options: &FormatOptions,
 ) -> Vec<BooleanRange> {
     let mut result = Vec::new();
 
     for expression in expressions {
-        let root_depth = boolean_root_depth(tokens, depths, parens, *expression);
+        let root_depth = boolean_root_depth(tokens, depths, parens, *expression, queries);
         let has_and = (expression.start..expression.end)
             .any(|candidate| tokens[candidate].kind == Token::And);
         let has_or =
@@ -1079,6 +1104,7 @@ fn boolean_root_depth(
     depths: &[usize],
     parens: &HashMap<usize, usize>,
     range: ExpressionRange,
+    queries: &[QueryBlock],
 ) -> Option<usize> {
     let mut start = range.start;
     let mut end = range.end;
@@ -1098,6 +1124,14 @@ fn boolean_root_depth(
     }
     let root_depth = depths[start];
     let first_connector_depth = (start..end)
+        .filter(|index| {
+            !queries.iter().any(|query| {
+                range.start <= query.select
+                    && query.end <= range.end
+                    && query.select <= *index
+                    && *index < query.end
+            })
+        })
         .filter(|index| matches!(tokens[*index].kind, Token::And | Token::Or))
         .map(|index| depths[index])
         .min()?;

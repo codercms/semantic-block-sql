@@ -104,9 +104,37 @@ fn procedural_into_targets_are_separate_from_sql_tables() {
 }
 
 #[test]
+fn procedural_into_comments_and_branch_queries_keep_their_owners() {
+    let source = "DO $$ DECLARE sample_id integer; sample_label text; BEGIN IF TRUE THEN SELECT id INTO /* retained target comment */ STRICT sample_id FROM sample_rows; ELSIF FALSE THEN SELECT id, label FROM sample_rows INTO sample_id, sample_label; ELSE SELECT id INTO sample_id FROM sample_rows; END IF; END; $$;";
+    assert_supported(source);
+    let result = semblock::format_sql(source, &semblock::FormatOptions::default()).unwrap();
+    assert!(result.output.contains("/* retained target comment */"));
+    assert_supported(
+        "DO $$ DECLARE sample_id integer; BEGIN WITH seed AS (SELECT 1 AS id) SELECT id FROM seed INTO sample_id; END; $$;",
+    );
+}
+
+#[test]
+fn procedural_type_references_keep_spelling_and_modulo_expressions() {
+    assert_supported(
+        "DO $$ DECLARE part sample_rows.id%type; row_value sample_rows%ROWTYPE; n integer DEFAULT 7 % 3; BEGIN part := n; END; $$;",
+    );
+}
+
+#[test]
+fn outer_not_exists_does_not_own_inner_query_connectors() {
+    assert_supported(
+        "WITH changed AS (\n    UPDATE sample_rows\n    SET enabled = TRUE\n    FROM sample_seed\n    WHERE NOT EXISTS (SELECT 1 FROM sample_details d WHERE d.kind = $1 AND d.id = sample_seed.id)\n    RETURNING id\n)\nSELECT 1;",
+    );
+}
+
+#[test]
 fn procedural_transaction_nodes_have_reviewed_ownership() {
     assert_supported(
         "CREATE PROCEDURE sample_work() LANGUAGE plpgsql AS $$\nBEGIN\n    COMMIT;\n    ROLLBACK;\n    COMMIT AND CHAIN;\n    ROLLBACK AND NO CHAIN;\nEND;\n$$;",
+    );
+    assert_supported(
+        "DO $$ BEGIN COMMIT -- retained transaction comment\nAND CHAIN; ROLLBACK /* retained block comment */ AND NO CHAIN; END; $$;",
     );
 }
 

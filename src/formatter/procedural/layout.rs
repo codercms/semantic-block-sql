@@ -55,7 +55,13 @@ pub(super) fn format(
         } else if node.kind == BodyNodeKind::Comment {
             node.text.to_owned()
         } else {
-            let (output, leaf_diagnostics) = format_leaf(node.kind, node.text, options, indent)?;
+            let (output, leaf_diagnostics) = format_leaf(
+                node.kind,
+                node.text,
+                options,
+                indent,
+                node.capability.as_ref(),
+            )?;
             diagnostics.extend(
                 leaf_diagnostics
                     .into_iter()

@@ -1569,3 +1569,16 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   controls; keep five procedural/VALUES/external audit cases explicitly red.
 - [x] Run focused/full gates and repeat private audits; review semantics,
   ownership, idempotence, comments, diagnostics, atomicity, dependencies/dead code.
+
+## Procedural leaf capability implementation
+
+- [x] Bind static SQL to parser queries and restore procedural INTO/STRICT at
+  their authored token boundaries; preserve comments and repeated branch queries.
+- [x] Preserve parser-recorded datatype references and review transaction command
+  and chain metadata; keep unknown PL parser nodes unsupported.
+- [x] Cover SELECT/RETURNING INTO, CTE leaves, type/rowtype references, arithmetic
+  percent operators, and default/strict transaction policy.
+- [x] Run full gates and review semantics, ownership, idempotence, comments,
+  diagnostics, atomicity, dependencies, and dead code before committing.
+- [x] Resolve the remaining SQL-child idempotence failure: exclude contained
+  query connectors from an outer NOT EXISTS owner; add a synthetic reduction.

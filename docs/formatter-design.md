@@ -1193,3 +1193,18 @@ recordset list width budgets include validated qualified names/relation headers;
 already-expanded child groups do not count as a single compact header line.
 Named CHECK prefixes wrap only when their predicate is still compact, keeping
 existing expanded predicate layouts stable.
+
+### Parser-owned procedural leaf capabilities
+
+PL/pgSQL static SQL queries, transaction commands, and datatype references are
+bound against the pinned parser's JSON nodes. SQL leaves must match parser query
+tokens after removal of exactly the parser-owned procedural INTO span. The SQL
+child uses the canonical formatter; INTO targets are restored at their original
+token boundary, with comments and STRICT preserved. No table-target inference
+or keyword fallback is used. Transaction spelling is checked against command
+kind and chain metadata. Reference datatype spans retain the parser-recorded
+spelling; arithmetic percent operators remain ordinary expressions. Both body
+passes repeat capability binding, structural equivalence, and idempotence.
+Boolean root connectors exclude contained query owners. In particular, NOT
+EXISTS cannot claim an inner WHERE connector and introduce a new authored break
+on the second pass. Transaction commands use the shared comment-preserving emitter.

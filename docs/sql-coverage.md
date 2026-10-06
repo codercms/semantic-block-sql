@@ -221,9 +221,12 @@ Parser-backed PL/pgSQL support is described below.
 
 PL/pgSQL coverage includes:
 
-- declarations;
+- declarations, including parser-owned `%TYPE` and `%ROWTYPE` references;
 - embedded SQL statements, including CTE-led SELECT/INSERT/UPDATE/DELETE and
   static `GRANT`, `ANALYZE`/`ANALYSE`, and `TRUNCATE`;
+- procedural SELECT/RETURNING `INTO` targets and `STRICT`, preserved at their
+  authored position separately from SQL table targets;
+- `COMMIT` and `ROLLBACK`, including `AND CHAIN` and `AND NO CHAIN`;
 - `IF` / `ELSIF` / `ELSE`;
 - exception handlers;
 - loops;
@@ -269,7 +272,6 @@ The following valid PostgreSQL forms are deliberately preserved as unsupported t
 - `JSON_TABLE`;
 - advanced SQL-standard JSON query/value/aggregate forms that are not in the reviewed expression subset;
 - SQL-standard routine body statements outside the reviewed SELECT/DML/RETURN boundary;
-- procedural transaction control;
 - ordered-set aggregate definitions and multi-setting `SET TRANSACTION` forms;
 - VALUES derived relations with ORDER BY suffixes.
 

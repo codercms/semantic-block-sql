@@ -1,3 +1,4 @@
+mod capabilities;
 mod ir;
 mod layout;
 
@@ -16,8 +17,9 @@ pub(super) fn format_single_routine(
 
     let (open_start, open_end, close_start, close_end) = dollar_body_span(source)?;
     let body = &source[open_end..close_start];
-    let body_ir = ir::parse(body)?;
+    let mut body_ir = ir::parse(body)?;
     ir::validate_parser_alignment(&body_ir, &parser_model)?;
+    capabilities::bind(&mut body_ir, &parsed)?;
     let formatted_body = layout::format(&body_ir, options)?;
     let mut warnings = super::semantic_block::validate_hard_width(&formatted_body.output, options)?;
     let mut output = String::with_capacity(source.len() + formatted_body.output.len());
@@ -44,8 +46,9 @@ pub(super) fn format_single_routine(
 
     let second_body = {
         let (_, second_open, second_close, _) = dollar_body_span(&output)?;
-        let second_ir = ir::parse(&output[second_open..second_close])?;
+        let mut second_ir = ir::parse(&output[second_open..second_close])?;
         ir::validate_parser_alignment(&second_ir, &reparsed_model)?;
+        capabilities::bind(&mut second_ir, &reparsed)?;
         layout::format(&second_ir, options)?
     };
     if second_body.output != formatted_body.output {
@@ -229,6 +232,7 @@ fn format_leaf(
     text: &str,
     options: &FormatOptions,
     indent: usize,
+    capability: Option<&capabilities::LeafCapability>,
 ) -> Result<(String, Vec<Diagnostic>), FormatDiagnostic> {
     let mut nested_options = options.clone();
     let indent_width = indent * 4;
@@ -238,6 +242,9 @@ fn format_leaf(
         .saturating_sub(indent_width)
         .max(nested_options.soft_line_width);
     nested_options.semicolon_policy = super::SemicolonPolicy::Preserve;
+    if let Some(output) = capabilities::format(text, capability, &nested_options)? {
+        return Ok((output, Vec::new()));
+    }
     if kind == ir::BodyNodeKind::Sql {
         let formatted = super::format_sql(text, &nested_options)?;
         return Ok((
