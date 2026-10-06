@@ -1424,3 +1424,23 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   No formatting/layout behavior or dependency changes were introduced.
 - [x] Rebuild/install optimized 0.2.1 on PATH and verify matching hashes and the
   installed CLI's syntax-token location. Keep all private files outside the repo.
+
+
+## Authored blank lines after comments
+
+- [x] Reproduce loss of blank lines between dump comment headers and CREATE
+  INDEX statements with a synthetic two-index fixture.
+- [x] Retain the following token's authored newline count when ending comments
+  in the shared emitter; keep existing comment attachment/indentation rules.
+- [x] Cover line/block comments, multiple blank lines, and inline/query comments
+  using semantic equivalence, idempotence, and clean-check assertions.
+- [x] Format the private original Git schema snapshot and verify all 873 dump
+  header gaps retain their original counts; keep its SQL outside the repository.
+- [x] Pass formatting, locked Clippy, Rustdoc, and diff hygiene. Full all-target
+  testing passes all existing and new controls; the same eleven pending cases
+  in the two desired-coverage targets remain red.
+- [x] Rebuild/install optimized 0.2.1 on PATH, verify matching hashes and an
+  installed-CLI blank-line smoke test.
+- [x] Review semantics, authored groups/comments, idempotence, diagnostics,
+  atomicity, module boundaries, dependencies, and dead code. No dependencies,
+  ownership-model expansions, or private domain fixtures were added.

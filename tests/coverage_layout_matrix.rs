@@ -242,3 +242,22 @@ fn comments_and_blank_lines_remain_hard_group_boundaries() {
         ),
     ]);
 }
+
+#[test]
+fn preserves_blank_lines_between_dump_headers_and_sql_statements() {
+    let source = "--\n-- Name: sample_active_idx; Type: INDEX; Schema: public; Owner: -\n--\n\nCREATE UNIQUE INDEX sample_active_idx ON sample_rows USING btree (external_id)\nWHERE (state = 'accepted'::sample_state);\n\n\n--\n-- Name: sample_record_idx; Type: INDEX; Schema: public; Owner: -\n--\n\nCREATE INDEX sample_record_idx ON sample_rows USING btree (record_id);";
+    support::assert_sql(source, source);
+}
+
+#[test]
+fn preserves_authored_blank_lines_after_line_and_block_comments() {
+    for source in [
+        "-- header\n\nSELECT 1;",
+        "-- header\n\n\nSELECT 1;",
+        "/* header */\n\nSELECT 1;",
+        "SELECT -- expression group\n\n    1;",
+        "SELECT id\nFROM sample_rows\n-- predicate group\n\nWHERE active;",
+    ] {
+        support::assert_sql(source, source);
+    }
+}

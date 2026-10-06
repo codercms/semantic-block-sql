@@ -1106,3 +1106,14 @@ Trusted cause ranges remain exact. Skipped-statement messages adjust their
 absolute statement line consistently. File fmt recomputes these locations in
 its output pass; check/diff retain input coordinates. Synthetic CLI coverage
 includes Unicode, CRLF, preceding layout changes, and repeated fmt calls.
+
+
+### Authored whitespace after comments
+
+Blank lines between a comment and following SQL are hard authored boundaries,
+including dump header comments before DDL. The shared token emitter retains the
+next token's authored newline count when terminating a line or block comment.
+Layout plans can still supply the following token's indentation without reducing
+that gap. Comment attachment and inter-statement spacing remain under their
+existing ownership rules. Synthetic fixtures cover dump index headers, line and
+block comments, multiple blank lines, and comments within query groups.

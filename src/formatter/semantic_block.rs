@@ -421,12 +421,12 @@ pub(super) fn format(
         }
 
         if token.is_comment() {
-            let next_starts_authored_line = tokens
+            let next_line_breaks = tokens
                 .get(index + 1)
-                .is_some_and(|next| next.line_breaks_before > 0);
-            if token.kind == Token::SqlComment || next_starts_authored_line {
+                .map_or(0, |next| next.line_breaks_before);
+            if token.kind == Token::SqlComment || next_line_breaks > 0 {
                 let indent = plan.indent_for(index, depths[index]);
-                writer.newline(1, indent);
+                writer.newline(next_line_breaks.max(1), indent);
             }
         }
 
