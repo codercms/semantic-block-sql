@@ -1996,7 +1996,8 @@ pub(super) fn bind_relation_source(
         let join_depth = depths[start];
         let next_boundary = (start + 1..range.end)
             .find(|index| {
-                (tokens[*index].kind == Token::Ascii44 && depths[*index] == base_depth)
+                depths[*index] < join_depth
+                    || (tokens[*index].kind == Token::Ascii44 && depths[*index] == base_depth)
                     || (join_starts.binary_search(index).is_ok() && depths[*index] <= join_depth)
             })
             .unwrap_or(range.end);

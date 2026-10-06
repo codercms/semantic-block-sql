@@ -1788,3 +1788,15 @@ the published 0.3.0 release is unchanged.
   module boundaries and unchanged dependencies; update PR #50.
 - [x] Rebuild/install optimized 0.3.1 on PATH and verify version, hash and
   installed CLI casing smoke test. Correct older goldens to core section 7.
+
+## Nested JOIN predicate indentation
+
+- [x] Add a failing synthetic regression for complete Boolean wrapper chains.
+- [x] Bound JOIN predicates within their typed relation owner and expand the
+  enclosing Boolean wrappers through the existing planner.
+- [x] Cover scalar subqueries, NOT MATERIALIZED CTEs and INSERT sources.
+- [x] Pass 491 tests across 62 targets and all engineering gates; private-copy
+  fmt/check/repeat passes with no unsupported/skipped/errors. Install optimized
+  0.3.1 on PATH and verify its hash and installed CLI behavior.
+- [x] Review semantics, ownership, comments, groups, diagnostics, idempotence,
+  atomicity, dependencies and dead code; commit and update PR #50.

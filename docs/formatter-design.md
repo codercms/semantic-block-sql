@@ -1286,3 +1286,12 @@ Core specification section 7 lowercases the complete type name, including
 uppercase WITH in those names; their expectations are corrected to the core
 contract. CTE WITH and expression AT TIME ZONE remain uppercase grammar. NOW()
 retains the explicit built-in whitelist casing. This adds no syntax capability.
+
+### Expanded JOIN predicate wrappers
+
+JOIN predicate ownership ends before a closing parenthesis of its enclosing
+relation, as determined by the token depth within the typed relation owner.
+When a Boolean root expands, its complete enclosing parenthesis chain expands
+with it. Each retained wrapper has a visible indentation level; atomic
+parenthesized comparisons stay compact. This corrects layout within existing
+syntax and preserves all authored parentheses.

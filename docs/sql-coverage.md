@@ -364,3 +364,9 @@ table/ALTER declarations, casts, SQL signatures and PL/pgSQL declarations,
 including precision modifiers and parser-accepted comments before the suffix.
 CTE `WITH` and expression `AT TIME ZONE` remain uppercase; `NOW()` remains on the
 built-in uppercase whitelist. This is a casing correction within existing syntax.
+
+[`tests/nested_join_predicate_layout.rs`](../tests/nested_join_predicate_layout.rs)
+covers expanded JOIN predicates with two and three enclosing Boolean wrappers,
+scalar subqueries, CTE NOT MATERIALIZED and INSERT query sources. Predicate
+ownership excludes enclosing relation delimiters; expanded wrappers and Boolean
+connectors retain consistent indentation, equivalence and idempotence.

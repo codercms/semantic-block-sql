@@ -1297,8 +1297,16 @@ fn plan_booleans(
                     + compact_width(tokens, index, close + 1, options)
                     > options.soft_line_width;
                 let owns_complete_range = index == range.start && close + 1 == range.end;
-                if contains_boolean
+                let wraps_boolean_root = range.root_depth.is_some_and(|depth| depth >= inner_depth)
+                    && tokens[range.start..index]
+                        .iter()
+                        .all(|token| token.is_comment() || token.kind == Token::Ascii40)
+                    && tokens[close + 1..range.end]
+                        .iter()
+                        .all(|token| token.is_comment() || token.kind == Token::Ascii41);
+                if (contains_boolean || wraps_boolean_root)
                     && (owns_complete_range
+                        || wraps_boolean_root
                         || precedence_boundary
                         || independently_complex
                         || mixed_boolean
