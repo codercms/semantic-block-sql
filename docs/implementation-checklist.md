@@ -1514,3 +1514,15 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Re-audit private schema copies; remaining issues include identity options,
   nested query/call layout, procedural INTO/transaction nodes, and a VALUES
   suffix. Keep all private source and output artifacts outside the repository.
+
+## Remaining migration audit coverage
+
+- [x] Add nine invented shape fixtures after the first complete coverage pass.
+- [x] Reproduce seven failures: identity option layout, deeply nested keyword
+  function calls, procedural parameter %TYPE, procedural INTO, transaction
+  nodes, VALUES suffixes, and external-language routine declarations.
+- [x] Keep array-subquery and recordset/CTE controls; further reductions are
+  required for the private ownership and procedural idempotence failures.
+- [ ] Implement the remaining reviewed capabilities and make this target green.
+- [ ] Repeat private formatting/check/idempotence audits and resolve remaining
+  safety skips before reporting the final coverage and updating the PR.
