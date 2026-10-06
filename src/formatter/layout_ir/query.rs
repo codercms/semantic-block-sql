@@ -43,38 +43,29 @@ pub(super) fn bind_values_relations(
             if tokens[keyword].kind != Token::Values {
                 continue;
             }
-            let rows = (keyword + 1..close)
-                .filter(|index| {
-                    tokens[*index].kind == Token::Ascii40
-                        && structure.depth(*index) == structure.depth(keyword)
-                })
-                .filter_map(|open| {
-                    structure
-                        .matching_parenthesis(open)
-                        .map(|close| (open, close))
-                })
-                .collect::<Vec<_>>();
-            candidates.push(ValuesBlock {
-                span: TokenSpan {
-                    start: keyword,
-                    end: close,
-                    base_depth: structure.depth(keyword),
-                },
+            candidates.push(super::values::bind(
+                tokens,
+                structure,
                 keyword,
-                rows,
-                wrapper: Some((open, close)),
-            });
+                close,
+                Some((open, close)),
+            )?);
         }
         let mut actual_counts = candidates
             .iter()
-            .map(|values| values.rows.len())
+            .map(|values| super::values::capability(values, tokens, structure))
             .collect::<Vec<_>>();
-        let mut expected_counts = expected
-            .iter()
-            .map(|spec| spec.values.rows)
-            .collect::<Vec<_>>();
-        actual_counts.sort_unstable();
-        expected_counts.sort_unstable();
+        let mut expected_counts = expected.iter().map(|spec| spec.values).collect::<Vec<_>>();
+        let key = |spec: &crate::formatter::ownership::ValuesSpec| {
+            (
+                spec.rows,
+                spec.order_items,
+                spec.has_limit_count,
+                spec.has_limit_offset,
+            )
+        };
+        actual_counts.sort_unstable_by_key(key);
+        expected_counts.sort_unstable_by_key(key);
         if actual_counts != expected_counts {
             return Err(FormatDiagnostic::Ownership(format!(
                 "VALUES relation ownership in statement {statement_index} expected row counts {expected_counts:?}, found {actual_counts:?}"
@@ -821,7 +812,7 @@ pub(super) fn bind_window_blocks(
     result
 }
 
-fn bind_query_clauses(
+pub(super) fn bind_query_clauses(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
     select: usize,

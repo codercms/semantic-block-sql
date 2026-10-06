@@ -566,30 +566,13 @@ pub(super) fn bind_values(
     body_start: usize,
     spec: &ValuesSpec,
 ) -> Result<ValuesBlock, FormatDiagnostic> {
-    let rows = (body_start + 1..statement.range.end)
-        .filter(|index| {
-            structure.depth(*index) == statement.base_depth && tokens[*index].kind == Token::Ascii40
-        })
-        .map(|open| {
-            structure
-                .matching_parenthesis(open)
-                .map(|close| (open, close))
-                .ok_or_else(|| {
-                    FormatDiagnostic::Ownership("VALUES row has no closing parenthesis".into())
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    require_count("VALUES", "row count", rows.len(), spec.rows)?;
-    Ok(ValuesBlock {
-        span: TokenSpan {
-            start: statement.range.start,
-            end: statement.range.end,
-            base_depth: statement.base_depth,
-        },
-        keyword: body_start,
-        rows,
-        wrapper: None,
-    })
+    let values = super::values::bind(tokens, structure, body_start, statement.range.end, None)?;
+    if super::values::capability(&values, tokens, structure) != *spec {
+        return Err(FormatDiagnostic::Ownership(
+            "VALUES row/suffix ownership differs from AST".into(),
+        ));
+    }
+    Ok(values)
 }
 
 pub(super) fn bind_create_table(

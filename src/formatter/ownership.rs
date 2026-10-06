@@ -50,6 +50,9 @@ pub(super) struct ArrayListSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ValuesSpec {
     pub rows: usize,
+    pub order_items: usize,
+    pub has_limit_count: bool,
+    pub has_limit_offset: bool,
 }
 
 /// One parser-owned VALUES derived relation, scoped to its top-level statement.

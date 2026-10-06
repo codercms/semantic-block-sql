@@ -129,6 +129,13 @@ fn outer_not_exists_does_not_own_inner_query_connectors() {
 }
 
 #[test]
+fn case_results_include_their_when_then_prefix_in_width_budget() {
+    assert_supported(
+        "SELECT * FROM (SELECT * FROM (SELECT CASE WHEN (array_length(seed.sample_identifiers, 1) > 5) THEN (('prefix_value'::text || ((array_length(seed.sample_identifiers, 1) - 5))::text) || 'suffix_value'::text) ELSE NULL END AS label FROM sample_rows seed) AS inner_rows) AS outer_rows;",
+    );
+}
+
+#[test]
 fn procedural_transaction_nodes_have_reviewed_ownership() {
     assert_supported(
         "CREATE PROCEDURE sample_work() LANGUAGE plpgsql AS $$\nBEGIN\n    COMMIT;\n    ROLLBACK;\n    COMMIT AND CHAIN;\n    ROLLBACK AND NO CHAIN;\nEND;\n$$;",

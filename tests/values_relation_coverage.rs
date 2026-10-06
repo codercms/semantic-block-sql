@@ -47,7 +47,7 @@ fn repeated_nested_values_sources_keep_distinct_owners() {
 #[test]
 fn unsupported_values_shape_reports_its_own_source_location() {
     let source = format!(
-        "SELECT 1;\r\n{}SELECT * FROM (\r\n    VALUES (1), (2) ORDER BY 1\r\n) AS source(id);",
+        "SELECT 1;\r\n{}SELECT * FROM (\r\n    VALUES (1), (2) UNION SELECT 3\r\n) AS source(id);",
         "\r\n".repeat(13)
     );
     let result = format_sql_result(&source, &FormatOptions::default());
@@ -55,7 +55,7 @@ fn unsupported_values_shape_reports_its_own_source_location() {
         .diagnostics
         .iter()
         .find(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
-        .expect("unreviewed VALUES suffix remains unsupported");
+        .expect("unreviewed VALUES set-operation branch remains unsupported");
     assert_eq!(
         diagnostic.source_range.start,
         source.find("VALUES").unwrap()
@@ -86,7 +86,7 @@ fn cli_reports_the_rejected_values_line_and_byte_offset() {
     use std::io::Write;
     use std::process::{Command, Stdio};
     let source = format!(
-        "-- café\r\n{}SELECT * FROM (\r\n    VALUES (1), (2) ORDER BY 1\r\n) AS source(id);",
+        "-- café\r\n{}SELECT * FROM (\r\n    VALUES (1), (2) UNION SELECT 3\r\n) AS source(id);",
         "\r\n".repeat(13)
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_semblock"))
@@ -130,4 +130,58 @@ fn nested_join_wrappers_do_not_collapse_into_values_wrapper() {
         result.output
     );
     assert_reviewed(source);
+}
+
+#[test]
+fn values_suffixes_keep_counts_order_and_authored_groups() {
+    for suffix in [
+        "ORDER BY 1 DESC NULLS LAST LIMIT 2 OFFSET 1",
+        "ORDER BY 1 OFFSET 1 ROWS FETCH FIRST 2 ROWS ONLY",
+        "ORDER BY 1 FETCH NEXT 1 ROW WITH TIES",
+        "LIMIT ALL",
+        "LIMIT 1",
+        "OFFSET 1",
+    ] {
+        assert_reviewed(&format!("VALUES (3), (1), (2) {suffix};"));
+        assert_reviewed(&format!(
+            "SELECT source.id FROM (VALUES (3), (1), (2) {suffix}) AS source(id);"
+        ));
+    }
+    assert_reviewed(
+        "SELECT a.id, b.id FROM (VALUES (1), (2) ORDER BY abs(1), 1 LIMIT (1 + 1)) AS a(id), (VALUES (3), (4) OFFSET 1) AS b(id);",
+    );
+    let source = "VALUES\n    (3),\n\n    -- retained row group\n    (1),\n    (2)\n\nORDER BY\n    1 DESC\n\nLIMIT 2\nOFFSET 1;";
+    assert_sql_layout_only(source, source);
+    for source in [
+        "UPDATE sample_rows SET id = source.id FROM (VALUES (3), (1) ORDER BY 1 LIMIT 1) AS source(id);",
+        "DELETE FROM sample_rows USING (VALUES (3), (1) ORDER BY 1 OFFSET 1) AS source(id) WHERE sample_rows.id = source.id;",
+        "INSERT INTO sample_rows SELECT id FROM (VALUES (3), (1) ORDER BY 1 LIMIT 1) AS source(id);",
+    ] {
+        assert_reviewed(source);
+    }
+}
+
+#[test]
+fn unowned_direct_insert_values_suffix_remains_unchanged() {
+    let source = "INSERT INTO sample_rows VALUES (3), (1) ORDER BY 1 LIMIT 1;";
+    let result = format_sql(source, &FormatOptions::default()).unwrap();
+    assert_eq!(result.output, source);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
+    );
+}
+
+#[test]
+fn values_cte_bodies_use_their_own_statement_capability() {
+    for source in [
+        "WITH seed(id) AS (VALUES (3), (1), (2)) SELECT id FROM seed;",
+        "WITH seed(id) AS MATERIALIZED (VALUES (3), (1), (2) ORDER BY 1 LIMIT 2), other(id) AS (VALUES (4), (5) OFFSET 1) SELECT seed.id FROM seed JOIN other USING (id);",
+        "WITH seed(id) AS (VALUES (1), (2)) UPDATE sample_rows SET enabled = TRUE FROM seed WHERE sample_rows.id = seed.id;",
+        "SELECT id FROM (WITH seed(id) AS (VALUES (1), (2)) SELECT id FROM seed) AS source;",
+    ] {
+        assert_reviewed(source);
+    }
 }

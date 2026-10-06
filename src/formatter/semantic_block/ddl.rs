@@ -4,7 +4,7 @@ use crate::formatter::layout_ir::{
 };
 use crate::formatter::ownership::TokenRange;
 
-use super::lists::plan_owned_delimited_list;
+use super::lists::{plan_keyword_list_at_indent, plan_owned_delimited_list};
 use super::*;
 
 pub(super) fn plan_values_statements(
@@ -24,7 +24,17 @@ pub(super) fn plan_values_statements(
                 values.span.end,
                 context.options,
             );
-        if values.rows.len() <= 1 && !authored && width <= context.options.soft_line_width {
+        let has_authored_suffix = values
+            .clauses
+            .ordered_boundaries(values.span.end)
+            .into_iter()
+            .filter(|&index| index < values.span.end)
+            .any(|index| context.tokens[index].line_breaks_before > 0);
+        if values.rows.len() <= 1
+            && !authored
+            && !has_authored_suffix
+            && width <= context.options.soft_line_width
+        {
             continue;
         }
         let keyword_indent = values
@@ -37,10 +47,35 @@ pub(super) fn plan_values_statements(
                 parent_indent + 1
             });
         let indent = keyword_indent + 1;
+        if let Some((_, close)) = values.rows.last() {
+            plan.set_indent(values.keyword + 1..close + 1, indent);
+        }
         for &(open, close) in &values.rows {
             plan.set_indent(open..close + 1, indent);
             plan.break_before(open, 1, indent);
         }
+        if let Some(order) = values.clauses.order_by {
+            plan_keyword_list_at_indent(
+                context,
+                order + 1,
+                values.clauses.next_after(order, values.span.end),
+                values.span.base_depth,
+                keyword_indent,
+                false,
+                plan,
+            );
+        }
+        plan_clause_boundaries(
+            context,
+            values
+                .clauses
+                .ordered_boundaries(values.span.end)
+                .into_iter()
+                .filter(|&index| index < values.span.end),
+            keyword_indent,
+            true,
+            plan,
+        );
     }
 }
 

@@ -470,6 +470,7 @@ pub(super) fn format(
             plan.rebase_indents(open + 1..close + 1, current, desired);
         }
     }
+    plan_case_result_boundaries(&tokens, &expression_ranges, options, &mut plan);
     plan_expression_comment_continuations(&tokens, &expression_ranges, &mut plan);
     plan_ctes(&tokens, depths, layout.with_blocks(), &mut plan);
 
@@ -1280,6 +1281,43 @@ fn plan_booleans(
         }
         if let Some(close) = range.wrapper_close {
             plan.break_before(close, 1, root_indent.saturating_sub(1));
+        }
+    }
+}
+
+fn plan_case_result_boundaries(
+    tokens: &[SqlToken<'_>],
+    expressions: &[ExpressionRange],
+    options: &FormatOptions,
+    plan: &mut LayoutPlan,
+) {
+    for result in expressions
+        .iter()
+        .filter(|range| range.kind == ExpressionOwnerKind::CaseResult)
+    {
+        let Some((&line_start, line_break)) = plan
+            .before
+            .iter()
+            .filter(|(index, _)| **index <= result.start)
+            .max_by_key(|(index, _)| **index)
+        else {
+            continue;
+        };
+        if line_start == result.start {
+            continue;
+        }
+        let indent = line_break.indent;
+        let line_end = plan
+            .before
+            .keys()
+            .copied()
+            .filter(|index| result.start < *index && *index < result.end)
+            .min()
+            .unwrap_or(result.end);
+        if indent * INDENT_WIDTH + compact_width(tokens, line_start, line_end, options)
+            > options.hard_line_width
+        {
+            plan.break_before(result.start, 1, indent + 1);
         }
     }
 }

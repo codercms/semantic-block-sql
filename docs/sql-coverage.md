@@ -41,7 +41,8 @@ Reviewed structural support includes:
 - `CASE`;
 - filtered and ordered aggregates;
 - named and inline window definitions;
-- `VALUES`;
+- standalone, CTE-body, and derived `VALUES`, including `ORDER BY`, `LIMIT`, `OFFSET`,
+  and `FETCH` suffixes;
 - reviewed subqueries inside DML expressions.
 
 Authored multiline list and predicate groups, blank lines, and comment boundaries are preserved as structural presentation choices.
@@ -273,7 +274,7 @@ The following valid PostgreSQL forms are deliberately preserved as unsupported t
 - advanced SQL-standard JSON query/value/aggregate forms that are not in the reviewed expression subset;
 - SQL-standard routine body statements outside the reviewed SELECT/DML/RETURN boundary;
 - ordered-set aggregate definitions and multi-setting `SET TRANSACTION` forms;
-- VALUES derived relations with ORDER BY suffixes.
+- VALUES set-operation branches and direct INSERT VALUES query suffixes.
 
 This list highlights known high-value boundaries; it is not a promise that every PostgreSQL feature not listed here is already supported.
 

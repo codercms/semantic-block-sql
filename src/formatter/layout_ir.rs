@@ -13,6 +13,7 @@ mod function_calls;
 mod migration_ddl;
 mod query;
 mod statement;
+mod values;
 
 use self::query::{
     bind_predicates, bind_queries, bind_set_operations, bind_values_relations, bind_window_blocks,
@@ -354,6 +355,7 @@ pub(super) struct ValuesBlock {
     pub keyword: usize,
     pub rows: Vec<(usize, usize)>,
     pub wrapper: Option<(usize, usize)>,
+    pub clauses: QueryClauses,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

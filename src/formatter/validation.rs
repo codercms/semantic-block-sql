@@ -297,9 +297,7 @@ fn collect_query_specs(
             validate_values_select(query)?;
             values_relations.push(ValuesRelationSpec {
                 statement_index,
-                values: ValuesSpec {
-                    rows: query.values_lists.len(),
-                },
+                values: values_spec(query),
             });
         }
         Ok(())
@@ -371,6 +369,10 @@ fn validated_nested_cte_specs(node: &NodeEnum) -> Result<Vec<CteStatementSpec>, 
             .and_then(|query| query.node.as_ref())
             .ok_or("empty common table expression")?;
         let spec = match query {
+            NodeEnum::SelectStmt(select) if is_values_select_shape(select) => {
+                validate_values_select(select)?;
+                StatementSpec::Values(values_spec(select))
+            }
             NodeEnum::SelectStmt(select) => {
                 StatementSpec::Select(validate_select(select, with_clause.recursive)?)
             }
@@ -400,9 +402,7 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
     match node {
         NodeEnum::SelectStmt(select) if is_values_select_shape(select) => {
             validate_values_select(select)?;
-            Ok(StatementSpec::Values(ValuesSpec {
-                rows: select.values_lists.len(),
-            }))
+            Ok(StatementSpec::Values(values_spec(select)))
         }
         NodeEnum::SelectStmt(select) => Ok(StatementSpec::Select(validate_select(select, false)?)),
         NodeEnum::InsertStmt(insert) => {
@@ -1312,6 +1312,15 @@ fn validate_values_select(select: &SelectStmt) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn values_spec(select: &SelectStmt) -> ValuesSpec {
+    ValuesSpec {
+        rows: select.values_lists.len(),
+        order_items: select.sort_clause.len(),
+        has_limit_count: select.limit_count.is_some(),
+        has_limit_offset: select.limit_offset.is_some(),
+    }
+}
+
 fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'static str> {
     if create.relation.is_none() {
         return Err("CREATE TABLE without a relation");
@@ -1984,6 +1993,12 @@ fn validate_insert(insert: &InsertStmt) -> Result<InsertSpec, &'static str> {
 
             if !select.values_lists.is_empty() {
                 validate_select_fields(select, true)?;
+                if !select.sort_clause.is_empty()
+                    || select.limit_count.is_some()
+                    || select.limit_offset.is_some()
+                {
+                    return Err("INSERT VALUES query suffix");
+                }
                 if SetOperation::try_from(select.op).unwrap_or(SetOperation::Undefined)
                     != SetOperation::SetopNone
                     || select.larg.is_some()
@@ -2493,6 +2508,9 @@ fn validate_with_clause(with_clause: &pg_query::protobuf::WithClause) -> Result<
             .and_then(|query| query.node.as_ref())
             .ok_or("empty common table expression")?;
         match query {
+            NodeEnum::SelectStmt(select) if is_values_select_shape(select) => {
+                validate_values_select(select)?;
+            }
             NodeEnum::SelectStmt(select) => {
                 let _ = validate_select(select, with_clause.recursive)?;
             }
@@ -2697,9 +2715,6 @@ fn is_values_select_shape(select: &SelectStmt) -> bool {
         && select.where_clause.is_none()
         && select.group_clause.is_empty()
         && select.having_clause.is_none()
-        && select.sort_clause.is_empty()
-        && select.limit_offset.is_none()
-        && select.limit_count.is_none()
 }
 
 /// Localize a rejected VALUES shape using its parser-owned first expression.

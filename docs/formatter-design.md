@@ -1208,3 +1208,19 @@ passes repeat capability binding, structural equivalence, and idempotence.
 Boolean root connectors exclude contained query owners. In particular, NOT
 EXISTS cannot claim an inner WHERE connector and introduce a new authored break
 on the second pass. Transaction commands use the shared comment-preserving emitter.
+
+### VALUES suffix ownership
+
+Standalone and derived VALUES carry row counts, ORDER BY item counts, and limit/
+offset presence. A shared binder consumes consecutive row groups before binding
+query suffix clauses, so suffix expression parentheses cannot claim row ownership.
+Lexical capabilities must match the AST record, including repeated sources.
+CTE bodies use the existing exhaustive VALUES statement variant rather than a
+SELECT spec; nested CTEs and their enclosing SELECT/DML keep separate owners.
+Suffix lists and clause boundaries reuse the query list planners, while comments
+between rows inherit the row group's indentation. Set-operation VALUES branches
+and direct INSERT VALUES suffixes remain explicit fixture-backed boundaries.
+Enabling VALUES CTEs exposed a CASE branch whose condition and result each fit
+but whose combined WHEN/THEN line did not. Typed CASE result ranges now include
+the current planned line prefix in their hard-width budget and may begin a
+separate result line. No expression syntax is added, moved, or split.

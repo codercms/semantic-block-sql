@@ -1582,3 +1582,17 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   diagnostics, atomicity, dependencies, and dead code before committing.
 - [x] Resolve the remaining SQL-child idempotence failure: exclude contained
   query connectors from an outer NOT EXISTS owner; add a synthetic reduction.
+
+## VALUES suffix implementation
+
+- [x] Bind row groups separately from suffix expression parentheses; verify
+  row/order counts and limit/offset capabilities for each source.
+- [x] Reuse list/clause planners and preserve row comments and authored groups.
+- [x] Cover standalone/derived ORDER, LIMIT/OFFSET/FETCH, repeated sources,
+  expression parentheses, and DML derived sources; retain explicit neighbors.
+- [x] Add a private-audit reduction for VALUES CTE bodies; carry the explicit
+  statement variant through ordinary, nested, materialized, and DML CTE owners.
+- [x] Re-audit newly enabled VALUES CTEs; reproduce and fix the CASE result
+  prefix width failure using a generic nested-query fixture.
+- [x] Run full gates, repeat private audits, and review safety/module boundaries,
+  idempotence, groups, diagnostics, atomicity, dependencies, and dead code.
