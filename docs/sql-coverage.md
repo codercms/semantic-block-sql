@@ -350,3 +350,10 @@ and 160 columns, including strict policy and CRLF. Supported siblings still wrap
 breakable predicates and report indivisible-width warnings. The protected output
 ranges survive routine-header and preceding-statement shifts into document
 validation; see the over-width fixture in `tests/review_combinations.rs`.
+
+Nested relation indentation is covered by
+[`tests/nested_relation_indentation.rs`](../tests/nested_relation_indentation.rs):
+scalar queries, views with JSON aggregation, LATERAL nesting, comments, nested
+JOIN wrappers and comma-separated wrapped sources. Wrapper contents indent one
+level beneath their owner and closing parentheses align with it. These fixtures
+strengthen layout coverage without expanding the PostgreSQL grammar boundary.

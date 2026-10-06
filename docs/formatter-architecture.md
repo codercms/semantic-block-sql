@@ -815,3 +815,10 @@ parsing in their current source frame. Procedural formatting owns body validatio
 leaf adaptation and rendering; other routine modules no longer depend on it for
 generic declaration helpers. The SQL adapters' duplicate ownership construction
 and language-location helper are removed.
+
+Relation-source layout derives its base display indentation from the owning
+query clause, then applies parser-bound relative depths for JOINs and wrappers.
+Comma-separated sources add their list level. Direct wrapper tokens, including
+comments, receive that contextual indentation; nested query/expression owners
+remain separate. Raw scanner depth does not replace an expanded query's display
+indentation.

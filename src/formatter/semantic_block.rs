@@ -415,7 +415,7 @@ pub(super) fn format(
             {
                 expanded_selects.insert(select.query_start);
             }
-            plan_relation_source(source, &mut plan);
+            plan_relation_source(source, depths, &mut plan);
         }
     }
     let insert_query_starts = plan_insert_statements(&context, &inserts, &mut plan);
@@ -920,10 +920,11 @@ fn plan_query_clauses(
     for query in queries {
         let select = query.select;
         let base_depth = query.base_depth;
-        if let Some(source) = &query.from {
-            plan_relation_source(source, plan);
-        }
         let indent = query_indent(query, plan);
+        if let Some(source) = &query.from {
+            plan.token_indents[source.introducer] = Some(indent);
+            plan_relation_source(source, depths, plan);
+        }
         let end = query.end;
         let has_join = query
             .from

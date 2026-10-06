@@ -1751,3 +1751,20 @@ Self-review checked typed outcomes, canonical metadata retention, declaration
 source frames, source/output ranges, comments/groups, safety/idempotence and
 strict atomicity. Public behavior, dependency surface and reviewed syntax remain
 unchanged. Existing fixtures validate behavior preservation for this refactor.
+
+## Nested relation indentation regression
+
+- [x] Reproduce wrapped JOIN indentation escaping its expanded query owner with
+  invented scalar/view/LATERAL fixtures, without private SQL or domains.
+- [x] Add red neighboring cases for comment termination and comma-list wrappers;
+  cover nested wrapper levels using exact output, equivalence and idempotence.
+- [x] Derive relation indentation from the contextual query clause and retain
+  relative typed JOIN/wrapper depths; indent direct wrapper tokens only.
+- [x] Pass all 487 tests across 60 targets and all five engineering gates;
+  audit current/original private copies with zero unsupported/skipped/errors,
+  clean check and byte-identical repeated formatting.
+- [x] Review typed relation ownership, contextual/relative indentation, comments,
+  nested query/expression boundaries, semantics, idempotence, diagnostics, atomic
+  rewriting, dependencies and dead code. No parser or dependency was added.
+- [x] Prepare the coherent batch and follow-up PR; install the fresh build on
+  PATH with a matching optimized release hash.
