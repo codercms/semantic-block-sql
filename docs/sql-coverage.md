@@ -357,3 +357,10 @@ scalar queries, views with JSON aggregation, LATERAL nesting, comments, nested
 JOIN wrappers and comma-separated wrapped sources. Wrapper contents indent one
 level beneath their owner and closing parentheses align with it. These fixtures
 strengthen layout coverage without expanding the PostgreSQL grammar boundary.
+
+[`tests/temporal_type_casing.rs`](../tests/temporal_type_casing.rs) verifies lowercase
+`timestamp`/`time` names and their complete `with/without time zone` suffixes in
+table/ALTER declarations, casts, SQL signatures and PL/pgSQL declarations,
+including precision modifiers and parser-accepted comments before the suffix.
+CTE `WITH` and expression `AT TIME ZONE` remain uppercase; `NOW()` remains on the
+built-in uppercase whitelist. This is a casing correction within existing syntax.

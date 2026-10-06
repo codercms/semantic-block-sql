@@ -1,6 +1,6 @@
 SELECT
     payload::public.custom_type[] AS typed_payload,
-    CAST(created_at AS timestamp(3) WITH time zone) AS created_ts,
+    CAST(created_at AS timestamp(3) with time zone) AS created_ts,
     CAST(payload AS public.other_type[]) AS other_payload,
     ARRAY[1, 2, 3]::integer[] AS ids,
     ARRAY[ARRAY[1, 2], ARRAY[3, 4]] AS matrix,

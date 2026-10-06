@@ -1278,3 +1278,11 @@ diagnostics, warnings and source/output protection across adapters. Declaration
 ownership and generic helpers belong to `routine_header`, with one AST-backed
 constructor used by SQL, external and procedural routines. These changes clarify
 module responsibilities without changing public behavior or the core contract.
+
+### Temporal type suffix casing correction
+
+Core specification section 7 lowercases the complete type name, including
+`with/without time zone`. Older expression/type-alias goldens incorrectly retained
+uppercase WITH in those names; their expectations are corrected to the core
+contract. CTE WITH and expression AT TIME ZONE remain uppercase grammar. NOW()
+retains the explicit built-in whitelist casing. This adds no syntax capability.

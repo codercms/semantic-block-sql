@@ -640,13 +640,13 @@ fn is_keyword_like(kind: Token) -> bool {
 }
 
 fn is_contextual_type_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
-    let previous = index
-        .checked_sub(1)
-        .and_then(|previous| tokens.get(previous));
-    let before_previous = index
-        .checked_sub(2)
-        .and_then(|before_previous| tokens.get(before_previous));
-    let next = tokens.get(index + 1);
+    let previous_index = previous_non_comment(tokens, index);
+    let previous = previous_index.map(|index| &tokens[index]);
+    let before_previous = previous_index
+        .and_then(|index| previous_non_comment(tokens, index))
+        .map(|index| &tokens[index]);
+    let next_index = next_non_comment(tokens, index);
+    let next = next_index.map(|index| &tokens[index]);
 
     match tokens[index].kind {
         Token::DoubleP => next.is_some_and(|next| next.kind == Token::Precision),
@@ -657,6 +657,12 @@ fn is_contextual_type_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
         Token::Varying => previous.is_some_and(|previous| {
             matches!(previous.kind, Token::Bit | Token::CharP | Token::Character)
         }),
+        Token::With | Token::Without => {
+            next.is_some_and(|next| next.kind == Token::Time)
+                && next_index
+                    .and_then(|index| next_non_comment(tokens, index))
+                    .is_some_and(|index| tokens[index].kind == Token::Zone)
+        }
         Token::Zone => {
             previous.is_some_and(|previous| previous.kind == Token::Time)
                 && before_previous.is_some_and(|before_previous| {

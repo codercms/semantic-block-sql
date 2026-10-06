@@ -11,7 +11,7 @@
 - [x] Update coverage, architecture, README/guide as needed; run full gates.
 - [x] Re-audit private copies, install the fresh binary, and update the PR.
 
-Status: **0.3.1 nested relation indentation fix complete**
+Status: **0.3.1 nested relation indentation and temporal type casing fixes complete**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
@@ -1773,3 +1773,18 @@ unchanged. Existing fixtures validate behavior preservation for this refactor.
 the optimized PATH executable reports 0.3.1 and matches the build hash. All 487
 tests and required engineering gates pass. PR #50 includes the version bump;
 the published 0.3.0 release is unchanged.
+
+## Temporal type suffix casing
+
+- [x] Reproduce uppercase WITH inside a lowercase temporal type with a red
+  declaration/cast fixture; cover precision, SQL/PL routines and comments.
+- [x] Recognize the bounded time-zone suffix in the existing contextual
+  type-word classifier; retain CTE WITH and AT TIME ZONE keyword casing.
+- [x] Pass focused casing/lexical tests and preserve NOW() whitelist behavior.
+- [x] Pass all 490 tests across 61 targets and five engineering gates; private
+  copy fmt/check and byte-identical repeat audit have no unsupported/skipped/errors.
+- [x] Review bounded contextual casing, quoted/protected names, grammar/type
+  distinctions, comments, semantics, idempotence, diagnostics, atomicity,
+  module boundaries and unchanged dependencies; update PR #50.
+- [x] Rebuild/install optimized 0.3.1 on PATH and verify version, hash and
+  installed CLI casing smoke test. Correct older goldens to core section 7.
