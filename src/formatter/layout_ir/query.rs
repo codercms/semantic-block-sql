@@ -6,7 +6,7 @@ use super::*;
 use crate::formatter::ownership::{
     QuerySpec, SelectSpec, StatementSpec, StatementTokens, ViewCheckSpec,
 };
-use crate::formatter::tokens::{is_join_start, is_query_clause_start};
+use crate::formatter::tokens::is_query_clause_start;
 
 /// Match parser-owned VALUES relations as counted groups within each statement.
 /// Only a parenthesis whose first significant token is VALUES can own a derived
@@ -915,32 +915,8 @@ pub(super) fn bind_predicates(
                 query.indent,
             );
         }
-        for index in query.select + 1..query.end {
-            if depths[index] != query.base_depth
-                || tokens[index].kind != Token::On
-                || tokens
-                    .get(index + 1)
-                    .is_some_and(|next| next.kind == Token::Conflict)
-            {
-                continue;
-            }
-            let end = (index + 1..query.end)
-                .find(|candidate| {
-                    depths[*candidate] < query.base_depth
-                        || (depths[*candidate] == query.base_depth
-                            && (is_query_clause_start(tokens, *candidate)
-                                || is_join_start(tokens, *candidate)))
-                })
-                .unwrap_or(query.end);
-            push_predicate(
-                &mut result,
-                &mut seen,
-                PredicateKind::JoinOn,
-                index,
-                end,
-                query.base_depth,
-                query.indent,
-            );
+        if let Some(source) = &query.from {
+            push_relation_join_predicates(&mut result, &mut seen, source, query.indent);
         }
     }
 
@@ -974,7 +950,12 @@ pub(super) fn bind_predicates(
             }
             StatementLayout::Update(update) => {
                 if let Some(source) = &update.from {
-                    push_relation_join_predicates(&mut result, &mut seen, source);
+                    push_relation_join_predicates(
+                        &mut result,
+                        &mut seen,
+                        source,
+                        source.base_depth,
+                    );
                 }
                 if let Some(index) = update.where_clause {
                     push_predicate(
@@ -990,7 +971,12 @@ pub(super) fn bind_predicates(
             }
             StatementLayout::Delete(delete) => {
                 if let Some(source) = &delete.using {
-                    push_relation_join_predicates(&mut result, &mut seen, source);
+                    push_relation_join_predicates(
+                        &mut result,
+                        &mut seen,
+                        source,
+                        source.base_depth,
+                    );
                 }
                 if let Some(index) = delete.where_clause {
                     push_predicate(
@@ -1005,7 +991,12 @@ pub(super) fn bind_predicates(
                 }
             }
             StatementLayout::Merge(merge) => {
-                push_relation_join_predicates(&mut result, &mut seen, &merge.source);
+                push_relation_join_predicates(
+                    &mut result,
+                    &mut seen,
+                    &merge.source,
+                    merge.source.base_depth,
+                );
                 push_predicate(
                     &mut result,
                     &mut seen,
@@ -1099,6 +1090,7 @@ fn push_relation_join_predicates(
     result: &mut Vec<PredicateBlock>,
     seen: &mut HashSet<usize>,
     source: &RelationSourceBlock,
+    owner_indent: usize,
 ) {
     for join in &source.joins {
         if let Some((introducer, end)) = join.predicate {
@@ -1108,8 +1100,8 @@ fn push_relation_join_predicates(
                 PredicateKind::JoinOn,
                 introducer,
                 end,
-                source.base_depth,
-                source.base_depth,
+                join.depth,
+                owner_indent + join.depth.saturating_sub(source.base_depth),
             );
         }
     }

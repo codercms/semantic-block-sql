@@ -123,3 +123,65 @@ fn external_language_declarations_preserve_body_literals() {
         "CREATE FUNCTION sample_extension(integer) RETURNS text LANGUAGE C IMMUTABLE STRICT AS '$libdir/sample_extension', 'sample_entry';",
     );
 }
+
+#[test]
+fn parenthesized_join_trees_own_long_on_predicates() {
+    assert_supported(
+        "SELECT a.id FROM ((sample_rows a JOIN sample_details d ON (((a.sample_reference_identifier_one = d.sample_reference_identifier_one) AND (a.sample_reference_identifier_two = d.sample_reference_identifier_two)))));",
+    );
+}
+
+#[test]
+fn array_element_groups_expand_in_predicates_and_case_conditions() {
+    let values = (1..=4)
+        .map(|index| format!("'state_{index}'::sample_schema.sample_status_type"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_supported(&format!(
+        "SELECT id FROM sample_rows WHERE status = ANY (ARRAY[{values}]);"
+    ));
+    assert_supported(&format!(
+        "SELECT CASE WHEN status = ANY (ARRAY[{values}]) THEN 1 ELSE 2 END FROM sample_rows;"
+    ));
+}
+
+#[test]
+fn array_constructors_keep_nested_arrays_and_subscripts_distinct() {
+    assert_supported("SELECT ARRAY[[1,2],[3,4]], sample_values[1:2] FROM sample_rows;");
+    assert_supported("SELECT ARRAY[\n    1,\n\n    -- retained element group\n    2\n];");
+}
+
+#[test]
+fn check_array_elements_and_nested_unsupported_expressions_are_traversed() {
+    let values = (1..=3)
+        .map(|index| format!("'state_{index}'::sample_schema.sample_long_status_type"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_supported(&format!(
+        "CREATE TABLE sample_rows (status text, CHECK (status = ANY (ARRAY[{values}])));"
+    ));
+    let source = "SELECT ARRAY[json_value(payload, '$.id')] FROM sample_rows;";
+    let result = semblock::format_sql_result(source, &semblock::FormatOptions::default());
+    assert_eq!(result.output, source);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.rule_id == "syntax.unsupported")
+    );
+}
+
+#[test]
+fn named_check_constraints_include_their_prefix_in_width_budget() {
+    let name = "sample_".repeat(8);
+    assert_supported(&format!(
+        "CREATE TABLE sample_rows (status text, reason text, CONSTRAINT {name}check CHECK (((status != 'blocked'::sample_schema.sample_status_type) OR (reason IS NOT NULL))));"
+    ));
+}
+
+#[test]
+fn lateral_column_definitions_include_their_relation_header_in_width_budget() {
+    assert_supported(
+        "SELECT result.id FROM (SELECT result.id FROM (SELECT base.id FROM sample_rows base CROSS JOIN LATERAL sample_recordset(base.payload) source(sample_id integer, sample_kind text, sample_label text, sample_created_at timestamp with time zone, sample_payload jsonb)) result) result;",
+    );
+}

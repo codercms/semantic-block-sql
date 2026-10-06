@@ -114,19 +114,30 @@ impl LayoutPlan {
     }
 
     fn shift_indents(&mut self, range: std::ops::Range<usize>, levels: usize) {
-        if levels == 0 {
+        self.rebase_indents(range, 0, levels);
+    }
+
+    fn rebase_indents(&mut self, range: std::ops::Range<usize>, current: usize, desired: usize) {
+        if current == desired {
             return;
         }
+        let adjust = |indent: usize| {
+            if desired > current {
+                indent + desired - current
+            } else {
+                indent.saturating_sub(current - desired)
+            }
+        };
         for (index, line_break) in &mut self.before {
             if range.contains(index) {
-                line_break.indent += levels;
+                line_break.indent = adjust(line_break.indent);
             }
         }
         for indent in self.token_indents[range.clone()].iter_mut().flatten() {
-            *indent += levels;
+            *indent = adjust(*indent);
         }
         for offset in &mut self.indent_offsets[range] {
-            *offset += levels;
+            *offset = adjust(*offset);
         }
     }
 }
@@ -220,8 +231,8 @@ pub(super) fn format(
     for &index in layout.identifier_tokens() {
         tokens[index].role = TokenRole::Identifier;
     }
-    for &index in layout.function_name_tokens() {
-        tokens[index].role = TokenRole::FunctionName;
+    for call in layout.function_calls() {
+        tokens[call.name].role = TokenRole::FunctionName;
     }
     let cases = case_ranges(&tokens, options);
     let selects = layout.selects().cloned().collect::<Vec<_>>();
@@ -265,6 +276,53 @@ pub(super) fn format(
                     .filter_map(|join| join.using_open.map(|open| (open, depths[open])))
             }),
     );
+    let definition_headers = layout
+        .queries()
+        .iter()
+        .filter_map(|query| query.from.as_ref().map(|source| (source, query.indent)))
+        .chain(
+            updates
+                .iter()
+                .filter_map(|update| update.from.as_ref())
+                .map(|source| (source, source.base_depth)),
+        )
+        .chain(
+            deletes
+                .iter()
+                .filter_map(|delete| delete.using.as_ref())
+                .map(|source| (source, source.base_depth)),
+        )
+        .chain(
+            merges
+                .iter()
+                .map(|merge| (&merge.source, merge.source.base_depth)),
+        )
+        .flat_map(|(source, indent)| {
+            source.definition_lists.iter().map(move |&(open, _)| {
+                let prefix = source
+                    .joins
+                    .iter()
+                    .filter(|join| {
+                        join.start < open && join.predicate.is_none_or(|(on, _)| open < on)
+                    })
+                    .map(|join| join.start)
+                    .max()
+                    .or_else(|| {
+                        source
+                            .items
+                            .iter()
+                            .find(|item| item.start <= open && open < item.end)
+                            .map(|item| item.start)
+                    })
+                    .unwrap_or(source.range.start);
+                (
+                    open,
+                    prefix,
+                    indent + depths[open].saturating_sub(source.base_depth),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
     let parenthesized_lists = parenthesized_lists(
         &tokens,
         depths,
@@ -276,6 +334,9 @@ pub(super) fn format(
             join_using_lists: &join_using_lists,
             utilities: &utilities,
             values: &values,
+            arrays: layout.arrays(),
+            calls: layout.function_calls(),
+            definition_headers: &definition_headers,
         },
         options,
     );
@@ -357,7 +418,7 @@ pub(super) fn format(
     plan_views(&context, &views, &mut plan);
     plan_materialized_views(&context, &materialized_views, &mut plan);
     plan_values_statements(&context, &values, &mut plan);
-    plan_create_tables(&context, &create_tables, &mut plan);
+    plan_create_tables(&context, &create_tables, &boolean_ranges, &mut plan);
     plan_create_indexes(&context, &create_indexes, &mut plan);
     plan_alter_tables(&context, &alter_tables, &mut plan);
     plan_utility_statements(&context, &utilities, &mut plan);
@@ -388,6 +449,20 @@ pub(super) fn format(
     plan_set_operations(&context, layout.set_operations(), &mut plan);
     plan_cases(&tokens, depths, &cases, &mut plan);
     plan_booleans(&tokens, depths, &boolean_ranges, parens, options, &mut plan);
+    // Array constructors may live in CASE/predicate groups whose final parent
+    // line is planned after argument lists. Rebase the already-owned bracket
+    // subtree, including nested CASE/query groups, instead of replanning it.
+    for &(open, close) in layout.arrays() {
+        if let Some(current) = plan.before.get(&close).map(|line_break| line_break.indent) {
+            let desired = plan
+                .before
+                .iter()
+                .filter(|(index, _)| **index <= open)
+                .max_by_key(|(index, _)| **index)
+                .map_or(current, |(_, line_break)| line_break.indent);
+            plan.rebase_indents(open + 1..close + 1, current, desired);
+        }
+    }
     plan_expression_comment_continuations(&tokens, &expression_ranges, &mut plan);
     plan_ctes(&tokens, depths, layout.with_blocks(), &mut plan);
 
@@ -1049,6 +1124,7 @@ fn plan_booleans(
                 range.root_indent + plan.indent_offsets[range.start],
             )
             .max(range.root_indent + plan.indent_offsets[range.start]);
+
         if !matches!(
             range.kind,
             ExpressionOwnerKind::AssignmentValue

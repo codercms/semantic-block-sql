@@ -7,7 +7,7 @@ pub(super) fn bind(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
     specs: &[FunctionCallSpec],
-) -> Result<Vec<usize>, FormatDiagnostic> {
+) -> Result<Vec<super::FunctionCallBlock>, FormatDiagnostic> {
     let mut names = Vec::new();
     for spec in specs {
         let (location, name) = match spec {
@@ -43,6 +43,7 @@ pub(super) fn bind(
                 "function call name is empty".into(),
             ));
         }
+        let start = cursor;
         for (part, expected) in name.iter().enumerate() {
             if part > 0 {
                 let dot = next_non_comment(tokens, cursor)
@@ -67,12 +68,15 @@ pub(super) fn bind(
             .ok_or_else(|| {
                 FormatDiagnostic::Ownership("function argument list is missing".into())
             })?;
-        if structure.matching_parenthesis(open).is_none() {
-            return Err(FormatDiagnostic::Ownership(
-                "function argument list is unclosed".into(),
-            ));
-        }
-        names.push(cursor);
+        let close = structure.matching_parenthesis(open).ok_or_else(|| {
+            FormatDiagnostic::Ownership("function argument list is unclosed".into())
+        })?;
+        names.push(super::FunctionCallBlock {
+            start,
+            name: cursor,
+            open,
+            close,
+        });
     }
     names.sort_unstable();
     names.dedup();

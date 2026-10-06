@@ -1555,3 +1555,17 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
   gates; five remaining audit fixture cases are still red.
 - [x] Re-audit private copies and review semantics, module boundaries,
   idempotence, comments/groups, diagnostics, atomicity, dependencies/dead code.
+
+## Nested expression and relation group implementation
+
+- [x] Add red fixtures for nested ON predicates, wide array elements in
+  predicates/CASE, named CHECK prefixes, and LATERAL column-definition budgets.
+- [x] Replace the SELECT-only outer-depth ON scan with shared typed join owners.
+- [x] Bind array brackets/counts separately from subscripts; complete traversal
+  of array and DDL expression children and retain nested unsupported boundaries.
+- [x] Include function qualification and owned relation prefixes in list budgets;
+  preserve expanded child groups and final CASE/predicate array indentation.
+- [x] Cover nested arrays, comments, CHECK arrays, and existing layout/alias
+  controls; keep five procedural/VALUES/external audit cases explicitly red.
+- [x] Run focused/full gates and repeat private audits; review semantics,
+  ownership, idempotence, comments, diagnostics, atomicity, dependencies/dead code.

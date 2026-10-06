@@ -40,6 +40,12 @@ pub(super) enum FunctionCallSpec {
     OperatorEscape { location: usize, keyword: Token },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ArrayListSpec {
+    pub location: usize,
+    pub elements: usize,
+}
+
 /// Top-level VALUES capabilities proven by PostgreSQL AST validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ValuesSpec {
@@ -630,6 +636,7 @@ pub(super) struct SupportedDocument {
     queries: Vec<QuerySpec>,
     values_relations: Vec<ValuesRelationSpec>,
     function_calls: Vec<FunctionCallSpec>,
+    arrays: Vec<ArrayListSpec>,
 }
 
 impl SupportedDocument {
@@ -640,6 +647,7 @@ impl SupportedDocument {
             queries: Vec::new(),
             values_relations: Vec::new(),
             function_calls: Vec::new(),
+            arrays: Vec::new(),
         }
     }
 
@@ -648,12 +656,14 @@ impl SupportedDocument {
         queries: Vec<QuerySpec>,
         values_relations: Vec<ValuesRelationSpec>,
         function_calls: Vec<FunctionCallSpec>,
+        arrays: Vec<ArrayListSpec>,
     ) -> Self {
         Self {
             statements,
             queries,
             values_relations,
             function_calls,
+            arrays,
         }
     }
 
@@ -671,6 +681,10 @@ impl SupportedDocument {
 
     pub fn function_calls(&self) -> &[FunctionCallSpec] {
         &self.function_calls
+    }
+
+    pub fn arrays(&self) -> &[ArrayListSpec] {
+        &self.arrays
     }
 }
 

@@ -1179,3 +1179,17 @@ option capability within their own spans, preserving generation mode and order.
 The sequence-option binder accepts an owned token range and depth rather than
 inventing a utility statement for an identity child. Empty and multiline option
 forms retain the existing semantic, comment, hard-width, and idempotence gates.
+
+### Nested expression and relation group ownership
+
+SELECT and DML use the same typed join predicates, including ON clauses below
+parenthesized relation wrappers. Array constructors carry AST locations and
+element counts; their bracket lists are distinct from subscripts. The completed
+traversal includes array elements and expression-bearing table/constraint fields
+omitted by the backend's convenience walker. Unknown children remain unsupported.
+After CASE/predicate parents are planned, array bracket subtrees inherit their
+actual parent line indentation, preserving nested child layouts. Function and
+recordset list width budgets include validated qualified names/relation headers;
+already-expanded child groups do not count as a single compact header line.
+Named CHECK prefixes wrap only when their predicate is still compact, keeping
+existing expanded predicate layouts stable.

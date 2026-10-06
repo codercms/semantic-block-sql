@@ -45,6 +45,10 @@ Reviewed structural support includes:
 - reviewed subqueries inside DML expressions.
 
 Authored multiline list and predicate groups, blank lines, and comment boundaries are preserved as structural presentation choices.
+Array constructors own verified element lists, including nested constructors,
+comments, CASE conditions, and CHECK constraints. Array subscripts remain
+separate syntax. Parenthesized join trees retain typed ownership of ON
+predicates so long Boolean groups can wrap without removing parentheses.
 
 ### Operators and PostgreSQL expressions
 
@@ -103,6 +107,8 @@ The same typed relation ownership is used in nested queries, CTEs, views, `INSER
 Function aliases may share the call name and omit AS, including aliases followed
 by recordset column-definition lists. AST-bound call names cannot claim alias
 tokens.
+Function column-definition lists include their relation/join header and owning
+query indentation in the width budget, including LATERAL sources.
 
 ## Data modification
 

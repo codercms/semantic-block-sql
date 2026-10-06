@@ -2101,7 +2101,7 @@ pub(super) fn bind_relation_source(
         .collect::<Vec<_>>();
     wrappers.sort_by_key(|(open, _, _)| *open);
 
-    let identifier_tokens =
+    let identifiers =
         bind_relation_identifiers(tokens, structure, range, &spec.identifiers, owner)?;
 
     Ok(RelationSourceBlock {
@@ -2112,8 +2112,14 @@ pub(super) fn bind_relation_source(
         joins,
         wrappers,
         base_depth,
-        identifier_tokens,
+        identifier_tokens: identifiers.tokens,
+        definition_lists: identifiers.definitions,
     })
+}
+
+struct RelationIdentifierBindings {
+    tokens: Vec<usize>,
+    definitions: Vec<(usize, usize)>,
 }
 
 fn bind_relation_identifiers(
@@ -2122,8 +2128,9 @@ fn bind_relation_identifiers(
     range: TokenRange,
     expected: &[RelationIdentifierSpec],
     owner: &str,
-) -> Result<Vec<usize>, FormatDiagnostic> {
+) -> Result<RelationIdentifierBindings, FormatDiagnostic> {
     let mut result = Vec::new();
+    let mut definitions = Vec::new();
     let mut cursor = range.start;
     for (position, identifier) in expected.iter().enumerate() {
         match identifier {
@@ -2190,11 +2197,20 @@ fn bind_relation_identifiers(
                 result.extend(bind_parenthesized_names(
                     tokens, structure, open, columns, owner,
                 )?);
+                definitions.push((
+                    open,
+                    structure.matching_parenthesis(open).ok_or_else(|| {
+                        FormatDiagnostic::Ownership("column-definition list is unclosed".into())
+                    })?,
+                ));
                 cursor = structure.matching_parenthesis(open).unwrap_or(open) + 1;
             }
         }
     }
-    Ok(result)
+    Ok(RelationIdentifierBindings {
+        tokens: result,
+        definitions,
+    })
 }
 
 fn is_relation_alias_boundary(

@@ -89,6 +89,7 @@ pub(super) fn plan_materialized_views(
 pub(super) fn plan_create_tables(
     context: &PlanningContext<'_, '_>,
     statements: &[CreateTableBlock],
+    booleans: &[BooleanRange],
     plan: &mut LayoutPlan,
 ) {
     for table in statements {
@@ -101,6 +102,29 @@ pub(super) fn plan_create_tables(
             plan.break_before(item.range.start, if blank_line { 2 } else { 1 }, indent);
             if let Some(identity) = &item.identity {
                 plan_identity(context, identity, indent, plan);
+            }
+            if indent * INDENT_WIDTH
+                + compact_width(
+                    context.tokens,
+                    item.range.start,
+                    item.range.end,
+                    context.options,
+                )
+                > context.options.soft_line_width
+            {
+                for check in &item.checks {
+                    if booleans
+                        .iter()
+                        .any(|range| range.start == check.open + 1 && range.end == check.close)
+                    {
+                        continue;
+                    }
+                    plan.break_before(
+                        check.introducer,
+                        context.tokens[check.introducer].line_breaks_before.max(1),
+                        indent + 1,
+                    );
+                }
             }
         }
         if let Some(close) = table.close {

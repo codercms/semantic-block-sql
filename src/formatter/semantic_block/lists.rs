@@ -10,6 +10,9 @@ pub(super) struct ParenthesizedListSources<'a> {
     pub join_using_lists: &'a [(usize, usize)],
     pub utilities: &'a [UtilityBlock],
     pub values: &'a [ValuesBlock],
+    pub arrays: &'a [(usize, usize)],
+    pub calls: &'a [crate::formatter::layout_ir::FunctionCallBlock],
+    pub definition_headers: &'a [(usize, usize, usize)],
 }
 
 pub(super) fn parenthesized_lists(
@@ -19,10 +22,10 @@ pub(super) fn parenthesized_lists(
     sources: ParenthesizedListSources<'_>,
     options: &FormatOptions,
 ) -> Vec<ParenthesizedList> {
-    let mut lists = Vec::new();
+    let mut lists: Vec<ParenthesizedList> = Vec::new();
 
     for (open, token) in tokens.iter().enumerate() {
-        if token.kind != Token::Ascii40
+        if !matches!(token.kind, Token::Ascii40 | Token::Ascii91)
             || !(is_function_call_open(tokens, open)
                 || is_insert_list_open(sources.inserts, open)
                 || is_merge_list_open(sources.merges, open)
@@ -38,11 +41,21 @@ pub(super) fn parenthesized_lists(
                         .flatten()
                         .any(|(list_open, _)| *list_open == open)
                 })
-                || is_values_list_open(sources.values, open))
+                || is_values_list_open(sources.values, open)
+                || sources
+                    .definition_headers
+                    .iter()
+                    .any(|&(list, _, _)| list == open)
+                || sources.arrays.iter().any(|&(array, _)| array == open))
         {
             continue;
         }
-        let Some(&close) = parens.get(&open) else {
+        let Some(close) = parens.get(&open).copied().or_else(|| {
+            sources
+                .arrays
+                .iter()
+                .find_map(|&(array, close)| (array == open).then_some(close))
+        }) else {
             continue;
         };
         if open + 1 >= close {
@@ -63,34 +76,56 @@ pub(super) fn parenthesized_lists(
             || (open + 1..close)
                 .any(|index| tokens[index].kind == Token::Select && depths[index] > depths[open])
             || contains_mixed_boolean_item(tokens, depths, open + 1, close, inner_depth);
-        let compact_start = sources
-            .inserts
+        let definition_header = sources
+            .definition_headers
             .iter()
-            .find(|insert| insert.target_open == Some(open))
-            .map(|insert| insert.body_start)
-            .or_else(|| {
-                sources.merges.iter().find_map(|merge| {
-                    merge
-                        .branches
-                        .iter()
-                        .find_map(|branch| match branch.action {
-                            MergeAction::Insert {
-                                target_open,
-                                values_open,
-                                ..
-                            } if target_open == Some(open) || values_open == open => {
-                                Some(branch.start)
-                            }
-                            _ => None,
-                        })
-                })
+            .find(|&&(list, _, _)| list == open);
+        let compact_start = definition_header
+            .map(|&(_, prefix, _)| {
+                lists
+                    .iter()
+                    .filter(|list| list.expanded && prefix <= list.open && list.close < open)
+                    .map(|list| list.close)
+                    .max()
+                    .unwrap_or(prefix)
             })
             .or_else(|| {
                 sources
-                    .values
+                    .calls
                     .iter()
-                    .find(|values| values.rows.iter().any(|&(row, _)| row == open))
-                    .map(|_| open)
+                    .find(|call| call.open == open)
+                    .map(|call| call.start)
+            })
+            .or_else(|| {
+                sources
+                    .inserts
+                    .iter()
+                    .find(|insert| insert.target_open == Some(open))
+                    .map(|insert| insert.body_start)
+                    .or_else(|| {
+                        sources.merges.iter().find_map(|merge| {
+                            merge
+                                .branches
+                                .iter()
+                                .find_map(|branch| match branch.action {
+                                    MergeAction::Insert {
+                                        target_open,
+                                        values_open,
+                                        ..
+                                    } if target_open == Some(open) || values_open == open => {
+                                        Some(branch.start)
+                                    }
+                                    _ => None,
+                                })
+                        })
+                    })
+                    .or_else(|| {
+                        sources
+                            .values
+                            .iter()
+                            .find(|values| values.rows.iter().any(|&(row, _)| row == open))
+                            .map(|_| open)
+                    })
             })
             .unwrap_or_else(|| open.saturating_sub(1));
         let compact = compact_width(tokens, compact_start, close + 1, options);
@@ -99,7 +134,9 @@ pub(super) fn parenthesized_lists(
         let unavoidable_single_argument = !has_top_level_comma
             && range_is_unavoidably_over_hard(tokens, open + 1, close, depths[open] + 1, options);
         let layout = LayoutGroup {
-            compact_line_width: depths[open] * INDENT_WIDTH + compact,
+            compact_line_width: definition_header.map_or(depths[open], |&(_, _, indent)| indent)
+                * INDENT_WIDTH
+                + compact,
             structurally_complex: contains_complex,
             hard_boundary: has_list_hard_boundary(tokens, open + 1, close),
             force_expand: authored,
@@ -113,7 +150,8 @@ pub(super) fn parenthesized_lists(
             base_indent: sources
                 .join_using_lists
                 .iter()
-                .find_map(|(using_open, indent)| (*using_open == open).then_some(*indent)),
+                .find_map(|(using_open, indent)| (*using_open == open).then_some(*indent))
+                .or_else(|| definition_header.map(|&(_, _, indent)| indent)),
         });
     }
 

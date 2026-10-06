@@ -8,6 +8,7 @@ use super::ownership::{
 use super::structure::TokenStructure;
 use super::tokens::SqlToken;
 
+mod arrays;
 mod function_calls;
 mod migration_ddl;
 mod query;
@@ -218,6 +219,15 @@ pub(super) struct RelationSourceBlock {
     pub wrappers: Vec<(usize, usize, usize)>,
     pub base_depth: usize,
     pub identifier_tokens: Vec<usize>,
+    pub definition_lists: Vec<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct FunctionCallBlock {
+    pub start: usize,
+    pub name: usize,
+    pub open: usize,
+    pub close: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -449,7 +459,8 @@ pub(super) struct LayoutDocument {
     set_operations: Vec<SetOperationBlock>,
     window_blocks: Vec<WindowBlock>,
     identifier_tokens: Vec<usize>,
-    function_name_tokens: Vec<usize>,
+    function_calls: Vec<FunctionCallBlock>,
+    arrays: Vec<(usize, usize)>,
 }
 
 impl LayoutDocument {
@@ -458,14 +469,14 @@ impl LayoutDocument {
         tokens: &[SqlToken<'_>],
         structure: &TokenStructure,
     ) -> Result<Self, FormatDiagnostic> {
-        let function_name_tokens =
-            function_calls::bind(tokens, structure, document.function_calls())?;
+        let function_calls = function_calls::bind(tokens, structure, document.function_calls())?;
+        let arrays = arrays::bind(tokens, structure, document.arrays())?;
         // Relation alias binding needs to distinguish a real call name from a
         // same-spelled alias before expression layout starts. Keep caller tokens
         // immutable while binding this shared source-role view.
         let mut owned_tokens = tokens.to_vec();
-        for &index in &function_name_tokens {
-            owned_tokens[index].role = super::tokens::TokenRole::FunctionName;
+        for call in &function_calls {
+            owned_tokens[call.name].role = super::tokens::TokenRole::FunctionName;
         }
         let tokens = owned_tokens.as_slice();
         let top_level_statements = bind_token_statements(document, tokens, structure.depths())?;
@@ -635,7 +646,8 @@ impl LayoutDocument {
             set_operations,
             window_blocks,
             identifier_tokens,
-            function_name_tokens,
+            function_calls,
+            arrays,
         })
     }
 
@@ -672,8 +684,12 @@ impl LayoutDocument {
         &self.identifier_tokens
     }
 
-    pub fn function_name_tokens(&self) -> &[usize] {
-        &self.function_name_tokens
+    pub fn function_calls(&self) -> &[FunctionCallBlock] {
+        &self.function_calls
+    }
+
+    pub fn arrays(&self) -> &[(usize, usize)] {
+        &self.arrays
     }
 
     pub fn statement_spans(&self) -> impl Iterator<Item = TokenSpan> + '_ {

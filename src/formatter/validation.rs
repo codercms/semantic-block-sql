@@ -17,14 +17,14 @@ pub use equivalence::validate_equivalent;
 
 use super::ownership::{
     AggregateSignatureSpec, AliasSpec, AlterTableActionGroup, AlterTableActionSpec, AlterTableSpec,
-    ConflictActionSpec, ConflictSpec, CreateIndexSpec, CreateTableElementSpec, CreateTableSpec,
-    CteStatementSpec, DeleteSpec, ForeignKeyAction, ForeignKeySpec, FunctionCallSpec, IdentitySpec,
-    InsertSourceSpec, InsertSpec, MaterializedViewSpec, MergeActionSpec, MergeBranchSpec,
-    MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec, RelationItemSpec,
-    RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec, RelationListSpec,
-    SelectSpec, SequenceOptionKind, SequenceSpec, StatementSpec, SupportedDocument, TriggerSpec,
-    TriggerTiming, UpdateSpec, UtilityStatementKind, ValuesRelationSpec, ValuesSpec, ViewCheckSpec,
-    ViewSpec, source_statement,
+    ArrayListSpec, ConflictActionSpec, ConflictSpec, CreateIndexSpec, CreateTableElementSpec,
+    CreateTableSpec, CteStatementSpec, DeleteSpec, ForeignKeyAction, ForeignKeySpec,
+    FunctionCallSpec, IdentitySpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec,
+    MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec,
+    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
+    RelationListSpec, SelectSpec, SequenceOptionKind, SequenceSpec, StatementSpec,
+    SupportedDocument, TriggerSpec, TriggerTiming, UpdateSpec, UtilityStatementKind,
+    ValuesRelationSpec, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
 };
 
 /// PostgreSQL server grammar version embedded by the reviewed `pg_query`
@@ -76,6 +76,7 @@ pub(super) fn parse_supported_postgresql(
     let mut values_relations = Vec::new();
     let mut function_calls = Vec::new();
     let source_tokens = super::tokens::tokenize(source)?;
+    let mut arrays = Vec::new();
     for (statement_index, raw) in parsed.protobuf.stmts.iter().enumerate() {
         let root = raw
             .stmt
@@ -93,6 +94,7 @@ pub(super) fn parse_supported_postgresql(
             &mut values_relations,
             &source_tokens,
             &mut function_calls,
+            &mut arrays,
         )
         .map_err(|feature| FormatDiagnostic::UnsupportedSyntax {
             feature: feature.into(),
@@ -107,6 +109,7 @@ pub(super) fn parse_supported_postgresql(
         queries,
         values_relations,
         function_calls,
+        arrays,
     ))
 }
 
@@ -132,6 +135,31 @@ where
     F: for<'a> FnMut(NodeRef<'a>, Context) -> Result<(), &'static str>,
 {
     match node {
+        NodeRef::CreateStmt(statement) => walk_nodes(&statement.table_elts, visitor)?,
+        NodeRef::AlterTableStmt(statement) => walk_nodes(&statement.cmds, visitor)?,
+        NodeRef::AlterTableCmd(action) => walk_optional_node(action.def.as_deref(), visitor)?,
+        NodeRef::ColumnDef(column) => {
+            walk_optional_node(column.raw_default.as_deref(), visitor)?;
+            walk_nodes(&column.constraints, visitor)?;
+        }
+        NodeRef::CreateDomainStmt(statement) => walk_nodes(&statement.constraints, visitor)?,
+        NodeRef::CreateTrigStmt(statement) => {
+            walk_optional_node(statement.when_clause.as_deref(), visitor)?
+        }
+        NodeRef::CreatePolicyStmt(statement) => {
+            walk_optional_node(statement.qual.as_deref(), visitor)?;
+            walk_optional_node(statement.with_check.as_deref(), visitor)?;
+        }
+        NodeRef::AlterPolicyStmt(statement) => {
+            walk_optional_node(statement.qual.as_deref(), visitor)?;
+            walk_optional_node(statement.with_check.as_deref(), visitor)?;
+        }
+        NodeRef::AArrayExpr(array) => walk_nodes(&array.elements, visitor)?,
+        NodeRef::Constraint(constraint) => {
+            walk_optional_node(constraint.raw_expr.as_deref(), visitor)?;
+            walk_optional_node(constraint.where_clause.as_deref(), visitor)?;
+            walk_nodes(&constraint.exclusions, visitor)?;
+        }
         NodeRef::SelectStmt(select) => {
             walk_nodes(&select.distinct_clause, visitor)?;
             walk_nodes(&select.window_clause, visitor)?;
@@ -207,8 +235,16 @@ fn collect_query_specs(
     values_relations: &mut Vec<ValuesRelationSpec>,
     source_tokens: &[super::tokens::SqlToken<'_>],
     function_calls: &mut Vec<FunctionCallSpec>,
+    arrays: &mut Vec<ArrayListSpec>,
 ) -> Result<(), &'static str> {
     walk_complete_tree(root, &mut |node, _| {
+        if let NodeRef::AArrayExpr(array) = node {
+            arrays.push(ArrayListSpec {
+                location: usize::try_from(array.location)
+                    .map_err(|_| "unlocated array constructor")?,
+                elements: array.elements.len(),
+            });
+        }
         if let NodeRef::FuncCall(call) = node {
             match pg_query::protobuf::CoercionForm::try_from(call.funcformat) {
                 Ok(pg_query::protobuf::CoercionForm::CoerceExplicitCall) if call.location >= 0 => {
