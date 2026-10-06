@@ -795,7 +795,23 @@ comments inside the prefix and before sort expressions.
 
 The procedural body result retains separate protected source and output ranges.
 Output ranges are recorded while assembling the rendered bytes, shifted through
-the newly laid-out routine header, and forwarded through the existing private
-DocumentContent opaque-range fields. Body, routine and document width validation
+the newly laid-out routine header, and forwarded through the shared internal
+FormattedContent opaque-range fields. Body, routine and document width validation
 exclude only those leaves; supported siblings still undergo width enforcement.
 The public formatter result and the shared width policy are unchanged.
+
+`result.rs` owns the internal `FormattedContent` result shared by document and
+routine adapters: output, diagnostics, width warnings and protected source/output
+ranges. The canonical formatter retains this metadata through its existing gates;
+the public API projects it into the unchanged `FormattedSql` result. Procedural
+leaf adapters return an exhaustive `LeafOutcome::Formatted` or `Preserved` with
+diagnostics alongside it. Protection comes from owned source spans rather than
+diagnostic ID strings, and layout consumes that typed outcome directly.
+
+`routine_header` owns `OuterTokenOwnership`, its shared AST-backed constructor,
+option decoding, declaration locations and outer token normalization. SQL,
+external-language and PL/pgSQL routines use the same location constructor after
+parsing in their current source frame. Procedural formatting owns body validation,
+leaf adaptation and rendering; other routine modules no longer depend on it for
+generic declaration helpers. The SQL adapters' duplicate ownership construction
+and language-location helper are removed.

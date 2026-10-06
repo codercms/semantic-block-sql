@@ -1267,3 +1267,14 @@ their diagnostic identity and bounded leaf range rather than becoming routine
 ownership failures. Default mode can format the enclosing procedural layout while
 preserving the unsupported SQL leaf exactly; strict mode returns the original
 complete document. The core specification remains authoritative.
+
+### Routine/result maintainability follow-up
+
+Preservation is an internal typed outcome, independent of user-facing diagnostic
+IDs. Canonical formatting retains owned opaque spans through its existing gates;
+procedural leaf adapters turn that provenance into `Formatted` or `Preserved`
+and return diagnostics separately. A shared internal result module carries text,
+diagnostics, warnings and source/output protection across adapters. Declaration
+ownership and generic helpers belong to `routine_header`, with one AST-backed
+constructor used by SQL, external and procedural routines. These changes clarify
+module responsibilities without changing public behavior or the core contract.

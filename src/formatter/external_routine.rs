@@ -107,23 +107,8 @@ pub(super) fn format_single_routine(
     else {
         return Err(FormatDiagnostic::SemanticMismatch.into());
     };
-    let ownership = super::procedural::OuterTokenOwnership {
-        language_location: statement
-            .options
-            .iter()
-            .find_map(|node| match node.node.as_ref() {
-                Some(Node::DefElem(option)) if option.defname == "language" => {
-                    usize::try_from(option.location).ok()
-                }
-                _ => None,
-            }),
-        routine_kind_location: super::procedural::routine_kind_location(
-            &header,
-            statement.is_procedure,
-        )?,
-        returns_location: super::procedural::routine_returns_location(&header, statement)?,
-    };
-    let output = super::procedural::normalize_outer_tokens(&header, options, ownership)?;
+    let ownership = super::routine_header::OuterTokenOwnership::from_statement(&header, statement)?;
+    let output = super::routine_header::normalize_outer_tokens(&header, options, ownership)?;
     super::validation::equivalence::validate_equivalent_located(source, &output)?;
     let warnings = super::semantic_block::validate_hard_width(&output, options)?;
     Ok(FormattedSql {

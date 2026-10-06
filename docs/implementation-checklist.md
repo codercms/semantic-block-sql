@@ -1728,3 +1728,26 @@ The PATH executable matches the optimized release hash. Self-review confirmed
 leaf-only exclusions, source/output coordinate frames, supported width checks,
 parse/equivalence/idempotence gates, strict atomicity, comments/groups, module
 boundaries and unchanged dependencies. No dead code or fallback was introduced.
+
+## Routine/result maintainability follow-up
+
+- [x] Replace diagnostic-string-based protection with exhaustive typed leaf
+  outcomes derived from canonical protected-source metadata.
+- [x] Move shared declaration ownership, option/location helpers and outer
+  normalization into routine_header; use one AST-backed ownership constructor.
+- [x] Move the private formatting result into a shared result module; keep
+  canonical metadata through existing safety gates and the public API unchanged.
+- [x] Remove duplicate ownership construction, the redundant language-location
+  helper and unused imports; pass focused routine and review regression targets.
+- [x] Run full gates and private-copy audits; complete architecture self-review.
+- [x] Prepare the coherent commit, rebuild/install 0.3.0 and rewrite PR #49 under
+  features, fixes and chores around the complete final implementation.
+
+Maintainability verification: all 485 tests across 59 targets and five engineering
+gates pass. Fresh private copies pass fmt/check and byte-identical repeat fmt;
+their outputs also match the previous validated build byte-for-byte, with zero
+unsupported/skipped/errors. The PATH binary matches the optimized release hash.
+Self-review checked typed outcomes, canonical metadata retention, declaration
+source frames, source/output ranges, comments/groups, safety/idempotence and
+strict atomicity. Public behavior, dependency surface and reviewed syntax remain
+unchanged. Existing fixtures validate behavior preservation for this refactor.

@@ -1,3 +1,4 @@
+use super::super::result::LeafOutcome;
 use super::super::{Diagnostic, FormatDiagnostic, FormatOptions, Severity};
 use super::format_leaf;
 use super::ir::{BodyNode, BodyNodeKind, RoutineBody};
@@ -69,25 +70,25 @@ pub(super) fn format(
         } else if node.kind == BodyNodeKind::Comment {
             node.text.to_owned()
         } else {
-            let (output, leaf_diagnostics) = format_leaf(
+            let leaf = format_leaf(
                 node.kind,
                 node.text,
                 options,
                 indent,
                 node.capability.as_ref(),
             )?;
-            protected = leaf_diagnostics.iter().any(|diagnostic| {
-                matches!(
-                    diagnostic.rule_id.as_str(),
-                    "syntax.unsupported" | "format.statement_skipped"
-                )
-            });
             diagnostics.extend(
-                leaf_diagnostics
+                leaf.diagnostics
                     .into_iter()
                     .map(|diagnostic| diagnostic.shifted(node.range.start)),
             );
-            output
+            match leaf.outcome {
+                LeafOutcome::Formatted(output) => output,
+                LeafOutcome::Preserved => {
+                    protected = true;
+                    String::new()
+                }
+            }
         };
         if protected {
             let mut range = node.range;

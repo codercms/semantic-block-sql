@@ -1,7 +1,8 @@
 //! Source capabilities proven by the pinned PL/pgSQL parser, not SQL keywords.
 use serde_json::Value;
 
-use super::super::{Diagnostic, FormatDiagnostic, FormatOptions, SourceRange, tokens::tokenize};
+use super::super::result::{FormattedLeaf, LeafOutcome};
+use super::super::{FormatDiagnostic, FormatOptions, SourceRange, tokens::tokenize};
 use super::ir::{BodyNodeKind, RoutineBody};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,7 +223,7 @@ pub(super) fn format(
     source: &str,
     capability: Option<&LeafCapability>,
     options: &FormatOptions,
-) -> Result<Option<(String, Vec<Diagnostic>)>, FormatDiagnostic> {
+) -> Result<Option<FormattedLeaf>, FormatDiagnostic> {
     let Some(capability) = capability else {
         return Ok(None);
     };
@@ -248,7 +249,7 @@ pub(super) fn format(
         }
         LeafCapability::Into { range, strict } => {
             let sql = format!("{} {}", &source[..range.start], &source[range.end..]);
-            let formatted = super::super::format_sql(&sql, options)?;
+            let formatted = super::super::format_sql_content(&sql, options)?;
             let child_diagnostics = formatted
                 .diagnostics
                 .iter()
@@ -269,13 +270,11 @@ pub(super) fn format(
                     diagnostic
                 })
                 .collect::<Vec<_>>();
-            if child_diagnostics.iter().any(|diagnostic| {
-                matches!(
-                    diagnostic.rule_id.as_str(),
-                    "syntax.unsupported" | "format.statement_skipped"
-                )
-            }) {
-                return Ok(Some((source.to_owned(), child_diagnostics)));
+            if !formatted.opaque_source_ranges.is_empty() {
+                return Ok(Some(FormattedLeaf {
+                    outcome: LeafOutcome::Preserved,
+                    diagnostics: child_diagnostics,
+                }));
             }
             // Normalize the same parser-owned SQL before binding its insertion
             // boundary: allowed multiword aliases may change token cardinality.
@@ -337,10 +336,16 @@ pub(super) fn format(
                 },
                 after
             );
-            return Ok(Some((output, child_diagnostics)));
+            return Ok(Some(FormattedLeaf {
+                outcome: LeafOutcome::Formatted(output),
+                diagnostics: child_diagnostics,
+            }));
         }
     };
-    Ok(Some((output, Vec::new())))
+    Ok(Some(FormattedLeaf {
+        outcome: LeafOutcome::Formatted(output),
+        diagnostics: Vec::new(),
+    }))
 }
 
 /// Targets use the canonical SQL list planner without flattening physical lines.

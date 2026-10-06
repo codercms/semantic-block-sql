@@ -61,16 +61,10 @@ pub(super) fn format_single_routine(
         options,
     )?;
 
-    let outer_tokens = super::procedural::OuterTokenOwnership {
-        language_location: routine_language_location(statement),
-        routine_kind_location: super::procedural::routine_kind_location(
-            source,
-            statement.is_procedure,
-        )?,
-        returns_location: super::procedural::routine_returns_location(source, statement)?,
-    };
+    let outer_tokens =
+        super::routine_header::OuterTokenOwnership::from_statement(source, statement)?;
     let header = format_header(source, body.header_end, statement, options)?;
-    let footer = super::procedural::normalize_outer_tokens(
+    let footer = super::routine_header::normalize_outer_tokens(
         &source[body.footer_start..],
         options,
         outer_tokens.within(body.footer_start, source.len()),
@@ -194,16 +188,9 @@ fn format_dollar_body(
     super::semantic_block::validate_hard_width(&framed, options)?;
     super::validation::equivalence::validate_equivalent_located(raw_body, &framed)
         .map_err(|error| StatementFormatError::from(error).shifted(body.start))?;
-    let outer = super::procedural::OuterTokenOwnership {
-        language_location: routine_language_location(statement),
-        routine_kind_location: super::procedural::routine_kind_location(
-            source,
-            statement.is_procedure,
-        )?,
-        returns_location: super::procedural::routine_returns_location(source, statement)?,
-    };
+    let outer = super::routine_header::OuterTokenOwnership::from_statement(source, statement)?;
     let header = format_header(source, body.literal_start, statement, options)?;
-    let footer = super::procedural::normalize_outer_tokens(
+    let footer = super::routine_header::normalize_outer_tokens(
         &source[body.literal_end..],
         options,
         outer.within(body.literal_end, source.len()),
@@ -260,15 +247,9 @@ fn format_header(
     else {
         return Err(FormatDiagnostic::SemanticMismatch);
     };
-    let outer = super::procedural::OuterTokenOwnership {
-        language_location: routine_language_location(statement),
-        routine_kind_location: super::procedural::routine_kind_location(
-            &declaration,
-            statement.is_procedure,
-        )?,
-        returns_location: super::procedural::routine_returns_location(&declaration, statement)?,
-    };
-    super::procedural::normalize_outer_tokens(&header, options, outer.within(0, header.len()))
+    let outer =
+        super::routine_header::OuterTokenOwnership::from_statement(&declaration, statement)?;
+    super::routine_header::normalize_outer_tokens(&header, options, outer.within(0, header.len()))
 }
 
 /// Both SQL body spellings share statement attachment, width and token-safe indentation.
@@ -390,17 +371,6 @@ fn format_body_statement(
             Ok(formatted)
         }
     }
-}
-
-fn routine_language_location(statement: &CreateFunctionStmt) -> Option<usize> {
-    statement.options.iter().find_map(|option| {
-        let Node::DefElem(option) = option.node.as_ref()? else {
-            return None;
-        };
-        (option.defname == "language")
-            .then(|| usize::try_from(option.location).ok())
-            .flatten()
-    })
 }
 
 fn validate(statement: &CreateFunctionStmt, source: &str) -> Result<BodySpec, FormatDiagnostic> {

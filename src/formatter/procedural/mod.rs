@@ -4,12 +4,14 @@ mod layout;
 
 use serde_json::Value;
 
-use super::{Diagnostic, DocumentContent, FormatDiagnostic, FormatOptions};
+use super::result::{FormattedContent, FormattedLeaf, LeafOutcome};
+use super::routine_header::{OuterTokenOwnership, normalize_outer_tokens, option_string};
+use super::{FormatDiagnostic, FormatOptions};
 
 pub(super) fn format_single_routine(
     source: &str,
     options: &FormatOptions,
-) -> Result<DocumentContent, FormatDiagnostic> {
+) -> Result<FormattedContent, FormatDiagnostic> {
     let _ = validate_outer(source)?;
     let parsed = pg_query::parse_plpgsql(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
@@ -64,7 +66,8 @@ pub(super) fn format_single_routine(
         return Err(FormatDiagnostic::NotIdempotent);
     }
 
-    Ok(DocumentContent {
+    Ok(FormattedContent {
+        warnings: Vec::new(),
         output,
         opaque_source_ranges: formatted_body
             .protected_source_ranges
@@ -78,32 +81,6 @@ pub(super) fn format_single_routine(
             .map(|diagnostic| diagnostic.shifted(open_end))
             .collect(),
     })
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub(super) struct OuterTokenOwnership {
-    pub language_location: Option<usize>,
-    pub routine_kind_location: Option<usize>,
-    pub returns_location: Option<usize>,
-}
-
-impl OuterTokenOwnership {
-    pub fn within(self, start: usize, end: usize) -> Self {
-        Self {
-            language_location: self
-                .language_location
-                .filter(|location| start <= *location && *location < end)
-                .map(|location| location - start),
-            routine_kind_location: self
-                .routine_kind_location
-                .filter(|location| start <= *location && *location < end)
-                .map(|location| location - start),
-            returns_location: self
-                .returns_location
-                .filter(|location| start <= *location && *location < end)
-                .map(|location| location - start),
-        }
-    }
 }
 
 fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic> {
@@ -121,23 +98,24 @@ fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic>
         .and_then(|node| node.node.as_ref())
         .ok_or_else(|| unsupported(source, "empty routine statement"))?;
     use pg_query::protobuf::node::Node;
-    let (options, routine_kind_location, returns_location) = match node {
-        Node::DoStmt(statement) => (&statement.args, None, None),
+    let (options, ownership) = match node {
+        Node::DoStmt(statement) => (
+            &statement.args,
+            OuterTokenOwnership::from_options(&statement.args),
+        ),
         Node::CreateFunctionStmt(statement) => {
             if statement.sql_body.is_some() {
                 return Err(unsupported(source, "SQL-standard routine body"));
             }
             (
                 &statement.options,
-                routine_kind_location(source, statement.is_procedure)?,
-                routine_returns_location(source, statement)?,
+                OuterTokenOwnership::from_statement(source, statement)?,
             )
         }
         _ => return Err(unsupported(source, "non-routine statement")),
     };
 
     let mut language = None;
-    let mut language_location = None;
     let mut body_count = 0usize;
     for option in options {
         let Some(Node::DefElem(option)) = option.node.as_ref() else {
@@ -146,7 +124,6 @@ fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic>
         match option.defname.as_str() {
             "language" => {
                 language = option_string(option);
-                language_location = usize::try_from(option.location).ok();
             }
             "as" => body_count += 1,
             _ => {}
@@ -158,60 +135,7 @@ fn validate_outer(source: &str) -> Result<OuterTokenOwnership, FormatDiagnostic>
     if body_count != 1 {
         return Err(unsupported(source, "routine without exactly one body"));
     }
-    Ok(OuterTokenOwnership {
-        language_location,
-        routine_kind_location,
-        returns_location,
-    })
-}
-
-pub(super) fn routine_returns_location(
-    source: &str,
-    statement: &pg_query::protobuf::CreateFunctionStmt,
-) -> Result<Option<usize>, FormatDiagnostic> {
-    if statement.is_procedure {
-        return Ok(None);
-    }
-    let Some(return_type) = statement.return_type.as_ref() else {
-        return Ok(None);
-    };
-    let Some(return_type_location) = usize::try_from(return_type.location).ok() else {
-        return Ok(None);
-    };
-    Ok(super::tokens::tokenize(source)?
-        .into_iter()
-        .filter(|token| {
-            token.kind == pg_query::protobuf::Token::Returns && token.start < return_type_location
-        })
-        .map(|token| token.start)
-        .next_back())
-}
-
-pub(super) fn routine_kind_location(
-    source: &str,
-    is_procedure: bool,
-) -> Result<Option<usize>, FormatDiagnostic> {
-    let expected = if is_procedure {
-        pg_query::protobuf::Token::Procedure
-    } else {
-        pg_query::protobuf::Token::Function
-    };
-    Ok(super::tokens::tokenize(source)?
-        .into_iter()
-        .find(|token| token.kind == expected)
-        .map(|token| token.start))
-}
-
-pub(super) fn option_string(option: &pg_query::protobuf::DefElem) -> Option<String> {
-    use pg_query::protobuf::node::Node;
-    match option.arg.as_deref()?.node.as_ref()? {
-        Node::String(value) => Some(value.sval.to_ascii_lowercase()),
-        Node::List(list) if list.items.len() == 1 => match list.items[0].node.as_ref()? {
-            Node::String(value) => Some(value.sval.to_ascii_lowercase()),
-            _ => None,
-        },
-        _ => None,
-    }
+    Ok(ownership)
 }
 
 fn dollar_body_span(source: &str) -> Result<(usize, usize, usize, usize), FormatDiagnostic> {
@@ -246,7 +170,7 @@ fn format_leaf(
     options: &FormatOptions,
     indent: usize,
     capability: Option<&capabilities::LeafCapability>,
-) -> Result<(String, Vec<Diagnostic>), FormatDiagnostic> {
+) -> Result<FormattedLeaf, FormatDiagnostic> {
     let mut nested_options = options.clone();
     let indent_width = indent * 4;
     nested_options.soft_line_width = options.soft_line_width.saturating_sub(indent_width).max(1);
@@ -259,20 +183,12 @@ fn format_leaf(
         return Ok(formatted);
     }
     if kind == ir::BodyNodeKind::Sql {
-        let formatted = super::format_sql(text, &nested_options)?;
-        return Ok((
-            formatted.output,
-            formatted
-                .diagnostics
-                .into_iter()
-                .filter(|diagnostic| !diagnostic.fix_available)
-                .collect(),
-        ));
+        return Ok(super::format_sql_content(text, &nested_options)?.into());
     }
-    Ok((
-        format_body_statement(kind, text, &nested_options)?,
-        Vec::new(),
-    ))
+    Ok(FormattedLeaf {
+        outcome: LeafOutcome::Formatted(format_body_statement(kind, text, &nested_options)?),
+        diagnostics: Vec::new(),
+    })
 }
 
 fn format_body_statement(
@@ -907,39 +823,6 @@ fn strip_locations(value: &mut Value) {
         Value::Array(items) => items.iter_mut().for_each(strip_locations),
         _ => {}
     }
-}
-
-pub(super) fn normalize_outer_tokens(
-    source: &str,
-    options: &FormatOptions,
-    ownership: OuterTokenOwnership,
-) -> Result<String, FormatDiagnostic> {
-    let tokens = super::tokens::tokenize(source)?;
-    let mut output = String::with_capacity(source.len());
-    let mut cursor = 0usize;
-    for (index, token) in tokens.iter().enumerate() {
-        output.push_str(&source[cursor..token.start]);
-        let actual_language_clause = ownership.language_location == Some(token.start);
-        let actual_routine_kind = ownership.routine_kind_location == Some(token.start);
-        let actual_returns_clause = ownership.returns_location == Some(token.start);
-        let sql_language_name = token.text.eq_ignore_ascii_case("sql")
-            && index > 0
-            && ownership.language_location == Some(tokens[index - 1].start);
-        if actual_language_clause
-            || actual_routine_kind
-            || actual_returns_clause
-            || sql_language_name
-        {
-            output.push_str(&token.text.to_ascii_uppercase());
-        } else {
-            output.push_str(&super::semantic_block::render_token(
-                &tokens, index, options,
-            ));
-        }
-        cursor = token.end;
-    }
-    output.push_str(&source[cursor..]);
-    Ok(output)
 }
 
 fn unsupported(source: &str, feature: impl Into<String>) -> FormatDiagnostic {

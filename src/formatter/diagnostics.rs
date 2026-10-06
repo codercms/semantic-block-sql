@@ -361,7 +361,7 @@ fn routine_body_literals(
         };
         let language = options.iter().find_map(|node| match node.node.as_ref() {
             Some(Node::DefElem(option)) if option.defname == "language" => {
-                super::procedural::option_string(option)
+                super::routine_header::option_string(option)
             }
             _ => None,
         });

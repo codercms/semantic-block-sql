@@ -142,3 +142,16 @@ leaves. The private document result carries this metadata without changing the
 public formatter result. An initially failing fixture covers 80/160 widths,
 default/strict policy, CRLF and a preceding statement. Supported sibling controls
 verify breakable predicate wrapping and indivisible-token width warnings.
+
+## Maintainability follow-up
+
+Procedural adapters now return typed `Formatted`/`Preserved` leaf outcomes with
+diagnostics alongside them. Canonical opaque-source ownership determines
+preservation independently of diagnostic ID strings. A shared `result.rs` module
+carries internal text, diagnostics, warnings and source/output protection, while
+the public formatter result remains unchanged. Generic declaration helpers and
+one AST-backed ownership constructor live in `routine_header`; SQL and external
+adapters no longer construct those locations separately or depend on procedural
+formatting for them. The duplicate language-location helper is removed. This
+refactor adds no syntax or layout policy; the existing regression fixtures remain
+its behavior-preservation checks.

@@ -28,7 +28,7 @@ fn format_bound(
 ) -> Result<String, FormatDiagnostic> {
     let tokens = tokenize(source)?;
     let structure = TokenStructure::new(&tokens);
-    let kind_location = super::procedural::routine_kind_location(source, statement.is_procedure)?;
+    let kind_location = routine_kind_location(source, statement.is_procedure)?;
     let kind = tokens
         .iter()
         .position(|token| Some(token.start) == kind_location)
@@ -76,7 +76,7 @@ fn format_bound(
         })
         .filter_map(|location| tokens.iter().position(|token| token.start == location))
         .collect::<Vec<_>>();
-    if let Some(location) = super::procedural::routine_returns_location(source, statement)? {
+    if let Some(location) = routine_returns_location(source, statement)? {
         if let Some(index) = tokens.iter().position(|token| token.start == location) {
             clauses.push(index);
         }
@@ -105,11 +105,11 @@ pub(super) fn validate_options(
             return Err(unsupported(source, "unrecognized routine option"));
         };
         match option.defname.as_str() {
-            "language" => language = super::procedural::option_string(option),
+            "language" => language = option_string(option),
             "as" | "volatility" | "strict" | "security" | "leakproof" | "cost" | "rows"
             | "support" | "set" => {}
             "parallel"
-                if super::procedural::option_string(option).is_some_and(|value| {
+                if option_string(option).is_some_and(|value| {
                     matches!(value.as_str(), "safe" | "restricted" | "unsafe")
                 }) => {}
             _ => return Err(unsupported(source, "unreviewed routine option")),
@@ -194,4 +194,135 @@ pub(super) fn format_dollar_declaration(
         format(&source[..literal.start], statement, options)?,
         &source[literal.start..]
     ))
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct OuterTokenOwnership {
+    pub language_location: Option<usize>,
+    pub routine_kind_location: Option<usize>,
+    pub returns_location: Option<usize>,
+}
+
+impl OuterTokenOwnership {
+    pub fn from_statement(
+        source: &str,
+        statement: &CreateFunctionStmt,
+    ) -> Result<Self, FormatDiagnostic> {
+        Ok(Self {
+            routine_kind_location: routine_kind_location(source, statement.is_procedure)?,
+            returns_location: routine_returns_location(source, statement)?,
+            ..Self::from_options(&statement.options)
+        })
+    }
+
+    pub fn from_options(options: &[pg_query::protobuf::Node]) -> Self {
+        Self {
+            language_location: options.iter().find_map(|node| match node.node.as_ref() {
+                Some(Node::DefElem(option)) if option.defname == "language" => {
+                    usize::try_from(option.location).ok()
+                }
+                _ => None,
+            }),
+            ..Self::default()
+        }
+    }
+
+    pub fn within(self, start: usize, end: usize) -> Self {
+        Self {
+            language_location: self
+                .language_location
+                .filter(|location| start <= *location && *location < end)
+                .map(|location| location - start),
+            routine_kind_location: self
+                .routine_kind_location
+                .filter(|location| start <= *location && *location < end)
+                .map(|location| location - start),
+            returns_location: self
+                .returns_location
+                .filter(|location| start <= *location && *location < end)
+                .map(|location| location - start),
+        }
+    }
+}
+
+pub(super) fn routine_returns_location(
+    source: &str,
+    statement: &pg_query::protobuf::CreateFunctionStmt,
+) -> Result<Option<usize>, FormatDiagnostic> {
+    if statement.is_procedure {
+        return Ok(None);
+    }
+    let Some(return_type) = statement.return_type.as_ref() else {
+        return Ok(None);
+    };
+    let Some(return_type_location) = usize::try_from(return_type.location).ok() else {
+        return Ok(None);
+    };
+    Ok(super::tokens::tokenize(source)?
+        .into_iter()
+        .filter(|token| {
+            token.kind == pg_query::protobuf::Token::Returns && token.start < return_type_location
+        })
+        .map(|token| token.start)
+        .next_back())
+}
+
+pub(super) fn routine_kind_location(
+    source: &str,
+    is_procedure: bool,
+) -> Result<Option<usize>, FormatDiagnostic> {
+    let expected = if is_procedure {
+        pg_query::protobuf::Token::Procedure
+    } else {
+        pg_query::protobuf::Token::Function
+    };
+    Ok(super::tokens::tokenize(source)?
+        .into_iter()
+        .find(|token| token.kind == expected)
+        .map(|token| token.start))
+}
+
+pub(super) fn option_string(option: &pg_query::protobuf::DefElem) -> Option<String> {
+    use pg_query::protobuf::node::Node;
+    match option.arg.as_deref()?.node.as_ref()? {
+        Node::String(value) => Some(value.sval.to_ascii_lowercase()),
+        Node::List(list) if list.items.len() == 1 => match list.items[0].node.as_ref()? {
+            Node::String(value) => Some(value.sval.to_ascii_lowercase()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+pub(super) fn normalize_outer_tokens(
+    source: &str,
+    options: &FormatOptions,
+    ownership: OuterTokenOwnership,
+) -> Result<String, FormatDiagnostic> {
+    let tokens = super::tokens::tokenize(source)?;
+    let mut output = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+    for (index, token) in tokens.iter().enumerate() {
+        output.push_str(&source[cursor..token.start]);
+        let actual_language_clause = ownership.language_location == Some(token.start);
+        let actual_routine_kind = ownership.routine_kind_location == Some(token.start);
+        let actual_returns_clause = ownership.returns_location == Some(token.start);
+        let sql_language_name = token.text.eq_ignore_ascii_case("sql")
+            && index > 0
+            && ownership.language_location == Some(tokens[index - 1].start);
+        if actual_language_clause
+            || actual_routine_kind
+            || actual_returns_clause
+            || sql_language_name
+        {
+            output.push_str(&token.text.to_ascii_uppercase());
+        } else {
+            output.push_str(&super::semantic_block::render_token(
+                &tokens, index, options,
+            ));
+        }
+        cursor = token.end;
+    }
+    output.push_str(&source[cursor..]);
+    Ok(output)
 }
