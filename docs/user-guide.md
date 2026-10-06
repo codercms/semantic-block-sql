@@ -362,6 +362,10 @@ prevent joining. Set it to `false` to retain the separate-opener behavior.
 
 Indentation is always four spaces. Authored list groups, blank lines, and comment boundaries are mandatory structural boundaries and are not configurable.
 
+Physical line widths exclude LF/CRLF terminators. Diagnostic lines and columns
+come from the matching input or formatted text frame; columns count Unicode
+characters while the accompanying ranges remain UTF-8 byte offsets.
+
 ### Type-alias preferences
 
 `[format.type_aliases]` is empty by default, so authored type spelling is

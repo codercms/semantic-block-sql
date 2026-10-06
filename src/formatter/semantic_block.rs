@@ -1,3 +1,4 @@
+use crate::text::SourceIndex;
 use std::collections::{HashMap, HashSet};
 
 use pg_query::protobuf::Token;
@@ -800,14 +801,15 @@ pub(super) fn validate_hard_width_except(
 ) -> Result<Vec<FormatWarning>, FormatDiagnostic> {
     let tokens = tokenize(output)?;
     let mut warnings = Vec::new();
-    let mut line_start = 0usize;
+    let source_index = SourceIndex::new(output);
 
-    for (line_index, line_with_newline) in output.split_inclusive('\n').enumerate() {
-        let line = line_with_newline
-            .strip_suffix('\n')
-            .unwrap_or(line_with_newline);
-        let width = line.chars().count();
-        let line_end = line_start + line.len();
+    for (line_number, range) in source_index.lines() {
+        let line_start = range.start;
+        let line_end = range.end;
+        let line = &output[line_start..line_end];
+        let width = source_index
+            .line_width(line_number)
+            .expect("indexed physical line");
         let ignored = ignored_ranges
             .iter()
             .any(|range| range.start < line_end && range.end > line_start);
@@ -826,23 +828,26 @@ pub(super) fn validate_hard_width_except(
                 token_indent + output[start..end].chars().count() > options.hard_line_width
                     || (token.is_comment()
                         && token.start >= line_start
-                        && token.end <= line_end
+                        && token.end
+                            <= source_index
+                                .line_span(line_number)
+                                .expect("indexed physical line")
+                                .end
                         && output[line_start..end].chars().count() > options.hard_line_width)
             });
             if indivisible {
                 warnings.push(FormatWarning::IndivisibleTokenExceedsHardWidth {
-                    line: line_index + 1,
+                    line: line_number,
                     width,
                 });
             } else {
                 return Err(FormatDiagnostic::HardLineExceeded {
-                    line: line_index + 1,
+                    line: line_number,
                     width,
                     hard_limit: options.hard_line_width,
                 });
             }
         }
-        line_start += line_with_newline.len();
     }
 
     Ok(warnings)
@@ -1623,6 +1628,25 @@ impl Writer {
 #[cfg(test)]
 mod hard_width_tests {
     use super::*;
+
+    #[test]
+    fn physical_line_width_excludes_lf_and_crlf_terminators() {
+        let options = FormatOptions {
+            soft_line_width: 9,
+            hard_line_width: 9,
+            ..FormatOptions::default()
+        };
+        assert!(
+            validate_hard_width("SELECT 1;\n", &options)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            validate_hard_width("SELECT 1;\r\n", &options)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn short_indivisible_token_past_the_limit_does_not_excuse_a_breakable_line() {

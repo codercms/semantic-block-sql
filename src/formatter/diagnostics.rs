@@ -1,3 +1,4 @@
+use crate::text::SourceIndex;
 use pg_query::protobuf::Token;
 
 use super::semantic_block::{
@@ -180,12 +181,13 @@ pub(super) fn warning_diagnostics(
         output_terminal.filter(|_| source_terminal.is_none()),
     )?;
 
+    let output_source_index = SourceIndex::new(output);
     let body_literals = routine_body_literals(source, &source_tokens);
     warnings
         .iter()
         .map(|warning| match warning {
             FormatWarning::IndivisibleTokenExceedsHardWidth { line, width } => {
-                let output_range = output_line_range(output, *line);
+                let output_range = output_source_index.line_range(*line);
                 let output_index = output_range.and_then(|range| warning_output_token(&output_tokens, output, range, options.hard_line_width));
                 let source_range = output_index
                     .and_then(|output_index| {
@@ -232,11 +234,7 @@ fn warning_token_range(
         ) {
             let relative = line.start.saturating_sub(output.start + output_start);
             if relative <= output_body.len() {
-                let body_line = output_body[..relative]
-                    .bytes()
-                    .filter(|byte| *byte == b'\n')
-                    .count()
-                    + 1;
+                let body_line = SourceIndex::new(output_body).location(relative).line;
                 if let Some(mapped) =
                     body_warning_range(source_body, output_body, body_line, options)
                 {
@@ -256,12 +254,8 @@ fn warning_token_range(
             .start
             .saturating_sub(output.start)
             .min(output.text.len());
-        let ordinal = output.text[..relative]
-            .bytes()
-            .filter(|byte| *byte == b'\n')
-            .count()
-            + 1;
-        if let Some(fragment) = output_line_range(source.text, ordinal) {
+        let ordinal = SourceIndex::new(output.text).location(relative).line;
+        if let Some(fragment) = SourceIndex::new(source.text).line_range(ordinal) {
             return SourceRange::new(source.start + fragment.start, source.start + fragment.end);
         }
     }
@@ -300,7 +294,7 @@ fn body_warning_range(
 ) -> Option<SourceRange> {
     let source_tokens = tokenize(source).ok()?;
     let output_tokens = tokenize(output).ok()?;
-    let range = output_line_range(output, line)?;
+    let range = SourceIndex::new(output).line_range(line)?;
     let output_index =
         warning_output_token(&output_tokens, output, range, options.hard_line_width)?;
     let target = &output_tokens[output_index];
@@ -427,18 +421,6 @@ fn dollar_token_content(text: &str) -> Option<(usize, &str)> {
             &text[delimiter_end..text.len() - delimiter_end],
         )
     })
-}
-
-fn output_line_range(output: &str, line: usize) -> Option<SourceRange> {
-    let mut start = 0usize;
-    for (index, segment) in output.split_inclusive('\n').enumerate() {
-        let end = start + segment.trim_end_matches(['\r', '\n']).len();
-        if index + 1 == line {
-            return Some(SourceRange::new(start, end));
-        }
-        start += segment.len();
-    }
-    None
 }
 
 pub(super) fn unsupported_diagnostic(

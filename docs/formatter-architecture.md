@@ -70,6 +70,15 @@ remain the compiler-enforced dispatcher.
 Filesystem discovery, SQL directives, Go/Rust extraction, diff generation, and
 atomic rewriting remain outside the formatter core.
 
+`text::SourceIndex` is the shared immutable text-coordinate authority for the
+core and its clients. It owns one source frame's physical line starts, UTF-8 byte
+ranges, Unicode-scalar columns and LF/CRLF content widths. SourceRange lives in
+this shared module and remains re-exported by the formatter's public API.
+Diagnostics, directive line spans, hard-width validation and statement/COPY
+line offsets consume the same index. Input and output have separate indices;
+normalization never reuses an AST's locations in a changed text frame. Physical
+content ranges exclude the line terminator; full spans retain it for rewriting.
+
 ## End-to-end flow
 
 ```mermaid

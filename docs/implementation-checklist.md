@@ -1876,3 +1876,16 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Review capability boundaries, alias uniqueness, VALUES provenance,
   comments/protected tokens, semantics, idempotence, diagnostics, atomicity,
   dependencies and dead code; commit before source-coordinate work.
+
+## Shared immutable text coordinates
+
+- [x] Observe the red LF/CRLF width-boundary case before migrating consumers.
+- [x] Introduce SourceIndex for physical lines, Unicode columns, byte ranges and
+  content widths; move SourceRange out of the facade while preserving exports.
+- [x] Migrate CLI diagnostics, directive spans, warning ranges, protected token
+  line ordinals, document/COPY offsets and width validation to the shared index.
+- [x] Verify UTF-8 offsets, CRLF/blank/EOF ranges, distinct input/output frames,
+  routine warning mapping, strict mode, protected leaves and repeated fmt/check.
+- [x] Pass 509 tests across 65 targets and all engineering gates; review source
+  frames, semantic/protected-token preservation, idempotence, diagnostics,
+  atomicity, dependencies and dead helpers before committing this batch.

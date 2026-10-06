@@ -56,7 +56,7 @@ are not reinterpreted by layout consumers.
   traversal; route validation, capability collection, type aliases and source
   anchors through it. Verify ordering, missing child families and unsupported
   neighbors with synthetic fixtures.
-- [ ] Centralize text line/column indexing and coordinate calculations used by
+- [x] Centralize text line/column indexing and coordinate calculations used by
   diagnostics; cover UTF-8, CRLF, statement prefixes and nested routine adapters.
 - [ ] Extract shared layout owner/line geometry operations, migrate duplicate
   calculations and verify contextual indentation through nested combinations.

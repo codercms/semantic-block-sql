@@ -1,3 +1,4 @@
+use crate::text::SourceIndex;
 use thiserror::Error;
 
 use crate::{Diagnostic, FormatDiagnostic, FormatOptions, FormatWarning, format_sql};
@@ -158,18 +159,16 @@ struct Line<'a> {
 }
 
 fn lines_with_offsets(source: &str) -> Vec<Line<'_>> {
-    let mut offset = 0;
-    source
-        .split_inclusive('\n')
-        .enumerate()
-        .map(|(index, text)| {
-            let start = offset;
-            offset += text.len();
+    let index = SourceIndex::new(source);
+    index
+        .lines()
+        .map(|(number, _)| {
+            let span = index.line_span(number).expect("indexed physical line");
             Line {
-                number: index + 1,
-                start,
-                end: offset,
-                text,
+                number,
+                start: span.start,
+                end: span.end,
+                text: &source[span.start..span.end],
             }
         })
         .collect()
