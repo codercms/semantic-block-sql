@@ -1630,3 +1630,13 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 - [x] Synchronize README, coverage, architecture, user guide, and design decisions;
   record the detailed fixture/bug/audit report without private SQL or domains.
 - [x] Build and verify the optimized 0.3.0 Windows executable.
+
+## Independent review combination regressions
+
+- [x] Reproduce all seven reported issues with invented fixtures.
+- [x] Add an atomic multiline-literal regression for the duplicated body renderer.
+- [ ] Rebind normalized routine header locations and unify body assembly.
+- [ ] Bind VALUES relations by AST provenance and accept optional transition AS.
+- [ ] Restore procedural INTO through mapped boundaries; preserve comments and child diagnostics.
+- [ ] Route routine header expansion through the shared layout policy.
+- [ ] Run full gates and repeat private-copy audits; update the PR and installed binary.
