@@ -52,32 +52,14 @@ pub(super) fn format_single_routine(
         return format_dollar_body(source, statement, *as_location, value, options);
     }
     let body = bind_body(source, &spec)?;
-    let mut body_options = options.clone();
-    body_options.semicolon_policy = SemicolonPolicy::Preserve;
-    if body.atomic {
-        body_options.soft_line_width = options.soft_line_width.saturating_sub(4).max(1);
-        body_options.hard_line_width = options
-            .hard_line_width
-            .saturating_sub(4)
-            .max(body_options.soft_line_width);
-    }
-    let mut formatted_body = String::new();
-    let mut cursor = body.start;
-    for &(start, end, kind) in &body.statements {
-        let gap = super::normalize_document_gap(&source[cursor..start], true);
-        if cursor > body.start && gap.is_empty() {
-            formatted_body.push('\n');
-        }
-        formatted_body.push_str(&gap);
-        let formatted = format_body_statement(&source[start..end], kind, &body_options)
-            .map_err(|error| error.shifted(start))?;
-        formatted_body.push_str(&formatted.output);
-        cursor = end;
-    }
-    formatted_body.push_str(&super::normalize_document_gap(
-        &source[cursor..body.end],
-        false,
-    ));
+    let formatted_body = format_body_statements(
+        source,
+        body.start,
+        body.end,
+        body.statements,
+        body.atomic,
+        options,
+    )?;
 
     let outer_tokens = super::procedural::OuterTokenOwnership {
         language_location: routine_language_location(statement),
@@ -87,12 +69,7 @@ pub(super) fn format_single_routine(
         )?,
         returns_location: super::procedural::routine_returns_location(source, statement)?,
     };
-    let header = super::procedural::normalize_outer_tokens(
-        &source[..body.header_end],
-        options,
-        outer_tokens.within(0, body.header_end),
-    )?;
-    let header = super::routine_header::format(&header, statement, options)?;
+    let header = format_header(source, body.header_end, statement, options)?;
     let footer = super::procedural::normalize_outer_tokens(
         &source[body.footer_start..],
         options,
@@ -101,17 +78,7 @@ pub(super) fn format_single_routine(
     let mut output = header.trim_end().to_owned();
     if body.atomic {
         output.push('\n');
-        for line in formatted_body
-            .strip_prefix('\n')
-            .unwrap_or(&formatted_body)
-            .lines()
-        {
-            if !line.is_empty() {
-                output.push_str("    ");
-            }
-            output.push_str(line);
-            output.push('\n');
-        }
+        output.push_str(&formatted_body);
         output.push_str(footer.trim_start());
     } else {
         let header_width = output.lines().last().map_or(0, |line| line.chars().count());
@@ -213,29 +180,17 @@ fn format_dollar_body(
     if parsed.protobuf.stmts.is_empty() {
         return Err(unsupported(source, "empty SQL routine body").into());
     }
-    let mut body_options = options.clone();
-    body_options.semicolon_policy = SemicolonPolicy::Preserve;
-    body_options.soft_line_width = options.soft_line_width.saturating_sub(4).max(1);
-    body_options.hard_line_width = options
-        .hard_line_width
-        .saturating_sub(4)
-        .max(body_options.soft_line_width);
-    let mut formatted_body = String::new();
-    let mut cursor = 0;
-    for raw in &parsed.protobuf.stmts {
-        let (start, end) = super::statement_span(raw_body, raw);
-        let gap = super::normalize_document_gap(&raw_body[cursor..start], true);
-        if cursor > 0 && gap.is_empty() {
-            formatted_body.push('\n');
-        }
-        formatted_body.push_str(&gap);
-        let formatted = super::format_supported_statement(&raw_body[start..end], &body_options)
-            .map_err(|error| error.shifted(body.start + start))?;
-        formatted_body.push_str(&formatted.output);
-        cursor = end;
-    }
-    formatted_body.push_str(&super::normalize_document_gap(&raw_body[cursor..], true));
-    let framed = indent_sql_body(formatted_body.strip_prefix('\n').unwrap_or(&formatted_body))?;
+    let statements = parsed
+        .protobuf
+        .stmts
+        .iter()
+        .map(|raw| {
+            let (start, end) = super::statement_span(raw_body, raw);
+            (start, end, BodyStatementKind::Sql)
+        })
+        .collect();
+    let framed = format_body_statements(raw_body, 0, raw_body.len(), statements, true, options)
+        .map_err(|error| error.shifted(body.start))?;
     super::semantic_block::validate_hard_width(&framed, options)?;
     super::validation::equivalence::validate_equivalent_located(raw_body, &framed)
         .map_err(|error| StatementFormatError::from(error).shifted(body.start))?;
@@ -247,12 +202,7 @@ fn format_dollar_body(
         )?,
         returns_location: super::procedural::routine_returns_location(source, statement)?,
     };
-    let header = super::procedural::normalize_outer_tokens(
-        &source[..body.literal_start],
-        options,
-        outer.within(0, body.literal_start),
-    )?;
-    let header = super::routine_header::format(&header, statement, options)?;
+    let header = format_header(source, body.literal_start, statement, options)?;
     let footer = super::procedural::normalize_outer_tokens(
         &source[body.literal_end..],
         options,
@@ -289,6 +239,98 @@ fn format_dollar_body(
         warnings,
         diagnostics: Vec::new(),
     })
+}
+
+/// Bind layout before any normalization can invalidate parser byte locations.
+/// Reparse the complete declaration to bind casing against the laid-out prefix.
+fn format_header(
+    source: &str,
+    end: usize,
+    statement: &CreateFunctionStmt,
+    options: &FormatOptions,
+) -> Result<String, FormatDiagnostic> {
+    let header = super::routine_header::format(&source[..end], statement, options)?;
+    let declaration = format!("{header}{}", &source[end..]);
+    let parsed = pg_query::parse(&declaration)
+        .map_err(|error| FormatDiagnostic::PostgreSqlParse(error.to_string()))?;
+    let Some(Node::CreateFunctionStmt(statement)) = parsed.protobuf.stmts[0]
+        .stmt
+        .as_deref()
+        .and_then(|node| node.node.as_ref())
+    else {
+        return Err(FormatDiagnostic::SemanticMismatch);
+    };
+    let outer = super::procedural::OuterTokenOwnership {
+        language_location: routine_language_location(statement),
+        routine_kind_location: super::procedural::routine_kind_location(
+            &declaration,
+            statement.is_procedure,
+        )?,
+        returns_location: super::procedural::routine_returns_location(&declaration, statement)?,
+    };
+    super::procedural::normalize_outer_tokens(&header, options, outer.within(0, header.len()))
+}
+
+/// Both SQL body spellings share statement attachment, width and token-safe indentation.
+fn format_body_statements(
+    source: &str,
+    start: usize,
+    end: usize,
+    mut statements: Vec<(usize, usize, BodyStatementKind)>,
+    indent: bool,
+    options: &FormatOptions,
+) -> Result<String, StatementFormatError> {
+    let tokens = super::tokens::tokenize(source)?;
+    for index in 0..statements.len() {
+        let original_end = statements[index].1;
+        let limit = statements.get(index + 1).map_or(end, |next| next.1);
+        let mut attached_end = original_end;
+        for token in tokens
+            .iter()
+            .filter(|token| original_end <= token.start && token.end <= limit)
+        {
+            if !token.is_comment() || token.line_breaks_before > 0 {
+                break;
+            }
+            attached_end = token.end;
+        }
+        statements[index].1 = attached_end;
+        if let Some(next) = statements.get_mut(index + 1) {
+            next.0 = next.0.max(attached_end);
+            next.0 += source[next.0..next.1].len() - source[next.0..next.1].trim_start().len();
+        }
+    }
+    let mut nested = options.clone();
+    nested.semicolon_policy = SemicolonPolicy::Preserve;
+    if indent {
+        nested.soft_line_width = options.soft_line_width.saturating_sub(4).max(1);
+        nested.hard_line_width = options
+            .hard_line_width
+            .saturating_sub(4)
+            .max(nested.soft_line_width);
+    }
+    let mut output = String::new();
+    let mut cursor = start;
+    for (statement_start, statement_end, kind) in statements {
+        let gap = super::normalize_document_gap(&source[cursor..statement_start], true);
+        if cursor > start && gap.is_empty() {
+            output.push('\n');
+        }
+        output.push_str(&gap);
+        let formatted =
+            format_body_statement(&source[statement_start..statement_end], kind, &nested)
+                .map_err(|error| error.shifted(statement_start))?;
+        output.push_str(&formatted.output);
+        cursor = statement_end;
+    }
+    output.push_str(&super::normalize_document_gap(&source[cursor..end], indent));
+    if indent {
+        Ok(indent_sql_body(
+            output.strip_prefix('\n').unwrap_or(&output),
+        )?)
+    } else {
+        Ok(output)
+    }
 }
 
 /// Indent SQL trivia, never the continuation bytes of a multiline token.

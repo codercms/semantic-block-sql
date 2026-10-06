@@ -742,3 +742,16 @@ adapter, then restore it before whole-routine AST/protected-token validation.
 The body budget includes its four-space framing indentation. Authored groups and
 comments are preserved, and nested unsupported ranges are shifted into the
 routine's coordinates without permitting a partial routine rewrite.
+
+## Routine body and header ownership
+
+SQL atomic and dollar bodies share one statement assembler. Parser-proven
+statement boundaries retain same-line trailing comments with the preceding
+statement before canonical formatting. Both body spellings use the same nested
+width budget and token-aware indentation; continuation bytes inside multiline
+literals are never indented.
+
+Routine headers bind their original AST locations before any whitespace
+normalization. The complete declaration is reparsed after header layout so
+location-owned casing uses the new source frame. Header, signature-list and
+external-literal expansion use the shared LayoutGroup::decide policy.

@@ -580,9 +580,19 @@ pub(super) fn format_routine_header(
     for token in &mut tokens {
         token.role = TokenRole::Identifier;
     }
-    let header_expands = source
-        .lines()
-        .any(|line| line.chars().count() > options.soft_line_width);
+    let header_expands = LayoutGroup {
+        compact_line_width: source
+            .lines()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0),
+        structurally_complex: false,
+        hard_boundary: false,
+        force_expand: false,
+        compact_overflow_is_unavoidable: false,
+    }
+    .decide(options)
+        == GroupLayout::Expanded;
     let lists = owned_lists
         .iter()
         .map(|&(open, close)| {
@@ -592,7 +602,16 @@ pub(super) fn format_routine_header(
             ParenthesizedList {
                 open,
                 close,
-                expanded: open + 1 < close && (authored || header_expands),
+                expanded: open + 1 < close
+                    && LayoutGroup {
+                        compact_line_width: 0,
+                        structurally_complex: false,
+                        hard_boundary: has_hard_boundary(&tokens, open + 1, close),
+                        force_expand: authored || header_expands,
+                        compact_overflow_is_unavoidable: false,
+                    }
+                    .decide(options)
+                        == GroupLayout::Expanded,
                 base_indent: Some(0),
             }
         })
@@ -619,10 +638,17 @@ pub(super) fn format_routine_header(
                 FormatDiagnostic::Ownership("external literals have no owned AS clause".into())
             })?;
         let width = compact_width(&tokens, as_index, last + 1, options);
-        if width > options.soft_line_width
-            || literal_arguments
+        if (LayoutGroup {
+            compact_line_width: width,
+            structurally_complex: false,
+            hard_boundary: has_hard_boundary(&tokens, as_index, last + 1),
+            force_expand: literal_arguments
                 .iter()
-                .any(|&index| tokens[index].line_breaks_before > 0)
+                .any(|&index| tokens[index].line_breaks_before > 0),
+            compact_overflow_is_unavoidable: false,
+        })
+        .decide(options)
+            == GroupLayout::Expanded
         {
             for &index in literal_arguments {
                 plan.break_before(index, tokens[index].line_breaks_before.max(1), 1);

@@ -122,3 +122,21 @@ fn unsupported_into_child_retains_identity_and_leaf_coordinates() {
         "{diagnostic:?}"
     );
 }
+
+#[test]
+fn sql_body_comments_cover_final_block_and_blank_boundaries() {
+    for body in [
+        "BEGIN ATOMIC\nSELECT 1; /* attached */\n\n-- next group\nSELECT 2; -- final\nEND",
+        "AS $body$\nSELECT 1; /* attached */\n\n-- next group\nSELECT 2; -- final\n$body$",
+    ] {
+        let output = supported(
+            &format!("CREATE FUNCTION sample_value() RETURNS int LANGUAGE SQL {body};"),
+            &FormatOptions::default(),
+        );
+        assert!(
+            output.contains("SELECT 1; /* attached */\n\n    -- next group"),
+            "{output}"
+        );
+        assert!(output.contains("SELECT 2; -- final\n"), "{output}");
+    }
+}

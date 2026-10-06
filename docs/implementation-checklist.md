@@ -1635,8 +1635,19 @@ tests track pending formatter fixes and do not imply those fixes have shipped.
 
 - [x] Reproduce all seven reported issues with invented fixtures.
 - [x] Add an atomic multiline-literal regression for the duplicated body renderer.
-- [ ] Rebind normalized routine header locations and unify body assembly.
+- [x] Rebind normalized routine header locations and unify body assembly.
 - [ ] Bind VALUES relations by AST provenance and accept optional transition AS.
 - [ ] Restore procedural INTO through mapped boundaries; preserve comments and child diagnostics.
-- [ ] Route routine header expansion through the shared layout policy.
+- [x] Route routine header expansion through the shared layout policy.
 - [ ] Run full gates and repeat private-copy audits; update the PR and installed binary.
+
+### SQL routine ownership and assembly review batch
+
+- Header layout binds original parser locations before normalization; the complete
+  laid-out declaration is reparsed before casing uses new option locations.
+- Atomic and dollar bodies share width adjustment, statement/gap assembly,
+  trailing-inline-comment ownership, and token-aware indentation.
+- The atomic literal and header/comment regressions are green. Existing SQL and
+  external routine targets pass; five other review regressions remain pending.
+- Header/list/literal expansion uses LayoutGroup::decide. No parser, dependency,
+  fallback, or safety exemption was added.
