@@ -11,7 +11,7 @@
 - [x] Update coverage, architecture, README/guide as needed; run full gates.
 - [x] Re-audit private copies, install the fresh binary, and update the PR.
 
-Status: **0.3.0 migration coverage and JSON key/value layout complete**
+Status: **0.3.1 nested relation indentation fix complete**
 
 Update this file during every batch. A checked feature requires focused tests
 and a self-review; syntax support also requires a fixture.
@@ -1768,3 +1768,8 @@ unchanged. Existing fixtures validate behavior preservation for this refactor.
   rewriting, dependencies and dead code. No parser or dependency was added.
 - [x] Prepare the coherent batch and follow-up PR; install the fresh build on
   PATH with a matching optimized release hash.
+
+0.3.1 version batch: application and lockfile versions are bumped together;
+the optimized PATH executable reports 0.3.1 and matches the build hash. All 487
+tests and required engineering gates pass. PR #50 includes the version bump;
+the published 0.3.0 release is unchanged.
