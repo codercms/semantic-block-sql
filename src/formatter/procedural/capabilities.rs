@@ -1,5 +1,5 @@
-//! Source capabilities proven by the pinned PL/pgSQL parser, not SQL keywords.
 use serde_json::Value;
+use std::collections::HashSet;
 
 use super::super::result::{FormattedLeaf, LeafOutcome};
 use super::super::{FormatDiagnostic, FormatOptions, SourceRange, tokens::tokenize};
@@ -223,16 +223,23 @@ pub(super) fn format(
     source: &str,
     capability: Option<&LeafCapability>,
     options: &FormatOptions,
+    variables: &HashSet<String>,
 ) -> Result<Option<FormattedLeaf>, FormatDiagnostic> {
     let Some(capability) = capability else {
         return Ok(None);
     };
     let output = match capability {
         LeafCapability::TypeReference(range) => {
-            let prefix =
-                super::normalize_procedural_code(source[..range.start].trim_end(), options)?;
-            let suffix =
-                super::normalize_procedural_code(source[range.end..].trim_start(), options)?;
+            let prefix = super::normalize_procedural_code(
+                source[..range.start].trim_end(),
+                options,
+                variables,
+            )?;
+            let suffix = super::normalize_procedural_code(
+                source[range.end..].trim_start(),
+                options,
+                variables,
+            )?;
             format!(
                 "{prefix} {}{}{}",
                 &source[range.start..range.end],

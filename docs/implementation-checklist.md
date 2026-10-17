@@ -1929,3 +1929,12 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Route SQL document formatting failure diagnostics through directives and CLI without crashing or bailing early, preserving broken files unchanged.
 - [x] Add comprehensive tests in `tests/alias_casing.rs`, `tests/spec_v1_diagnostics.rs`, and `tests/cli_diagnostic_locations.rs`.
 - [x] Pass all tool verification gates (`cargo fmt`, `cargo clippy`, `cargo test`, `cargo doc`, `git diff --check`).
+
+## Unreserved keyword AST ownership, PL/pgSQL variable protection, and ASSERT formatting (0.4.2)
+
+- [x] Reproduce casing defect for all PostgreSQL unreserved keywords (`cycle`, `depth`, `breadth`, `admin`, `share`, `policy`, `comment`, `options`, `start`, etc.) used as column names, DML targets, and in expressions without `AS`.
+- [x] Bind AST identifiers from `ColumnRef`, `RangeVar`, `ResTarget`, and `ColumnDef` into layout IR as `TokenRole::Identifier`, preventing spurious keyword uppercase while retaining grammar keyword precedence (e.g. `EXCLUDED` in `ON CONFLICT`).
+- [x] In PL/pgSQL, protect declared variables and parameters by collecting datums and `DECLARE` blocks into `variables`, tagging them as `TokenRole::Identifier` and skipping them in `uppercase_procedural_words`, avoiding false uppercase and false `SemanticMismatch`.
+- [x] Ensure `ASSERT (condition) [, message];` preserves separating space before `(` and formats condition and message expressions with full SQL expression layout (including subqueries).
+- [x] Clean stale dev profile build artifacts freeing >10GB disk space.
+- [x] Bump version to 0.4.2 and pass all validation gates (`cargo fmt`, `cargo clippy`, `cargo test`, `cargo doc`, `git diff --check`).

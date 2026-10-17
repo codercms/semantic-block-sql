@@ -1,5 +1,6 @@
 use super::FormatDiagnostic;
 use super::ast::{DepthFirst, walk_complete_tree};
+use super::tokens::{next_non_comment, token_matches_identifier};
 use pg_query::NodeRef;
 use pg_query::protobuf::a_const::Val as AConstValue;
 use pg_query::protobuf::node::Node as NodeEnum;
@@ -9,8 +10,8 @@ use pg_query::protobuf::{
     DeleteStmt, DropBehavior, DropStmt, GrantRoleStmt, GrantStmt, GrantTargetType, IndexStmt,
     InsertStmt, JoinExpr, JoinType, LockClauseStrength, LockWaitPolicy, MergeMatchKind, MergeStmt,
     Node, ObjectType, OnCommitAction, OnConflictAction, OverridingKind, PartitionStrategy, RawStmt,
-    SelectStmt, SetOperation, TransactionStmt, TransactionStmtKind, TruncateStmt, UpdateStmt,
-    ViewCheckOption, ViewStmt,
+    SelectStmt, SetOperation, Token, TransactionStmt, TransactionStmtKind, TruncateStmt,
+    UpdateStmt, ViewCheckOption, ViewStmt,
 };
 pub(super) mod equivalence;
 
@@ -78,6 +79,7 @@ pub(super) fn parse_supported_postgresql(
     let mut function_calls = Vec::new();
     let source_tokens = super::tokens::tokenize(source)?;
     let mut arrays = Vec::new();
+    let mut ast_identifiers = Vec::new();
     for (statement_index, raw) in parsed.protobuf.stmts.iter().enumerate() {
         let root = raw
             .stmt
@@ -102,6 +104,7 @@ pub(super) fn parse_supported_postgresql(
             start: 0,
             end: source.len(),
         })?;
+        collect_ast_identifiers(root, &source_tokens, &mut ast_identifiers);
     }
     queries.sort_by_key(|query| (query.statement_index, query.anchor.unwrap_or(usize::MAX)));
 
@@ -111,7 +114,90 @@ pub(super) fn parse_supported_postgresql(
         values_relations,
         function_calls,
         arrays,
+        ast_identifiers,
     ))
+}
+
+fn collect_ast_identifiers(
+    root: &NodeEnum,
+    tokens: &[super::tokens::SqlToken<'_>],
+    out: &mut Vec<usize>,
+) {
+    for visit in DepthFirst::new(root) {
+        match visit.node {
+            NodeRef::ColumnRef(col) if col.location >= 0 => {
+                let loc = col.location as usize;
+                let mut names = Vec::new();
+                for field in &col.fields {
+                    if let Some(NodeEnum::String(s)) = field.node.as_ref() {
+                        names.push(s.sval.as_str());
+                    }
+                }
+                bind_dotted_identifiers(tokens, loc, &names, out);
+            }
+            NodeRef::RangeVar(rv) if rv.location >= 0 => {
+                let loc = rv.location as usize;
+                let mut names = Vec::new();
+                if !rv.schemaname.is_empty() {
+                    names.push(rv.schemaname.as_str());
+                }
+                if !rv.relname.is_empty() {
+                    names.push(rv.relname.as_str());
+                }
+                bind_dotted_identifiers(tokens, loc, &names, out);
+            }
+            NodeRef::ResTarget(target) if target.location >= 0 && !target.name.is_empty() => {
+                let loc = target.location as usize;
+                if let Some(index) = tokens.iter().position(|t| t.start == loc) {
+                    if token_matches_identifier(&tokens[index], &target.name) {
+                        out.push(index);
+                    }
+                }
+            }
+            NodeRef::ColumnDef(col) if col.location >= 0 && !col.colname.is_empty() => {
+                let loc = col.location as usize;
+                if let Some(index) = tokens.iter().position(|t| t.start == loc) {
+                    if token_matches_identifier(&tokens[index], &col.colname) {
+                        out.push(index);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn bind_dotted_identifiers(
+    tokens: &[super::tokens::SqlToken<'_>],
+    start_location: usize,
+    names: &[&str],
+    out: &mut Vec<usize>,
+) {
+    let Some(mut cursor) = tokens.iter().position(|t| t.start == start_location) else {
+        return;
+    };
+    for (i, name) in names.iter().enumerate() {
+        if i > 0 {
+            let Some(next_dot) = next_non_comment(tokens, cursor) else {
+                return;
+            };
+            if tokens[next_dot].kind != Token::Ascii46 {
+                return;
+            }
+            let Some(next_ident) = next_non_comment(tokens, next_dot) else {
+                return;
+            };
+            cursor = next_ident;
+        }
+        if super::semantic_block::is_on_conflict_excluded(tokens, cursor)
+            || super::semantic_block::is_domain_value_keyword(tokens, cursor)
+        {
+            continue;
+        }
+        if token_matches_identifier(&tokens[cursor], name) {
+            out.push(cursor);
+        }
+    }
 }
 
 fn validate_complete_tree(root: &NodeEnum) -> Result<(), &'static str> {

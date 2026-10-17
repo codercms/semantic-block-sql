@@ -135,3 +135,11 @@ fn scopes_returns_casing_to_the_plpgsql_routine_clause() {
         "CREATE FUNCTION echo_returns(returns returns) RETURNS returns LANGUAGE plpgsql AS $$\nBEGIN\n    RETURN returns;\nEND;\n$$;",
     );
 }
+
+#[test]
+fn preserves_procedural_keywords_as_variable_names_in_plpgsql() {
+    assert_fixture(
+        "DO $$ DECLARE first text := 'hello'; last int := 10; close int := 1; query text := 'val'; BEGIN first := 'world'; last := 20; close := 2; query := 'val2'; END; $$;",
+        "DO $$\nDECLARE\n    first text := 'hello';\n    last int := 10;\n    close int := 1;\n    query text := 'val';\nBEGIN\n    first := 'world';\n    last := 20;\n    close := 2;\n    query := 'val2';\nEND;\n$$;",
+    );
+}

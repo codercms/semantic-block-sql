@@ -643,6 +643,7 @@ impl LayoutDocument {
                     .iter()
                     .flat_map(|statement| statement_identifier_tokens(statement, tokens)),
             )
+            .chain(document.ast_identifiers().iter().copied())
             .collect::<Vec<_>>();
         identifier_tokens.sort_unstable();
         identifier_tokens.dedup();

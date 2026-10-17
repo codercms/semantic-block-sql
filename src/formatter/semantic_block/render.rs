@@ -18,6 +18,20 @@ pub(in crate::formatter) fn render_token(
         return normalize_comment_trailing_whitespace(token.text).into_owned();
     }
 
+    if is_on_conflict_excluded(tokens, index)
+        || is_overriding_value_keyword(tokens, index)
+        || is_domain_value_keyword(tokens, index)
+        || is_enum_value_keyword(tokens, index)
+        || is_merge_match_side_keyword(tokens, index)
+        || is_with_ordinality_keyword(tokens, index)
+        || is_partition_strategy_keyword(tokens, index)
+        || is_transaction_control_keyword(tokens, index)
+        || is_with_data_keyword(tokens, index)
+        || is_type_declaration_keyword(tokens, index)
+    {
+        return token.text.to_uppercase();
+    }
+
     if token.role == TokenRole::Identifier {
         return token.text.to_owned();
     }
@@ -36,19 +50,6 @@ pub(in crate::formatter) fn render_token(
             NotEqualPolicy::Preserve => token.text.to_owned(),
             NotEqualPolicy::PreferBang => "!=".into(),
         };
-    }
-    if is_on_conflict_excluded(tokens, index)
-        || is_overriding_value_keyword(tokens, index)
-        || is_domain_value_keyword(tokens, index)
-        || is_enum_value_keyword(tokens, index)
-        || is_merge_match_side_keyword(tokens, index)
-        || is_with_ordinality_keyword(tokens, index)
-        || is_partition_strategy_keyword(tokens, index)
-        || is_transaction_control_keyword(tokens, index)
-        || is_with_data_keyword(tokens, index)
-        || is_type_declaration_keyword(tokens, index)
-    {
-        return token.text.to_uppercase();
     }
     if is_at_time_zone_keyword(tokens, index) || is_contextual_grammar_keyword(tokens, index) {
         return token.text.to_uppercase();
@@ -167,7 +168,7 @@ pub(in crate::formatter) fn is_uppercase_builtin(name: &str) -> bool {
     )
 }
 
-fn is_on_conflict_excluded(tokens: &[SqlToken<'_>], index: usize) -> bool {
+pub(in crate::formatter) fn is_on_conflict_excluded(tokens: &[SqlToken<'_>], index: usize) -> bool {
     if tokens[index].kind != Token::Ident
         || !tokens[index].text.eq_ignore_ascii_case("excluded")
         || tokens
@@ -234,7 +235,7 @@ fn is_overriding_value_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
     }
 }
 
-fn is_domain_value_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+pub(in crate::formatter) fn is_domain_value_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
     if tokens[index].kind != Token::ValueP {
         return false;
     }

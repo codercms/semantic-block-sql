@@ -174,6 +174,18 @@ pub(super) fn next_non_comment(tokens: &[SqlToken<'_>], index: usize) -> Option<
     (index + 1..tokens.len()).find(|candidate| !tokens[*candidate].is_comment())
 }
 
+pub(in crate::formatter) fn token_matches_identifier(token: &SqlToken<'_>, expected: &str) -> bool {
+    if let Some(quoted) = token
+        .text
+        .strip_prefix('"')
+        .and_then(|text| text.strip_suffix('"'))
+    {
+        quoted.replace("\"\"", "\"") == expected
+    } else {
+        token.text.eq_ignore_ascii_case(expected)
+    }
+}
+
 pub(super) fn tokenize(source: &str) -> Result<Vec<SqlToken<'_>>, FormatDiagnostic> {
     let scanned = pg_query::scan(source)
         .map_err(|error| FormatDiagnostic::PostgreSqlScan(error.to_string()))?;

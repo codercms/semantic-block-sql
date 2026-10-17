@@ -90,6 +90,18 @@ fn formats_assert_and_return_query() {
 }
 
 #[test]
+fn formats_assert_with_parenthesized_condition_and_subquery() {
+    assert_fixture(
+        "DO $$ BEGIN ASSERT (1 = 1); END; $$;",
+        "DO $$\nBEGIN\n    ASSERT (1 = 1);\nEND;\n$$;",
+    );
+    assert_fixture(
+        "DO $$ BEGIN ASSERT (SELECT count(*) FROM users WHERE active = true) > 0, 'no active users'; END; $$;",
+        "DO $$\nBEGIN\n    ASSERT (SELECT COUNT(*) FROM users WHERE active = TRUE) > 0, 'no active users';\nEND;\n$$;",
+    );
+}
+
+#[test]
 fn formats_reviewed_transaction_control_and_siblings() {
     let source =
         "CREATE PROCEDURE p() LANGUAGE plpgsql AS $$ BEGIN perform 1; COMMIT; perform 2; END; $$;";
