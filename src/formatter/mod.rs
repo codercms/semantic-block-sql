@@ -26,6 +26,7 @@ pub use validation::validate_equivalent;
 pub(crate) const INDENT_WIDTH: usize = 4;
 
 pub use crate::text::SourceRange;
+pub(crate) use diagnostics::failure_diagnostic;
 
 /// Diagnostic severity independent from CLI exit-code policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -309,3 +309,28 @@ fn dump_comment_headers_do_not_own_unsupported_or_skipped_locations() {
         rewritten
     );
 }
+
+#[test]
+fn cli_fmt_emits_located_syntax_error_diagnostic_and_preserves_file() {
+    let project = TempDir::new().unwrap();
+    let source = "SELECT\n    id,\n    FROM items;\n";
+    write(project.path(), "broken.sql", source);
+
+    let output = run(project.path(), &["fmt", "broken.sql"], None);
+    assert_eq!(output.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let from_start = source.find("FROM").unwrap();
+    assert!(
+        stderr.contains(&format!("broken.sql:3:5 (bytes {from_start}-")),
+        "stderr must contain exact line and column: {stderr}"
+    );
+    assert!(
+        stderr.contains("error[syntax.parse_failure]: syntax error at or near \"FROM\""),
+        "stderr must contain clean error message: {stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(project.path().join("broken.sql")).unwrap(),
+        source,
+        "broken file must remain byte-identical"
+    );
+}
