@@ -37,10 +37,12 @@ use lists::{
     ParenthesizedListSources, parenthesized_lists, plan_keyword_list_at_indent,
     plan_parenthesized_lists, plan_select_lists,
 };
-pub(in crate::formatter) use render::needs_space;
 pub(super) use render::{
     is_compact_grammar_parenthesis, is_function_call_name, is_function_call_syntax,
     is_type_keyword, is_type_modifier_syntax, is_uppercase_builtin, render_token,
+};
+pub(in crate::formatter) use render::{
+    is_domain_value_keyword, is_on_conflict_excluded, needs_space,
 };
 use statements::{
     plan_delete_statements, plan_insert_statements, plan_merge_statements, plan_relation_source,

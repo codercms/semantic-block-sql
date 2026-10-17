@@ -1359,3 +1359,26 @@ disambiguation. The error message is normalized (stripping redundant
 `Invalid statement: ` prefixes), and the diagnostic is emitted under
 `syntax.parse_failure` with exact `path:line:col (bytes S-E)` coordinates while
 preserving broken files byte-identical and exiting with code 3.
+
+### Unreserved keyword AST ownership, PL/pgSQL variable protection, and ASSERT formatting
+
+PostgreSQL supports many unreserved keywords (`cycle`, `depth`, `breadth`, `admin`,
+`share`, `policy`, `comment`, `options`, `start`, etc.) that are frequently used
+as table columns, expressions, DML targets, or in `USING (...)` joins without quoting.
+Rather than maintaining an ad-hoc scanner exemption list, all AST-proven identifier
+locations (`ColumnRef`, `RangeVar`, `ResTarget`, `ColumnDef`) are collected into
+`ast_identifiers` during parsing and mapped to `TokenRole::Identifier` in layout IR.
+Grammar keyword roles (such as `EXCLUDED` in `ON CONFLICT DO UPDATE`) take precedence
+to ensure SQL pseudo-relations and grammar keywords remain capitalized, while true
+column and table identifiers preserve their authored casing.
+
+In PL/pgSQL routines, declared variables and parameters that collide with procedural
+syntax words (e.g. `first`, `last`, `close`, `query`) are collected from the parsed
+PL/pgSQL datums and `DECLARE` blocks. These variables are marked with
+`TokenRole::Identifier` and excluded from procedural keyword uppercasing, preventing
+unwanted capitalization and false `SemanticMismatch` failures in equivalence validation.
+
+PL/pgSQL `ASSERT (condition) [, message];` statements ensure proper whitespace separation
+before `(` (avoiding false function-call compaction), and format their condition and
+optional message expressions via the canonical SQL expression layout engine, providing
+proper indentation and keyword casing for nested subqueries.

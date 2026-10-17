@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::formatter::ast::strip_locations;
 mod capabilities;
 mod ir;
@@ -23,7 +25,8 @@ pub(super) fn format_single_routine(
     let mut body_ir = ir::parse(body)?;
     ir::validate_parser_alignment(&body_ir, &parser_model)?;
     capabilities::bind(&mut body_ir, &parsed)?;
-    let formatted_body = layout::format(&body_ir, options)?;
+    let variables = collect_plpgsql_variables(&parsed, &body_ir);
+    let formatted_body = layout::format(&body_ir, options, &variables)?;
     super::semantic_block::validate_hard_width_except(
         &formatted_body.output,
         options,
@@ -61,7 +64,8 @@ pub(super) fn format_single_routine(
         let mut second_ir = ir::parse(&output[second_open..second_close])?;
         ir::validate_parser_alignment(&second_ir, &reparsed_model)?;
         capabilities::bind(&mut second_ir, &reparsed)?;
-        layout::format(&second_ir, options)?
+        let second_variables = collect_plpgsql_variables(&reparsed, &second_ir);
+        layout::format(&second_ir, options, &second_variables)?
     };
     if second_body.output != formatted_body.output {
         return Err(FormatDiagnostic::NotIdempotent);
@@ -171,6 +175,7 @@ fn format_leaf(
     options: &FormatOptions,
     indent: usize,
     capability: Option<&capabilities::LeafCapability>,
+    variables: &HashSet<String>,
 ) -> Result<FormattedLeaf, FormatDiagnostic> {
     let mut nested_options = options.clone();
     let indent_width = indent * 4;
@@ -180,14 +185,19 @@ fn format_leaf(
         .saturating_sub(indent_width)
         .max(nested_options.soft_line_width);
     nested_options.semicolon_policy = super::SemicolonPolicy::Preserve;
-    if let Some(formatted) = capabilities::format(text, capability, &nested_options)? {
+    if let Some(formatted) = capabilities::format(text, capability, &nested_options, variables)? {
         return Ok(formatted);
     }
     if kind == ir::BodyNodeKind::Sql {
         return Ok(super::format_sql_content(text, &nested_options)?.into());
     }
     Ok(FormattedLeaf {
-        outcome: LeafOutcome::Formatted(format_body_statement(kind, text, &nested_options)?),
+        outcome: LeafOutcome::Formatted(format_body_statement(
+            kind,
+            text,
+            &nested_options,
+            variables,
+        )?),
         diagnostics: Vec::new(),
     })
 }
@@ -196,6 +206,7 @@ fn format_body_statement(
     kind: ir::BodyNodeKind,
     text: &str,
     options: &FormatOptions,
+    variables: &HashSet<String>,
 ) -> Result<String, FormatDiagnostic> {
     let (raw_code, comment) = split_line_comment(text);
     let code = raw_code.trim();
@@ -203,40 +214,44 @@ fn format_body_statement(
         return Ok(comment.to_owned());
     }
     let upper = code.to_ascii_uppercase();
+    if let Some(rendered) = format_assert_expression(kind, code, options)? {
+        return Ok(attach_line_comment(rendered, comment));
+    }
     if let Some(rendered) = format_return_expression(kind, code, options)? {
         return Ok(attach_line_comment(rendered, comment));
     }
-    if let Some(rendered) = format_assignment_expression(kind, code, options)? {
+    if let Some(rendered) = format_assignment_expression(kind, code, options, variables)? {
         return Ok(attach_line_comment(rendered, comment));
     }
     if let Some(rendered) = format_dynamic_execute(kind, code, options)? {
         return Ok(attach_line_comment(rendered, comment));
     }
     if kind == ir::BodyNodeKind::ReturnQuery {
-        return format_return_query(code, &upper, options)
+        return format_return_query(code, &upper, options, variables)
             .map(|rendered| attach_line_comment(rendered, comment));
     }
-    if let Some(rendered) = format_for_query_header(code, &upper, options)? {
+    if let Some(rendered) = format_for_query_header(code, &upper, options, variables)? {
         return Ok(attach_line_comment(rendered, comment));
     }
-    if let Some(rendered) = format_cursor_query_declaration(code, &upper, options)? {
+    if let Some(rendered) = format_cursor_query_declaration(code, &upper, options, variables)? {
         return Ok(attach_line_comment(rendered, comment));
     }
-    if let Some(rendered) = format_open_query(code, &upper, options)? {
+    if let Some(rendered) = format_open_query(code, &upper, options, variables)? {
         return Ok(attach_line_comment(rendered, comment));
     }
     let normalized = if kind == ir::BodyNodeKind::Declaration {
         normalize_procedural_code(
             &super::type_aliases::normalize_declaration(code, options)?,
             options,
+            variables,
         )?
     } else if code.starts_with("<<") && code.ends_with(">>") {
         code.to_owned()
     } else {
-        normalize_procedural_code(code, options)?
+        normalize_procedural_code(code, options, variables)?
     };
     Ok(attach_line_comment(
-        uppercase_procedural_words(&normalized),
+        uppercase_procedural_words(&normalized, variables),
         comment,
     ))
 }
@@ -244,8 +259,14 @@ fn format_body_statement(
 fn normalize_procedural_code(
     source: &str,
     options: &FormatOptions,
+    variables: &HashSet<String>,
 ) -> Result<String, FormatDiagnostic> {
-    let tokens = super::tokens::tokenize(source)?;
+    let mut tokens = super::tokens::tokenize(source)?;
+    for token in &mut tokens {
+        if variables.contains(&token.text.to_ascii_lowercase()) {
+            token.role = super::tokens::TokenRole::Identifier;
+        }
+    }
     let mut output = String::with_capacity(source.len() + 8);
     let mut previous = None;
     for index in 0..tokens.len() {
@@ -258,6 +279,48 @@ fn normalize_procedural_code(
         previous = Some(index);
     }
     Ok(output)
+}
+
+fn format_assert_expression(
+    kind: ir::BodyNodeKind,
+    code: &str,
+    options: &FormatOptions,
+) -> Result<Option<String>, FormatDiagnostic> {
+    if kind != ir::BodyNodeKind::Assert {
+        return Ok(None);
+    }
+    let tokens = super::tokens::tokenize(code)?;
+    let assert_token = tokens
+        .first()
+        .filter(|token| token.text.eq_ignore_ascii_case("ASSERT"))
+        .ok_or_else(|| FormatDiagnostic::Ownership("ASSERT has no owner".into()))?;
+    let body = code[assert_token.end..].trim().trim_end_matches(';').trim();
+    if body.is_empty() {
+        return Err(FormatDiagnostic::Ownership(
+            "ASSERT has no expression".into(),
+        ));
+    }
+    let body_tokens = super::tokens::tokenize(body)?;
+    let structure = super::structure::TokenStructure::new(&body_tokens);
+    let comma_index = body_tokens.iter().enumerate().find_map(|(index, token)| {
+        (structure.depth(index) == 0 && token.kind == pg_query::protobuf::Token::Ascii44)
+            .then_some(index)
+    });
+
+    if let Some(comma_pos) = comma_index {
+        let comma_token = &body_tokens[comma_pos];
+        let condition = body[..comma_token.start].trim();
+        let message = body[comma_token.end..].trim();
+        let formatted_cond = format_sql_expression("ASSERT", condition, options)?;
+        let formatted_cond = formatted_cond.trim_end_matches(';').trim();
+        let formatted_msg = format_sql_expression("", message, options)?;
+        let formatted_msg = formatted_msg.trim_end_matches(';').trim();
+        Ok(Some(format!("{formatted_cond}, {formatted_msg};")))
+    } else {
+        let formatted = format_sql_expression("ASSERT", body, options)?;
+        let formatted = formatted.trim_end_matches(';').trim();
+        Ok(Some(format!("{formatted};")))
+    }
 }
 
 fn format_return_expression(
@@ -287,6 +350,7 @@ fn format_assignment_expression(
     kind: ir::BodyNodeKind,
     code: &str,
     options: &FormatOptions,
+    variables: &HashSet<String>,
 ) -> Result<Option<String>, FormatDiagnostic> {
     if kind != ir::BodyNodeKind::Assignment {
         return Ok(None);
@@ -295,10 +359,10 @@ fn format_assignment_expression(
     let assignment = ir::assignment_operator(&tokens)
         .map(|index| &tokens[index])
         .ok_or_else(|| FormatDiagnostic::Ownership("assignment has no owned operator".into()))?;
-    let prefix = uppercase_procedural_words(&normalize_procedural_code(
-        code[..assignment.end].trim(),
-        options,
-    )?);
+    let prefix = uppercase_procedural_words(
+        &normalize_procedural_code(code[..assignment.end].trim(), options, variables)?,
+        variables,
+    );
     let expression = code[assignment.end..].trim().trim_end_matches(';').trim();
     if expression.is_empty() {
         return Err(FormatDiagnostic::Ownership(
@@ -422,8 +486,9 @@ fn format_sql_expression(
     let body = formatted.strip_prefix("SELECT").ok_or_else(|| {
         FormatDiagnostic::Ownership("formatted procedural expression lost SELECT".into())
     })?;
+    let sep = if prefix.is_empty() { "" } else { " " };
     if let Some(inline) = body.strip_prefix(' ') {
-        return Ok(format!("{prefix} {inline}"));
+        return Ok(format!("{prefix}{sep}{inline}"));
     }
     let mut lines = body
         .strip_prefix('\n')
@@ -435,7 +500,7 @@ fn format_sql_expression(
     let first = lines.next().ok_or_else(|| {
         FormatDiagnostic::Ownership("formatted procedural expression is empty".into())
     })?;
-    Ok(std::iter::once(format!("{prefix} {first}"))
+    Ok(std::iter::once(format!("{prefix}{sep}{first}"))
         .chain(lines.map(str::to_owned))
         .collect::<Vec<_>>()
         .join("\n"))
@@ -451,6 +516,11 @@ fn procedural_needs_space(
     };
     if tokens[current].text == ".." || tokens[previous].text == ".." {
         return false;
+    }
+    if tokens[previous].text.eq_ignore_ascii_case("ASSERT")
+        && tokens[current].kind == pg_query::protobuf::Token::Ascii40
+    {
+        return true;
     }
     if matches!(
         tokens[previous].kind,
@@ -476,10 +546,11 @@ fn format_return_query(
     code: &str,
     upper: &str,
     options: &FormatOptions,
+    variables: &HashSet<String>,
 ) -> Result<String, FormatDiagnostic> {
     let body = code.trim_end_matches(';').trim();
     if upper.starts_with("RETURN QUERY EXECUTE ") {
-        return Ok(format!("{};", uppercase_procedural_words(body)));
+        return Ok(format!("{};", uppercase_procedural_words(body, variables)));
     }
     let prefix = "RETURN QUERY ";
     let query = body
@@ -493,6 +564,7 @@ fn format_for_query_header(
     code: &str,
     upper: &str,
     options: &FormatOptions,
+    variables: &HashSet<String>,
 ) -> Result<Option<String>, FormatDiagnostic> {
     if !upper.starts_with("FOR ") || !upper.ends_with(" LOOP") {
         return Ok(None);
@@ -505,7 +577,7 @@ fn format_for_query_header(
     };
     let query_start = marker.0 + " IN ".len();
     let query_end = code.len() - " LOOP".len();
-    let prefix = uppercase_procedural_words(code[..query_start].trim_end());
+    let prefix = uppercase_procedural_words(code[..query_start].trim_end(), variables);
     let query = format_query_fragment(&code[query_start..query_end], options)?;
     Ok(Some(format!("{prefix} {query} LOOP")))
 }
@@ -514,6 +586,7 @@ fn format_cursor_query_declaration(
     code: &str,
     upper: &str,
     options: &FormatOptions,
+    variables: &HashSet<String>,
 ) -> Result<Option<String>, FormatDiagnostic> {
     if !upper.contains(" CURSOR ") {
         return Ok(None);
@@ -526,7 +599,7 @@ fn format_cursor_query_declaration(
         return Ok(None);
     }
     let query_end = code.strip_suffix(';').map_or(code.len(), str::len);
-    let prefix = uppercase_procedural_words(code[..query_start].trim_end());
+    let prefix = uppercase_procedural_words(code[..query_start].trim_end(), variables);
     let query = format_query_fragment(&code[query_start..query_end], options)?;
     Ok(Some(format!("{prefix} {query};")))
 }
@@ -535,6 +608,7 @@ fn format_open_query(
     code: &str,
     upper: &str,
     options: &FormatOptions,
+    variables: &HashSet<String>,
 ) -> Result<Option<String>, FormatDiagnostic> {
     if !upper.starts_with("OPEN ") {
         return Ok(None);
@@ -547,7 +621,7 @@ fn format_open_query(
         return Ok(None);
     }
     let query_end = code.strip_suffix(';').map_or(code.len(), str::len);
-    let prefix = uppercase_procedural_words(code[..query_start].trim_end());
+    let prefix = uppercase_procedural_words(code[..query_start].trim_end(), variables);
     let query = format_query_fragment(&code[query_start..query_end], options)?;
     Ok(Some(format!("{prefix} {query};")))
 }
@@ -574,7 +648,7 @@ fn attach_line_comment(mut code: String, comment: &str) -> String {
     code
 }
 
-fn uppercase_procedural_words(text: &str) -> String {
+fn uppercase_procedural_words(text: &str, variables: &HashSet<String>) -> String {
     const WORDS: &[&str] = &[
         "array",
         "assert",
@@ -660,9 +734,11 @@ fn uppercase_procedural_words(text: &str) -> String {
                 }
             }
             let word = &code[start..end];
-            if WORDS
-                .iter()
-                .any(|candidate| word.eq_ignore_ascii_case(candidate))
+            let lower = word.to_ascii_lowercase();
+            if !variables.contains(&lower)
+                && WORDS
+                    .iter()
+                    .any(|candidate| word.eq_ignore_ascii_case(candidate))
             {
                 result.push_str(&word.to_ascii_uppercase());
             } else {
@@ -674,6 +750,45 @@ fn uppercase_procedural_words(text: &str) -> String {
     }
     result.push_str(comment);
     result
+}
+
+fn collect_plpgsql_variables(parsed: &Value, body_ir: &ir::RoutineBody<'_>) -> HashSet<String> {
+    let mut variables = HashSet::new();
+    collect_refnames_from_json(parsed, &mut variables);
+    for node in &body_ir.nodes {
+        if node.kind == ir::BodyNodeKind::Declaration {
+            if let Ok(tokens) = super::tokens::tokenize(node.text) {
+                if let Some(first_ident) = tokens
+                    .iter()
+                    .find(|t| !t.is_comment() && t.kind == pg_query::protobuf::Token::Ident)
+                {
+                    variables.insert(first_ident.text.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+    variables
+}
+
+fn collect_refnames_from_json(value: &Value, variables: &mut HashSet<String>) {
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::String(refname)) = map.get("refname") {
+                if !refname.is_empty() {
+                    variables.insert(refname.to_ascii_lowercase());
+                }
+            }
+            for v in map.values() {
+                collect_refnames_from_json(v, variables);
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                collect_refnames_from_json(item, variables);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn split_line_comment(text: &str) -> (&str, &str) {

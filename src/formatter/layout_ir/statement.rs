@@ -1386,6 +1386,26 @@ pub(super) fn bind_insert(
         &spec.returning_aliases,
         "INSERT RETURNING",
     )?);
+    if let Some(open) = target_open {
+        if let Some(close) = structure.matching_parenthesis(open) {
+            for (idx, token) in tokens.iter().enumerate().take(close).skip(open + 1) {
+                if !token.is_comment() && token.kind != Token::Ascii44 {
+                    identifier_tokens.push(idx);
+                }
+            }
+        }
+    }
+    if let Some(ref conflict) = on_conflict {
+        if let Some(open) = conflict.target_open {
+            if let Some(close) = structure.matching_parenthesis(open) {
+                for (idx, token) in tokens.iter().enumerate().take(close).skip(open + 1) {
+                    if !token.is_comment() && token.kind != Token::Ascii44 {
+                        identifier_tokens.push(idx);
+                    }
+                }
+            }
+        }
+    }
 
     Ok(InsertBlock {
         span: TokenSpan {
@@ -1556,6 +1576,17 @@ pub(super) fn bind_update(
         &spec.returning_aliases,
         "UPDATE RETURNING",
     )?);
+    let items = split_item_ranges(tokens, depths, set + 1, assignment_end, base_depth)?;
+    for item in items {
+        if let Some(eq_idx) = (item.start..item.end).find(|idx| tokens[*idx].kind == Token::Ascii61)
+        {
+            for (idx, token) in tokens.iter().enumerate().take(eq_idx).skip(item.start) {
+                if !token.is_comment() {
+                    identifier_tokens.push(idx);
+                }
+            }
+        }
+    }
 
     Ok(UpdateBlock {
         span: TokenSpan {
@@ -2087,6 +2118,18 @@ pub(super) fn bind_relation_source(
 
     let identifiers =
         bind_relation_identifiers(tokens, structure, range, &spec.identifiers, owner)?;
+    let mut identifier_tokens = identifiers.tokens;
+    for join in &joins {
+        if let Some(open) = join.using_open {
+            if let Some(close) = structure.matching_parenthesis(open) {
+                for (idx, token) in tokens.iter().enumerate().take(close).skip(open + 1) {
+                    if !token.is_comment() && token.kind != Token::Ascii44 {
+                        identifier_tokens.push(idx);
+                    }
+                }
+            }
+        }
+    }
 
     Ok(RelationSourceBlock {
         introducer,
@@ -2096,7 +2139,7 @@ pub(super) fn bind_relation_source(
         joins,
         wrappers,
         base_depth,
-        identifier_tokens: identifiers.tokens,
+        identifier_tokens,
         definition_lists: identifiers.definitions,
     })
 }
@@ -2352,17 +2395,8 @@ fn bind_expected_name(
         })
 }
 
-pub(super) fn token_matches_identifier(token: &SqlToken<'_>, expected: &str) -> bool {
-    if let Some(quoted) = token
-        .text
-        .strip_prefix('"')
-        .and_then(|text| text.strip_suffix('"'))
-    {
-        quoted.replace("\"\"", "\"") == expected
-    } else {
-        token.text.eq_ignore_ascii_case(expected)
-    }
-}
+pub(super) use crate::formatter::tokens::token_matches_identifier;
+
 fn set_operation_count(
     tokens: &[SqlToken<'_>],
     depths: &[usize],

@@ -283,3 +283,23 @@ fn preserves_unreserved_keyword_columns_in_dml() {
         "UPDATE items\nSET\n    type = 'a',\n    data = 'b'\nWHERE type = 'old';",
     );
 }
+
+#[test]
+fn preserves_unreserved_keywords_in_all_column_and_expression_positions() {
+    assert_sql(
+        "SELECT cycle, depth, breadth, admin, share, policy, comment, options, start FROM metrics WHERE cycle > 1 AND depth > 2 ORDER BY cycle, depth;",
+        "SELECT cycle, depth, breadth, admin, share, policy, comment, options, start\nFROM metrics\nWHERE cycle > 1 AND depth > 2\nORDER BY cycle, depth;",
+    );
+    assert_sql(
+        "INSERT INTO metrics (cycle, depth, breadth, admin, share, policy, comment, options, start) VALUES (1, 2, 3, 4, 5, 6, 7, 8, 9);",
+        "INSERT INTO metrics (cycle, depth, breadth, admin, share, policy, comment, options, start)\nVALUES (1, 2, 3, 4, 5, 6, 7, 8, 9);",
+    );
+    assert_sql(
+        "UPDATE metrics SET cycle = 1, depth = 2 WHERE share = 'all';",
+        "UPDATE metrics SET cycle = 1, depth = 2 WHERE share = 'all';",
+    );
+    assert_sql(
+        "SELECT m1.cycle FROM metrics m1 JOIN metrics m2 USING (cycle, depth);",
+        "SELECT m1.cycle\nFROM metrics m1\nJOIN metrics m2 USING (cycle, depth);",
+    );
+}

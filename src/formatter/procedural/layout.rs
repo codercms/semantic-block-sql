@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::super::result::LeafOutcome;
 use super::super::{Diagnostic, FormatDiagnostic, FormatOptions, Severity};
 use super::format_leaf;
@@ -43,6 +45,7 @@ enum BodyLayout {
 pub(super) fn format(
     body: &RoutineBody<'_>,
     options: &FormatOptions,
+    variables: &HashSet<String>,
 ) -> Result<FormattedBody, FormatDiagnostic> {
     let mut frames = Vec::new();
     let mut lines = Vec::new();
@@ -76,6 +79,7 @@ pub(super) fn format(
                 options,
                 indent,
                 node.capability.as_ref(),
+                variables,
             )?;
             diagnostics.extend(
                 leaf.diagnostics
@@ -212,7 +216,7 @@ pub(super) fn format(
         output.clone()
     } else {
         body_options.type_aliases.clear();
-        format(body, &body_options)?.output
+        format(body, &body_options, variables)?.output
     };
     let mut style_diagnostics =
         super::super::diagnostics::style_diagnostics(body.source, &style_output, &body_options)?;

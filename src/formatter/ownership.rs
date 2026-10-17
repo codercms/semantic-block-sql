@@ -655,6 +655,7 @@ pub(super) struct SupportedDocument {
     values_relations: Vec<ValuesRelationSpec>,
     function_calls: Vec<FunctionCallSpec>,
     arrays: Vec<ArrayListSpec>,
+    ast_identifiers: Vec<usize>,
 }
 
 impl SupportedDocument {
@@ -666,6 +667,7 @@ impl SupportedDocument {
             values_relations: Vec::new(),
             function_calls: Vec::new(),
             arrays: Vec::new(),
+            ast_identifiers: Vec::new(),
         }
     }
 
@@ -675,6 +677,7 @@ impl SupportedDocument {
         values_relations: Vec<ValuesRelationSpec>,
         function_calls: Vec<FunctionCallSpec>,
         arrays: Vec<ArrayListSpec>,
+        ast_identifiers: Vec<usize>,
     ) -> Self {
         Self {
             statements,
@@ -682,6 +685,7 @@ impl SupportedDocument {
             values_relations,
             function_calls,
             arrays,
+            ast_identifiers,
         }
     }
 
@@ -703,6 +707,10 @@ impl SupportedDocument {
 
     pub fn arrays(&self) -> &[ArrayListSpec] {
         &self.arrays
+    }
+
+    pub fn ast_identifiers(&self) -> &[usize] {
+        &self.ast_identifiers
     }
 }
 
