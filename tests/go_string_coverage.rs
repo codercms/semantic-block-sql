@@ -247,14 +247,20 @@ const valid = "select id from users where active=true and id>0;"
 // semblock:sql
 const malformed = "select from;"
 "#;
+    let formatted_explicit = format_source(
+        explicit,
+        Language::Go,
+        &FormatOptions::default(),
+        &Config::default().go,
+    )
+    .expect("explicit malformed sql returns error diagnostic instead of hard failure");
+    assert_eq!(formatted_explicit.output, explicit);
+    assert!(!formatted_explicit.changed);
     assert!(
-        format_source(
-            explicit,
-            Language::Go,
-            &FormatOptions::default(),
-            &Config::default().go,
-        )
-        .is_err()
+        formatted_explicit
+            .diagnostics
+            .iter()
+            .any(|d| d.rule_id == "syntax.parse_failure" && d.severity == Severity::Error)
     );
 }
 

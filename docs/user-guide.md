@@ -165,7 +165,7 @@ Every replacement is decoded again and compared with the intended formatted runt
 
 Expressions containing identifiers, calls, indexing, or other runtime values remain untouched. Import paths, struct tags, build directives, runes, comments, and incomplete fragments are excluded structurally.
 
-By default, semblock preserves a complete Go file byte-for-byte when comments before the package clause contain both `generated` and `DO NOT EDIT`, matched case-insensitively. The phrases may be in one comment or split across the leading comments, covering Go's standard marker and variants emitted by generators such as Swag and Hero. Set `ignore_generated_files = false` under `[go]` to process generated files. Auto-detected string values that are not valid UTF-8 are never SQL candidates; an explicit SQL marker still reports them as invalid.
+By default, semblock preserves a complete Go file byte-for-byte when comments before the package clause contain both `generated` and `DO NOT EDIT`, matched case-insensitively. The phrases may be in one comment or split across the leading comments, covering Go's standard marker and variants emitted by generators such as Swag and Hero. Set `ignore_generated_files = false` under `[go]` to process generated files. Auto-detected string values that are not valid UTF-8 are never SQL candidates; an explicit SQL marker reports them as invalid. Syntax errors in explicitly marked SQL expressions emit a `syntax.parse_failure` diagnostic and leave the malformed literal untouched while valid sibling queries continue formatting.
 
 Process Go explicitly with:
 
@@ -191,7 +191,9 @@ bindings, assignments, returns, direct/nested call arguments, closures, and
 struct, tuple, and array values. No `_SQL` name or database-library allowlist is
 required for ordinary expressions. PostgreSQL parsing decides whether an
 auto-detected candidate is a complete statement; invalid automatic candidates
-are skipped, while explicitly marked invalid SQL fails the source.
+are skipped, while explicitly marked invalid SQL emits a `syntax.parse_failure`
+diagnostic and preserves the malformed literal untouched while valid sibling
+queries continue formatting.
 
 ```rust
 const VALIDATE_SQL: &str = r#"

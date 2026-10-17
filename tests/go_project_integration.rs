@@ -261,7 +261,7 @@ func executed() {
 #[test]
 fn permanent_failure_projects_preserve_every_file() {
     for (fixture, expected_error) in [
-        ("go-project-invalid-sql", "PostgreSQL parse failed"),
+        ("go-project-invalid-sql", "syntax.parse_failure"),
         ("go-project-invalid-go", "Go parse failed"),
         ("go-project-directive-error", "misplaced Go directive"),
     ] {
