@@ -333,11 +333,19 @@ pub fn format_go_source(
                     stats.auto_parse_skips += 1;
                     continue;
                 }
-                Err(source) => {
-                    return Err(GoError::EmbeddedSql {
-                        line: expression.node.start_position().row + 1,
-                        source,
-                    });
+                Err(error) => {
+                    let failure = crate::formatter::failure_diagnostic(&prepared.sql, &error);
+                    let diagnostic_range = expression_diagnostic_range(*expression);
+                    diagnostics.push(
+                        Diagnostic {
+                            message: format!("embedded SQL: {}", failure.message),
+                            ..failure
+                        }
+                        .with_source_range(diagnostic_range),
+                    );
+                    stats.unsupported_expressions += 1;
+                    stats.unchanged_sql_expressions += 1;
+                    continue;
                 }
             };
             let expression_unsupported = formatted
@@ -396,12 +404,9 @@ pub fn format_go_source(
 
     replacements.sort_by_key(|replacement| replacement.start);
     let strict_unsupported = options.unsupported_policy == UnsupportedPolicy::Error
-        && diagnostics.iter().any(|diagnostic| {
-            matches!(
-                diagnostic.rule_id.as_str(),
-                "syntax.unsupported" | "format.statement_skipped"
-            ) && diagnostic.severity == Severity::Error
-        });
+        && diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == Severity::Error);
     let mut output = source.to_string();
     if !strict_unsupported {
         for replacement in replacements.iter().rev() {

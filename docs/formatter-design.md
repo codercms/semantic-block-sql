@@ -591,7 +591,7 @@ Pipeline:
 5. validate the decoded candidate as one or more complete PostgreSQL
    statements;
 6. format eligible snippets independently;
-7. abort the complete file on any mandatory snippet failure;
+7. isolate syntax/parse errors for explicit snippets (preserving the literal unchanged and recording `syntax.parse_failure` diagnostics) while formatting valid sibling snippets;
 8. replace byte ranges from end to start;
 9. reparse the complete resulting Go file;
 10. atomically replace the file.
@@ -1382,3 +1382,12 @@ PL/pgSQL `ASSERT (condition) [, message];` statements ensure proper whitespace s
 before `(` (avoiding false function-call compaction), and format their condition and
 optional message expressions via the canonical SQL expression layout engine, providing
 proper indentation and keyword casing for nested subqueries.
+
+### Host-language embedded SQL error isolation (0.5.0)
+
+When formatting embedded SQL in Go or Rust source files:
+- Syntax or scan parse errors occurring in explicit embedded SQL expressions (`// semblock:sql`, `// language=SQL`, or SQL macros) are isolated rather than causing a whole-file extraction abort.
+- The malformed literal expression remains byte-for-byte untouched in the output.
+- A compiler-style diagnostic is emitted with rule `syntax.parse_failure`, `Severity::Error`, and exact source coordinates pointing to the host literal location.
+- Valid sibling SQL expressions within the same Go or Rust file are formatted correctly in memory while the malformed literal remains byte-identical.
+- Under whole-project preflight and safety invariants ("Never partially rewrite a file"), the compiler diagnostic is emitted to stderr, exit code 3 is returned, and files containing fatal syntax errors are protected from partial modifications on disk.

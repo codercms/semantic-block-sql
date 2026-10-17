@@ -128,7 +128,17 @@ pub fn format_rust_source(
             {
                 continue;
             }
-            Err(source) => return Err(RustError::EmbeddedSql { line, source }),
+            Err(error) => {
+                let failure = crate::formatter::failure_diagnostic(&envelope.sql, &error);
+                diagnostics.push(
+                    Diagnostic {
+                        message: format!("embedded SQL: {}", failure.message),
+                        ..failure
+                    }
+                    .with_source_range(SourceRange::new(literal.start_byte(), literal.end_byte())),
+                );
+                continue;
+            }
         };
         let unchanged_opaque = formatted.output == envelope.sql
             && formatted.diagnostics.iter().any(|d| {
@@ -173,13 +183,7 @@ pub fn format_rust_source(
         ));
     }
     let strict_failure = options.unsupported_policy == UnsupportedPolicy::Error
-        && diagnostics.iter().any(|d| {
-            d.severity == Severity::Error
-                && matches!(
-                    d.rule_id.as_str(),
-                    "syntax.unsupported" | "format.statement_skipped"
-                )
-        });
+        && diagnostics.iter().any(|d| d.severity == Severity::Error);
     let mut output = source.to_owned();
     if !strict_failure {
         replacements.sort_by_key(|(range, _)| range.start);

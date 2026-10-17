@@ -1938,3 +1938,12 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Ensure `ASSERT (condition) [, message];` preserves separating space before `(` and formats condition and message expressions with full SQL expression layout (including subqueries).
 - [x] Clean stale dev profile build artifacts freeing >10GB disk space.
 - [x] Bump version to 0.4.2 and pass all validation gates (`cargo fmt`, `cargo clippy`, `cargo test`, `cargo doc`, `git diff --check`).
+
+## Host-language embedded SQL error isolation (0.5.0)
+
+- [x] Reproduce Go and Rust whole-file extraction abort when explicit embedded SQL (`// semblock:sql`, `// language=SQL`, SQL macros) contains a syntax error.
+- [x] Isolate syntax/scan/parse errors in `src/host/go.rs` and `src/host/rust.rs`, emitting compiler-style `syntax.parse_failure` diagnostics (`Severity::Error`) with exact host-language coordinates while keeping the malformed expression byte-for-byte untouched.
+- [x] Protect files from partial disk modifications under whole-project preflight safety while emitting compiler-style diagnostics to stderr with exit code 3.
+- [x] Add comprehensive tests in `tests/host_error_isolation.rs` and update existing host test expectations.
+- [x] Bump package version to `0.5.0` in `Cargo.toml` and `Cargo.lock`.
+- [x] Pass all verification gates (`cargo fmt`, `cargo clippy`, `cargo test`, `cargo doc`, `git diff --check`).

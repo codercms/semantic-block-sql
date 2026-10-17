@@ -1,6 +1,6 @@
 use semblock::config::{GoConfig, RustConfig, RustMultilineStringStyle};
 use semblock::source::{Language, format_source, format_source_with_rust};
-use semblock::{FormatOptions, UnsupportedPolicy, validate_equivalent};
+use semblock::{FormatOptions, Severity, UnsupportedPolicy, validate_equivalent};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -233,8 +233,24 @@ fn directives_force_ignore_and_reject_misplacement() {
     assert_eq!(result.output, output);
     let ignored = "// semblock:file-ignore\nconst A: &str = \"select 1\";\n";
     assert_eq!(format(ignored).output, ignored);
+    let malformed = "// semblock:sql\nconst A: &str = \"select from\";";
+    let malformed_result = format_source(
+        malformed,
+        Language::Rust,
+        &FormatOptions::default(),
+        &GoConfig::default(),
+    )
+    .expect("explicit malformed sql returns error diagnostic instead of hard failure");
+    assert_eq!(malformed_result.output, malformed);
+    assert!(!malformed_result.changed);
+    assert!(
+        malformed_result
+            .diagnostics
+            .iter()
+            .any(|d| d.rule_id == "syntax.parse_failure" && d.severity == Severity::Error)
+    );
+
     for source in [
-        "// semblock:sql\nconst A: &str = \"select from\";",
         "// semblock:sql\n// semblock:ignore\nconst A: &str = \"select 1\";",
         "// semblock:off\nconst A: &str = \"select 1\";",
         "// semblock:sql\nconst A: i32 = 1;",
