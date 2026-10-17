@@ -461,7 +461,7 @@ pub(super) fn statement_skipped_diagnostic(
     }
 }
 
-pub(super) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diagnostic {
+pub(crate) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diagnostic {
     let rule_id = match error {
         FormatDiagnostic::InvalidOptions(_) => "config.invalid",
         FormatDiagnostic::PostgreSqlParse(_) | FormatDiagnostic::PostgreSqlScan(_) => {
@@ -478,15 +478,73 @@ pub(super) fn failure_diagnostic(source: &str, error: &FormatDiagnostic) -> Diag
         FormatDiagnostic::UnsupportedSyntax { start, end, .. } => {
             syntax_source_range(source, SourceRange::new(*start, *end))
         }
+        FormatDiagnostic::PostgreSqlParse(message) => parse_failure_source_range(source, message),
         _ => SourceRange::new(0, source.len()),
+    };
+    let message = match error {
+        FormatDiagnostic::PostgreSqlParse(message) => clean_parse_error_message(message),
+        _ => error.to_string(),
     };
     Diagnostic {
         rule_id: rule_id.into(),
         severity: Severity::Error,
-        message: error.to_string(),
+        message,
         source_range,
         fix_available: false,
     }
+}
+
+fn parse_failure_source_range(source: &str, message: &str) -> SourceRange {
+    let Ok(tokens) = tokenize(source) else {
+        return SourceRange::new(0, source.len());
+    };
+    if tokens.is_empty() {
+        return SourceRange::new(0, source.len());
+    }
+
+    if message.contains("at end of input") {
+        if let Some(last) = tokens.iter().rev().find(|t| !t.is_comment()) {
+            return SourceRange::new(last.start, last.end);
+        }
+    }
+
+    if let Some(target) = extract_syntax_error_token(message) {
+        let matches: Vec<_> = tokens.iter().filter(|t| t.text == target).collect();
+        if matches.len() == 1 {
+            return SourceRange::new(matches[0].start, matches[0].end);
+        } else if matches.len() > 1 {
+            for candidate in &matches {
+                let prefix = &source[..candidate.end];
+                if let Err(err) = pg_query::parse(prefix) {
+                    let err_str = err.to_string();
+                    if err_str.contains(&format!("at or near \"{target}\"")) {
+                        return SourceRange::new(candidate.start, candidate.end);
+                    }
+                }
+            }
+            return SourceRange::new(matches[0].start, matches[0].end);
+        }
+    }
+
+    SourceRange::new(0, source.len())
+}
+
+fn extract_syntax_error_token(message: &str) -> Option<&str> {
+    let needle = "at or near \"";
+    let start = message.find(needle)? + needle.len();
+    let end = message[start..].find('"')? + start;
+    Some(&message[start..end])
+}
+
+fn clean_parse_error_message(message: &str) -> String {
+    let mut msg = message;
+    if let Some(rest) = msg.strip_prefix("PostgreSQL parse failed: ") {
+        msg = rest;
+    }
+    if let Some(rest) = msg.strip_prefix("Invalid statement: ") {
+        msg = rest;
+    }
+    msg.to_owned()
 }
 
 /// Parser statement ranges can include attached leading comments. Diagnostic

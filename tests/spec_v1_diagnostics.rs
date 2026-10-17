@@ -79,10 +79,52 @@ fn parse_failure_returns_the_original_source_and_syntax_diagnostic() {
     assert_eq!(formatted.diagnostics[0].rule_id, "syntax.parse_failure");
     assert_eq!(formatted.diagnostics[0].severity, Severity::Error);
     assert!(!formatted.diagnostics[0].fix_available);
+    assert_eq!(
+        formatted.diagnostics[0].source_range,
+        semblock::SourceRange::new(11, 12)
+    );
+    assert_eq!(
+        formatted.diagnostics[0].message,
+        "syntax error at or near \";\""
+    );
 
     let checked = check_sql(source, &FormatOptions::default());
     assert!(!checked.compliant);
     assert_eq!(checked.diagnostics, formatted.diagnostics);
+}
+
+#[test]
+fn parse_failure_locates_syntax_error_token_and_lines() {
+    let source = "SELECT\n    id,\n    FROM items;";
+    let formatted = format_sql_result(source, &FormatOptions::default());
+
+    assert_eq!(formatted.output, source);
+    assert_eq!(formatted.diagnostics.len(), 1);
+    let diag = &formatted.diagnostics[0];
+    assert_eq!(diag.rule_id, "syntax.parse_failure");
+    assert_eq!(diag.severity, Severity::Error);
+    assert_eq!(diag.message, "syntax error at or near \"FROM\"");
+    let from_start = source.find("FROM").unwrap();
+    assert_eq!(
+        diag.source_range,
+        semblock::SourceRange::new(from_start, from_start + "FROM".len())
+    );
+}
+
+#[test]
+fn parse_failure_at_end_of_input_points_to_unclosed_token() {
+    let source = "SELECT 1,";
+    let formatted = format_sql_result(source, &FormatOptions::default());
+
+    assert_eq!(formatted.diagnostics.len(), 1);
+    let diag = &formatted.diagnostics[0];
+    assert_eq!(diag.rule_id, "syntax.parse_failure");
+    assert_eq!(diag.message, "syntax error at end of input");
+    let comma_start = source.find(',').unwrap();
+    assert_eq!(
+        diag.source_range,
+        semblock::SourceRange::new(comma_start, comma_start + 1)
+    );
 }
 
 #[test]

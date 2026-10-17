@@ -45,6 +45,8 @@ pub(in crate::formatter) fn render_token(
         || is_with_ordinality_keyword(tokens, index)
         || is_partition_strategy_keyword(tokens, index)
         || is_transaction_control_keyword(tokens, index)
+        || is_with_data_keyword(tokens, index)
+        || is_type_declaration_keyword(tokens, index)
     {
         return token.text.to_uppercase();
     }
@@ -350,6 +352,35 @@ fn is_contextual_grammar_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool 
     }
 }
 
+fn is_with_data_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if tokens[index].kind != Token::DataP {
+        return false;
+    }
+    let prev_is_with = previous_non_comment(tokens, index).is_some_and(|prev| {
+        tokens[prev].kind == Token::With
+            || (tokens[prev].kind == Token::No
+                && previous_non_comment(tokens, prev)
+                    .is_some_and(|p2| tokens[p2].kind == Token::With))
+    });
+    if prev_is_with {
+        return true;
+    }
+    previous_non_comment(tokens, index).is_some_and(|prev| tokens[prev].kind == Token::Set)
+        && next_non_comment(tokens, index).is_some_and(|next| tokens[next].kind == Token::TypeP)
+}
+
+fn is_type_declaration_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if tokens[index].kind != Token::TypeP {
+        return false;
+    }
+    previous_non_comment(tokens, index).is_some_and(|prev| {
+        matches!(
+            tokens[prev].kind,
+            Token::Create | Token::Alter | Token::Drop | Token::Of | Token::DataP
+        )
+    })
+}
+
 fn is_pattern_match_operator(tokens: &[SqlToken<'_>], index: usize) -> bool {
     let Some(previous) = previous_non_comment(tokens, index) else {
         return false;
@@ -567,7 +598,6 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Window
             | Token::Within
             | Token::With
-            | Token::DataP
             | Token::Admin
             | Token::After
             | Token::Before
@@ -606,7 +636,6 @@ fn is_keyword_like(kind: Token) -> bool {
             | Token::Temporary
             | Token::Trigger
             | Token::Truncate
-            | Token::TypeP
             | Token::Unlogged
             | Token::Also
             | Token::Analyze

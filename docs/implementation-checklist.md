@@ -1919,3 +1919,13 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Cover inclusive soft width across six query/DML/routine contexts with both
   opener settings; verify comments, groups, equivalence and repeated fmt/check.
 - [x] Complete full gates, private-copy audit, commit, PR and PATH refresh.
+
+## Unreserved keyword casing and syntax error diagnostic coordinates
+
+- [x] Reproduce casing defect for unreserved keywords (`type`, `data`) in column, expression, and DML positions.
+- [x] Scope `Token::DataP` and `Token::TypeP` contextually to DDL/grammar constructs (`WITH [NO] DATA`, `SET DATA TYPE`, `CREATE/ALTER/DROP TYPE`, `OF TYPE`) so bare column and table names preserve authored casing.
+- [x] Extract syntax error token location (`parse_failure_source_range`) using safe Rust tokenizer matching and prefix disambiguation without `unsafe` FFI bindings.
+- [x] Clean syntax parse failure message by removing redundant prefix and report precise line, column, and token byte range in `syntax.parse_failure` diagnostics.
+- [x] Route SQL document formatting failure diagnostics through directives and CLI without crashing or bailing early, preserving broken files unchanged.
+- [x] Add comprehensive tests in `tests/alias_casing.rs`, `tests/spec_v1_diagnostics.rs`, and `tests/cli_diagnostic_locations.rs`.
+- [x] Pass all tool verification gates (`cargo fmt`, `cargo clippy`, `cargo test`, `cargo doc`, `git diff --check`).

@@ -255,3 +255,31 @@ fn preserves_keyword_aliases_in_supported_alias_positions() {
         "INSERT INTO numbered_offers AS no (offer_id) VALUES (1) RETURNING no.offer_id AS comment;",
     );
 }
+
+#[test]
+fn preserves_unreserved_keywords_as_columns_and_expressions() {
+    assert_sql(
+        "SELECT type::text AS type, data FROM items WHERE type = 'active' AND data IS NOT NULL ORDER BY type, data;",
+        "SELECT type::text AS type, data FROM items WHERE type = 'active' AND data IS NOT NULL ORDER BY type, data;",
+    );
+    assert_sql(
+        "SELECT\n    type::text AS type,\n    data\nFROM items\nWHERE type = 'active' AND data IS NOT NULL\nORDER BY\n    type,\n    data;",
+        "SELECT\n    type::text AS type,\n    data\nFROM items\nWHERE type = 'active' AND data IS NOT NULL\nORDER BY\n    type,\n    data;",
+    );
+}
+
+#[test]
+fn preserves_unreserved_keyword_columns_in_dml() {
+    assert_sql(
+        "INSERT INTO items (type, data) VALUES ('a', 'b') ON CONFLICT (type) DO UPDATE SET data = EXCLUDED.data RETURNING type, data;",
+        "INSERT INTO items (type, data)\nVALUES ('a', 'b')\nON CONFLICT (type)\nDO UPDATE\nSET\n    data = EXCLUDED.data\nRETURNING\n    type,\n    data;",
+    );
+    assert_sql(
+        "UPDATE items SET type = 'a', data = 'b' WHERE type = 'old';",
+        "UPDATE items SET type = 'a', data = 'b' WHERE type = 'old';",
+    );
+    assert_sql(
+        "UPDATE items\nSET\n    type = 'a',\n    data = 'b'\nWHERE type = 'old';",
+        "UPDATE items\nSET\n    type = 'a',\n    data = 'b'\nWHERE type = 'old';",
+    );
+}

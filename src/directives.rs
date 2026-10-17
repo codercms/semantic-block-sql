@@ -130,15 +130,23 @@ fn append_formatted(
         output.push_str(source);
         return Ok(());
     }
-    let formatted = format_sql(source, options)?;
-    output.push_str(&formatted.output);
-    warnings.extend(formatted.warnings);
-    diagnostics.extend(
-        formatted
-            .diagnostics
-            .into_iter()
-            .map(|diagnostic| diagnostic.shifted(source_offset)),
-    );
+    match format_sql(source, options) {
+        Ok(formatted) => {
+            output.push_str(&formatted.output);
+            warnings.extend(formatted.warnings);
+            diagnostics.extend(
+                formatted
+                    .diagnostics
+                    .into_iter()
+                    .map(|diagnostic| diagnostic.shifted(source_offset)),
+            );
+        }
+        Err(error) => {
+            output.push_str(source);
+            diagnostics
+                .push(crate::formatter::failure_diagnostic(source, &error).shifted(source_offset));
+        }
+    }
     Ok(())
 }
 

@@ -1337,3 +1337,25 @@ shared Boolean planner uses `LayoutPlan::line_width_through` and
 expanded groups; deferred candidates do not force unrelated clause expansion.
 Nested wrapper planning respects the same root authored-connector boundaries
 and blank gaps as the outer Boolean owner.
+
+### Unreserved keyword casing and syntax error diagnostic coordinates
+
+PostgreSQL allows unreserved keywords such as `type` and `data` in expression,
+column reference, and relation positions without quoting. Treating them as
+globally uppercase keywords inappropriately mutates authored column names (e.g.
+`SELECT type::text AS type, data FROM items`). `Token::DataP` and
+`Token::TypeP` are pruned from global `is_keyword_like()` checks and scoped
+contextually:
+- `Token::DataP` is uppercased in `WITH [NO] DATA` and `SET DATA TYPE`;
+- `Token::TypeP` is uppercased in `CREATE/ALTER/DROP TYPE`, `OF TYPE`, and
+  `SET DATA TYPE`.
+Everywhere else, unquoted identifiers preserve authored casing.
+
+When `pg_query::parse` fails due to invalid SQL, the raw error reports
+`syntax error at or near "<token>"` or `syntax error at end of input`. To avoid
+`unsafe` C FFI bindings while keeping 0 `unsafe` blocks in the codebase, the exact
+error token location is located in 100% safe Rust via token scanning and prefix
+disambiguation. The error message is normalized (stripping redundant
+`Invalid statement: ` prefixes), and the diagnostic is emitted under
+`syntax.parse_failure` with exact `path:line:col (bytes S-E)` coordinates while
+preserving broken files byte-identical and exiting with code 3.
