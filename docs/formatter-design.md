@@ -1,5 +1,20 @@
 # Formatter design
 
+## Boolean expression ownership and idempotence (0.6.0)
+
+CASE conditions/results own their Boolean operators; enclosing expressions must
+not treat connectors inside CASE as their own roots or replan their children.
+CASE classification anticipates mixed Boolean branches and hard boundaries so
+child expansion does not change the parent's classification on the next pass.
+List classification likewise anticipates mixed Boolean items, and UPDATE/DELETE
+consider expanded SET/RETURNING expressions before retaining compact layout.
+Over-hard Boolean comparison lines may break before the comparison operator,
+using the displayed line prefix and existing typed expression range.
+
+These are corrections within existing supported syntax. The core contract,
+CLI, safety gates and dependency surface are unchanged. Synthetic regressions
+live in `tests/boolean_list_idempotence.rs`; production SQL is not a fixture.
+
 Status: **Runnable CLI and raw-Go MVP complete**
 
 Last updated: **2026-10-06**

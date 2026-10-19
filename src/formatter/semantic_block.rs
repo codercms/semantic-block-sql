@@ -783,10 +783,23 @@ fn case_ranges(tokens: &[SqlToken<'_>], options: &FormatOptions) -> Vec<CaseRang
                     .iter()
                     .any(|token| token.line_breaks_before > 0);
                 let compact_width = compact_width(tokens, start, index + 1, options);
+                let mut has_and = false;
+                let mut has_or = false;
+                let mixed_branch = outside_case_indices(tokens, start + 1, index).any(|child| {
+                    if matches!(tokens[child].kind, Token::When | Token::Then | Token::Else) {
+                        has_and = false;
+                        has_or = false;
+                    }
+                    has_and |= tokens[child].kind == Token::And;
+                    has_or |= tokens[child].kind == Token::Or;
+                    has_and && has_or
+                });
                 ranges.push(CaseRange {
                     start,
                     end: index,
                     expanded: top_level_when_count > 1
+                        || mixed_branch
+                        || has_hard_boundary(tokens, start + 1, index)
                         || authored_multiline
                         || compact_width > options.soft_line_width,
                 });
@@ -999,10 +1012,10 @@ fn boolean_ranges(
 
     for expression in expressions {
         let root_depth = boolean_root_depth(tokens, depths, parens, *expression, queries);
-        let has_and = (expression.start..expression.end)
+        let has_and = outside_case_indices(tokens, expression.start, expression.end)
             .any(|candidate| tokens[candidate].kind == Token::And);
-        let has_or =
-            (expression.start..expression.end).any(|candidate| tokens[candidate].kind == Token::Or);
+        let has_or = outside_case_indices(tokens, expression.start, expression.end)
+            .any(|candidate| tokens[candidate].kind == Token::Or);
         let contains_nested_sql = (expression.start..expression.end).any(|candidate| {
             depths[candidate] > expression.base_depth
                 && matches!(tokens[candidate].kind, Token::Select | Token::With)
@@ -1078,6 +1091,25 @@ fn predicate_has_authored_root_break(
         })
 }
 
+fn outside_case_indices<'a>(
+    tokens: &'a [SqlToken<'_>],
+    start: usize,
+    end: usize,
+) -> impl Iterator<Item = usize> + 'a {
+    let mut nested = 0usize;
+    (start..end).filter(move |&index| match tokens[index].kind {
+        Token::Case => {
+            nested += 1;
+            false
+        }
+        Token::EndP if nested > 0 => {
+            nested -= 1;
+            false
+        }
+        _ => nested == 0,
+    })
+}
+
 fn boolean_root_depth(
     tokens: &[SqlToken<'_>],
     depths: &[usize],
@@ -1102,7 +1134,7 @@ fn boolean_root_depth(
         return None;
     }
     let root_depth = depths[start];
-    let first_connector_depth = (start..end)
+    let first_connector_depth = outside_case_indices(tokens, start, end)
         .filter(|index| {
             !queries.iter().any(|query| {
                 range.start <= query.select
@@ -1147,7 +1179,7 @@ fn plan_booleans(
             }
         }
         let root_has_and = range.root_depth.is_some_and(|root_depth| {
-            (range.start..range.end)
+            outside_case_indices(tokens, range.start, range.end)
                 .any(|index| depths[index] == root_depth && tokens[index].kind == Token::And)
         });
         let mut root_indent = range.introducer.map_or_else(
@@ -1197,7 +1229,7 @@ fn plan_booleans(
                 root_indent,
             );
         }
-        for index in range.start..range.end {
+        for index in outside_case_indices(tokens, range.start, range.end) {
             if range.root_depth == Some(depths[index])
                 && matches!(tokens[index].kind, Token::And | Token::Or)
             {
@@ -1245,7 +1277,7 @@ fn plan_booleans(
                     }
                     continue;
                 }
-                let direct_connectors = (index + 1..close)
+                let direct_connectors = outside_case_indices(tokens, index + 1, close)
                     .filter(|candidate| {
                         depths[*candidate] == inner_depth
                             && matches!(tokens[*candidate].kind, Token::And | Token::Or)
@@ -1322,6 +1354,36 @@ fn plan_booleans(
         }
         if let Some(close) = range.wrapper_close {
             plan.break_before(close, 1, root_indent.saturating_sub(1));
+        }
+        for index in outside_case_indices(tokens, range.start, range.end) {
+            if !matches!(
+                tokens[index].kind,
+                Token::Ascii60
+                    | Token::Ascii61
+                    | Token::Ascii62
+                    | Token::LessEquals
+                    | Token::GreaterEquals
+                    | Token::NotEquals
+            ) || plan.line_start(index) == index
+            {
+                continue;
+            }
+            let end = plan
+                .before
+                .range(index + 1..range.end)
+                .next()
+                .map_or(range.end, |(&next, _)| next);
+            if plan.line_width_through(tokens, index, end, root_indent, options)
+                > options.hard_line_width
+            {
+                let start = plan.line_start(index);
+                let indent = plan.line_indent_for(start, root_indent);
+                plan.break_before(
+                    index,
+                    tokens[index].line_breaks_before.clamp(1, 2),
+                    indent + 1,
+                );
+            }
         }
     }
 }

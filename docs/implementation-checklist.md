@@ -1,5 +1,26 @@
 # Durable implementation checklist
 
+## Boolean/CASE idempotence correction (0.6.0)
+
+- [x] Reproduce compact CASE and mixed Boolean list failures with synthetic
+  regressions; keep reported production SQL outside the repository.
+- [x] Preserve CASE child ownership, anticipate branch/list expansion and
+  account for Boolean SET/RETURNING children in compact DML decisions.
+- [x] Reproduce and fix over-hard comparison lines at a safe operator boundary.
+- [x] Verify focused goldens, nested CASE, comments, authored boundaries,
+  function arguments, VALUES, DML, equivalence, idempotence and clean check.
+- [x] Verify the reported SQL through strict fmt/check and identical repeats
+  using a temporary copy of the supplied text; its original path is unavailable.
+- [x] Bump application/lockfile versions together to 0.6.0 before commit/push.
+- [x] Complete formatting, Clippy, full tests, Rustdoc and diff hygiene gates.
+- [x] Review semantics, architecture, comments/groups, diagnostics, atomicity,
+  dependencies and dead code; run GitNexus scope review and commit the batch.
+- [x] Review README, user guide and coverage: no CLI, onboarding, configuration,
+  safety-policy or syntax-support status change requires updates.
+- [x] Install the optimized local binary on PATH and verify version/hash and
+  strict fmt/check/repeat against the supplied text. Release publication follows
+  green PR CI using the existing platform-artifact workflow.
+
 ## JSON key/value layout batch
 
 - [x] Resolve the authored-group/one-argument conflict in core section 10.1 and
