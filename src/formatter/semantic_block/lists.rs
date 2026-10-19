@@ -192,7 +192,7 @@ fn contains_mixed_boolean_item(
 ) -> bool {
     let mut has_and = false;
     let mut has_or = false;
-    for index in start..end {
+    for index in outside_case_indices(tokens, start, end) {
         if depths[index] == item_depth && tokens[index].kind == Token::Ascii44 {
             if has_and && has_or {
                 return true;
@@ -643,6 +643,7 @@ fn item_is_complex(
         || parenthesized_lists
             .iter()
             .any(|list| list.expanded && list.open >= start && list.close < end)
+        || contains_mixed_boolean_item(tokens, depths, start, end, base_depth)
         || tokens[start..end]
             .iter()
             .enumerate()

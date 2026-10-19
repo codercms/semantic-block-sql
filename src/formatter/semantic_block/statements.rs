@@ -13,16 +13,14 @@ pub(super) fn plan_update_statements(
     for update in updates {
         let compact_statement_width = update.span.base_depth * INDENT_WIDTH
             + compact_width(tokens, update.span.start, update.span.end, options);
-        let has_expanded_predicate = update.where_clause.is_some_and(|where_clause| {
-            boolean_ranges
-                .iter()
-                .any(|range| range.start == where_clause + 1 && range.end <= update.span.end)
+        let has_expanded_expression = boolean_ranges.iter().any(|range| {
+            range.expanded && update.span.start <= range.start && range.end <= update.span.end
         });
         // Retain compact one-line DML; authored layout permits the child owners
         // to plan their groups without forcing every sibling clause to expand.
         let mut expanded = LayoutGroup {
             compact_line_width: compact_statement_width,
-            structurally_complex: update.from.is_some() || has_expanded_predicate,
+            structurally_complex: update.from.is_some() || has_expanded_expression,
             hard_boundary: false,
             force_expand: false,
             compact_overflow_is_unavoidable: false,
@@ -95,14 +93,12 @@ pub(super) fn plan_delete_statements(
         let compact_statement_width = delete.span.base_depth * INDENT_WIDTH
             + compact_width(tokens, delete.span.start, delete.span.end, options);
         let width_driven = compact_statement_width > options.soft_line_width;
-        let has_expanded_predicate = delete.where_clause.is_some_and(|where_clause| {
-            boolean_ranges
-                .iter()
-                .any(|range| range.start == where_clause + 1 && range.end <= delete.span.end)
+        let has_expanded_expression = boolean_ranges.iter().any(|range| {
+            range.expanded && delete.span.start <= range.start && range.end <= delete.span.end
         });
         let mut expanded = LayoutGroup {
             compact_line_width: compact_statement_width,
-            structurally_complex: delete.using.is_some() || has_expanded_predicate,
+            structurally_complex: delete.using.is_some() || has_expanded_expression,
             hard_boundary: false,
             force_expand: false,
             compact_overflow_is_unavoidable: false,
