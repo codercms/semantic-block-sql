@@ -2009,7 +2009,7 @@ English PR: [#55](https://github.com/codercms/semantic-block-sql/pull/55).
 - [x] Verify four formerly failing private migration copies now pass strict fmt.
 - [x] Complete full engineering gates and self-review; commit before DDL expansion.
 - [x] Add fixture-backed LOCK/RENAME/type-change and procedural DDL support.
-- [ ] Audit all 20 deploy migrations with strict fmt/check/repeat, preserving originals.
+- [x] Audit all 20 deploy migrations with strict fmt/check/repeat, preserving originals.
 
 Safety batch: 550 tests pass (one existing opt-in ignored). All five gates pass.
 Self-review confirms canonical AST/protected-token checks remain enabled, COPY
@@ -2032,7 +2032,7 @@ Original hashes remain unchanged. Finish that layout correction in the next batc
   queries, authored groups, CRLF and repeat formatting with synthetic cases.
 - [x] Preserve unreviewed condition expressions with unsupported diagnostics.
 - [x] Complete engineering gates and commit this coherent behavior batch.
-- [ ] Bump the minor version, install and audit the optimized PATH binary,
+- [x] Bump the minor version, install and audit the optimized PATH binary,
   update the English PR, and prune obsolete Rust debug artifacts.
 
 Condition batch: all 566 tests pass (one existing opt-in ignored); rustfmt,
@@ -2041,3 +2041,18 @@ covers semantics/protected tokens, AST ownership and module boundaries,
 idempotence, comment/group attachment, unsupported diagnostics, strict
 atomicity and dead code. Both remaining private migration copies now pass
 strict fmt/check; the final release audit will recheck the complete corpus.
+
+Optimized 0.8.0 is installed at `C:\Users\coder\bin\semblock.exe`; its SHA-256
+matches the release artifact:
+`88F83FB088C822EA295789B7F5CCD1FA10D7CBB15129BAE7C98261DEB3E26148`.
+All 20 deploy files and all four initially reported watch-notification files
+pass strict fmt/check and byte-identical repeated formatting with that binary.
+Original file hashes are unchanged. Application SQL remains outside the tests.
+
+Release gates: 566 tests pass, one existing opt-in SQLx compilation test is
+ignored. Rustfmt, locked Clippy, Rustdoc and diff checks pass for 0.8.0.
+Debug cleanup removed 632 obsolete files and 361 older incremental directories,
+freeing 14.57 GiB while retaining current Cargo artifacts, dependency caches,
+and recent incremental state. All test targets remain buildable in 3.37 seconds;
+the 15 focused DDL/condition tests pass after cleanup.
+English PR #55 contains the completed migration fixes and 0.8.0 release.
