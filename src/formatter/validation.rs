@@ -164,7 +164,11 @@ fn collect_ast_identifiers(
                 }
                 bind_dotted_identifiers(tokens, loc, &names, out);
             }
-            NodeRef::ResTarget(target) if target.location >= 0 && !target.name.is_empty() => {
+            NodeRef::ResTarget(target)
+                if target.location >= 0
+                    && !target.name.is_empty()
+                    && !matches!(visit.parent, Some(NodeRef::SelectStmt(_))) =>
+            {
                 let loc = target.location as usize;
                 if let Some(index) = tokens.iter().position(|t| t.start == loc) {
                     if token_matches_identifier(&tokens[index], &target.name) {

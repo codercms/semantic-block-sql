@@ -4,6 +4,12 @@ This guide contains operational details intentionally kept out of the project RE
 
 ## Commands
 
+COPY FROM STDIN payloads are preserved byte-for-byte and excluded from SQL
+scanning, type-alias normalization and width diagnostics. Statements on either
+side still receive normal formatting and precise diagnostics; strict failures
+restore the complete document. Synthetic safety cases are recorded in
+`tests/deploy_safety_regressions.rs`.
+
 Short SQL authored with separate `SELECT`, `FROM`, and `WHERE` lines keeps those
 clause breaks, including in Go and Rust literals. An already compliant query
 therefore produces no formatting difference in `check` or `diff`. Short queries

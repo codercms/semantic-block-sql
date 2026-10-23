@@ -197,18 +197,20 @@ pub(super) fn plan_create_indexes(
             );
         let has_secondary_clauses =
             index.include.is_some() || index.with_options.is_some() || index.tablespace.is_some();
-        let expanded = authored || has_secondary_clauses || width > context.options.soft_line_width;
-
         let key_width = compact_width(
             context.tokens,
             index.key_open,
             index.key_close + 1,
             context.options,
         );
-        if index.key_items.len() > 1
+        let expanded_keys = index.key_items.len() > 1
             || key_width + index.span.base_depth * INDENT_WIDTH > context.options.soft_line_width
-            || context.tokens[index.key_open + 1].line_breaks_before > 0
-        {
+            || context.tokens[index.key_open + 1].line_breaks_before > 0;
+        let expanded = authored
+            || expanded_keys
+            || has_secondary_clauses
+            || width > context.options.soft_line_width;
+        if expanded_keys {
             plan_ranges(
                 &index.key_items,
                 index.key_close,

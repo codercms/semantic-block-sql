@@ -1,5 +1,23 @@
 # Formatter design
 
+## Deploy safety corrections
+
+SELECT output aliases are bound by their query owner. ResTarget.location points
+to the start of the expression, not necessarily the alias: a same-spelled call
+such as `count(*) AS count` must not become identifier-owned. DML target names
+retain their separate AST binding and identifier spelling validation stays on.
+
+The complete normalization, style/width diagnostics and alias pipeline now runs
+inside each trusted SQL region around COPY FROM STDIN. Payload bytes never enter
+SQL scanning, even when they contain quotes, comment delimiters or numeric-looking
+text. The existing region assembler shifts diagnostic byte ranges and output
+warning lines without changing payload bytes. Strict policy remains document-wide.
+
+CREATE INDEX plans key-list expansion before its following clauses, so a partial
+index does not acquire an additional WHERE break on the second pass. Expanded
+Boolean expressions may break before the IS operator, including IS [NOT] DISTINCT
+FROM, using the existing displayed-prefix hard-width decision.
+
 ## Boolean expression ownership and idempotence (0.6.0)
 
 CASE conditions/results own their Boolean operators; enclosing expressions must

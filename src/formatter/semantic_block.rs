@@ -1365,6 +1365,7 @@ fn plan_booleans(
                     | Token::LessEquals
                     | Token::GreaterEquals
                     | Token::NotEquals
+                    | Token::Is
             ) || plan.line_start(index) == index
             {
                 continue;

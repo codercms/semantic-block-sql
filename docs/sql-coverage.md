@@ -51,6 +51,11 @@ Reviewed structural support includes:
 - reviewed subqueries inside DML expressions.
 
 Authored multiline list and predicate groups, blank lines, and comment boundaries are preserved as structural presentation choices.
+
+Deploy safety fixtures in `tests/deploy_safety_regressions.rs` cover aggregate
+calls sharing their alias name, partial-index first-pass layout, distinctness
+comparison wrapping, and arbitrary COPY payload text with multiple regions,
+type policies, CRLF, warning coordinates and strict atomicity.
 Array constructors own verified element lists, including nested constructors,
 comments, CASE conditions, and CHECK constraints. Array subscripts remain
 separate syntax. Parenthesized join trees retain typed ownership of ON

@@ -1996,3 +1996,22 @@ SHA-256. Fresh copies of the four reported migrations pass strict fmt/check
 and byte-identical repeated formatting; original migration hashes are unchanged.
 
 English PR: [#55](https://github.com/codercms/semantic-block-sql/pull/55).
+
+## Deploy corpus safety corrections
+
+- [x] Add independent synthetic red cases for alias ownership, arbitrary COPY
+  payloads, partial-index idempotence and distinctness-comparison width.
+- [x] Cover same-spelled aliases in SELECT/CTE/DML/atomic routines; preserve the
+  identifier safety gate and DML target ownership.
+- [x] Run all normalization/diagnostics inside trusted SQL regions around COPY;
+  test multiple payloads, comments/quotes, CRLF, aliases and warning coordinates.
+- [x] Cover partial-index groups/comments/options and comparison expression owners.
+- [x] Verify four formerly failing private migration copies now pass strict fmt.
+- [x] Complete full engineering gates and self-review; commit before DDL expansion.
+- [ ] Add fixture-backed LOCK/RENAME/type-change and procedural DDL support.
+- [ ] Audit all 20 deploy migrations with strict fmt/check/repeat, preserving originals.
+
+Safety batch: 550 tests pass (one existing opt-in ignored). All five gates pass.
+Self-review confirms canonical AST/protected-token checks remain enabled, COPY
+data stay outside scanning, source/output coordinates compose correctly, strict
+failures retain the document, and no dependencies or dead helpers were added.
