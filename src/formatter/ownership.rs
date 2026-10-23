@@ -59,6 +59,12 @@ pub(super) struct ArrayListSpec {
     pub elements: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct InListSpec {
+    pub location: usize,
+    pub elements: usize,
+}
+
 /// Top-level VALUES capabilities proven by PostgreSQL AST validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ValuesSpec {
@@ -428,6 +434,7 @@ pub(super) enum AggregateSignatureSpec {
 pub(super) enum UtilityStatementKind {
     Begin,
     Commit,
+    Rollback,
     Drop,
     Truncate,
     Grant,
@@ -475,6 +482,7 @@ impl UtilityStatementKind {
         match self {
             Self::Begin => Token::BeginP,
             Self::Commit => Token::Commit,
+            Self::Rollback => Token::Rollback,
             Self::Drop => Token::Drop,
             Self::Truncate => Token::Truncate,
             Self::Grant | Self::GrantRole => Token::Grant,
@@ -515,6 +523,7 @@ impl UtilityStatementKind {
         match self {
             Self::Begin => "BEGIN",
             Self::Commit => "COMMIT",
+            Self::Rollback => "ROLLBACK",
             Self::Drop => "DROP",
             Self::Truncate => "TRUNCATE",
             Self::Grant => "GRANT",
@@ -655,6 +664,7 @@ pub(super) struct SupportedDocument {
     values_relations: Vec<ValuesRelationSpec>,
     function_calls: Vec<FunctionCallSpec>,
     arrays: Vec<ArrayListSpec>,
+    in_lists: Vec<InListSpec>,
     ast_identifiers: Vec<usize>,
 }
 
@@ -667,6 +677,7 @@ impl SupportedDocument {
             values_relations: Vec::new(),
             function_calls: Vec::new(),
             arrays: Vec::new(),
+            in_lists: Vec::new(),
             ast_identifiers: Vec::new(),
         }
     }
@@ -677,6 +688,7 @@ impl SupportedDocument {
         values_relations: Vec<ValuesRelationSpec>,
         function_calls: Vec<FunctionCallSpec>,
         arrays: Vec<ArrayListSpec>,
+        in_lists: Vec<InListSpec>,
         ast_identifiers: Vec<usize>,
     ) -> Self {
         Self {
@@ -685,6 +697,7 @@ impl SupportedDocument {
             values_relations,
             function_calls,
             arrays,
+            in_lists,
             ast_identifiers,
         }
     }
@@ -707,6 +720,10 @@ impl SupportedDocument {
 
     pub fn arrays(&self) -> &[ArrayListSpec] {
         &self.arrays
+    }
+
+    pub fn in_lists(&self) -> &[InListSpec] {
+        &self.in_lists
     }
 
     pub fn ast_identifiers(&self) -> &[usize] {

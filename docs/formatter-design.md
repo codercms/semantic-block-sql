@@ -841,6 +841,24 @@ No open decision authorizes bypassing the safety invariants.
 
 ## Expanded PostgreSQL capability boundary
 
+The October 2026 migration regressions extend DROP to FUNCTION / PROCEDURE
+targets with unnamed input-type signatures (including empty or omitted
+signatures), qualified/quoted names, multiple targets, IF EXISTS and drop
+behavior. ObjectWithArgs names and argument nodes are validated explicitly;
+named or output parameters, DROP ROUTINE and DROP AGGREGATE remain unsupported.
+
+IN / NOT IN value lists now carry their A_Expr location and AST element count
+through a dedicated binder into the shared list planner. Query-backed IN stays
+with query ownership. Expanded list geometry is rebased after its predicate or
+CASE parent, using the same existing operation as array constructors.
+
+FOR-query headers are handled before trailing-comment extraction. Token-bound
+IN/query/LOOP boundaries replace whitespace-sensitive matching, and the canonical
+SQL result retains its comments, nested layout and indentation-adjusted width.
+Short queries remain inline when the complete header fits; multiline queries
+indent beneath FOR ... IN with LOOP aligned to FOR. This fixes the previous
+comment-induced indentation growth without weakening the idempotence gate.
+
 The ordinary statement validator now admits a closed set of common migration
 utilities in addition to the layout-bearing query/DML/DDL families. `DROP`,
 `TRUNCATE`, object and role `GRANT` / `REVOKE`, `COMMENT ON`, enum/composite
@@ -852,12 +870,12 @@ object kinds or option combinations still return `syntax.unsupported`.
 Top-level transaction control follows the same closed utility path. The
 formatter accepts `TransactionStmt` only for `BEGIN` with parser-owned
 `ISOLATION LEVEL`, `READ ONLY` / `READ WRITE`, and `[NOT] DEFERRABLE` modes, or
-for `COMMIT` whose AST chain flag is false, including explicit `AND NO CHAIN`.
+for `COMMIT` / `ROLLBACK` whose AST chain flag is false, including explicit `AND NO CHAIN`.
 `WORK` and `TRANSACTION` spellings that map to those AST shapes are accepted.
 These statements need no transaction-specific
 nesting planner: the generic utility binder preserves token order, while a
 statement-scoped casing rule handles their unreserved keywords. Leading
-comments remain attached to `BEGIN`. `START TRANSACTION`, rollback, savepoint,
+comments remain attached to `BEGIN`. `START TRANSACTION`, savepoint,
 prepared-transaction, and chained-commit shapes remain byte-identical with
 `syntax.unsupported`; PL/pgSQL transaction control remains opaque as described
 below.

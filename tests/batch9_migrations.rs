@@ -40,7 +40,7 @@ fn enum_values_with_inline_comments_keep_owned_multiline_layout() {
 #[test]
 fn unreviewed_migration_neighbors_remain_fail_safe() {
     for source in [
-        "DROP FUNCTION public.refresh_item(bigint);",
+        "DROP ROUTINE public.refresh_item(bigint);",
         "GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_user;",
         "CREATE TYPE public.amount_range AS RANGE (subtype = numeric);",
     ] {

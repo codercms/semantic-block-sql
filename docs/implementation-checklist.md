@@ -1968,3 +1968,19 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Add comprehensive tests in `tests/host_error_isolation.rs` and update existing host test expectations.
 - [x] Bump package version to `0.5.0` in `Cargo.toml` and `Cargo.lock`.
 - [x] Pass all verification gates (`cargo fmt`, `cargo clippy`, `cargo test`, `cargo doc`, `git diff --check`).
+
+## Migration routine utilities and list/header regressions
+
+- [x] Reproduce routine DROP and top-level ROLLBACK gaps with invented SQL.
+- [x] Reproduce FOR-query comment indentation growth and over-width IN lists
+  with separate synthetic regression cases; copy no private migration SQL.
+- [x] Validate routine argument shapes and unchained rollback explicitly;
+  preserve adjacent unreviewed forms and strict document atomicity.
+- [x] Bind AST IN-list locations/counts and reuse list planning/parent rebasing.
+- [x] Route FOR query headers through canonical SQL before comment extraction.
+- [x] Verify all four private migration copies with strict fmt/check.
+- [x] Pass full gates and review semantic preservation, idempotence, comments,
+  authored groups, diagnostics, atomicity, dependencies and dead code.
+- [x] Commit the completed formatter batch before the minor-version batch.
+- [ ] Bump to 0.7.0, install the optimized PATH binary, verify its hash/version,
+  and open an English PR.

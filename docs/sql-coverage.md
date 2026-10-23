@@ -37,6 +37,8 @@ Reviewed structural support includes:
 - `UNION`, `INTERSECT`, and `EXCEPT`, including reviewed nested and parenthesized trees;
 - scalar and predicate subqueries;
 - result lists and function arguments;
+- AST-bound `IN` / `NOT IN` value lists, including width-driven expansion,
+  authored groups, comments, row values, and nested predicate owners;
 - `WHERE` and `HAVING`;
 - `GROUP BY` and `ORDER BY`;
 - `LIMIT`, `OFFSET`, and `FETCH`;
@@ -165,7 +167,9 @@ PostgreSQL 17 `MERGE` is supported for reviewed:
 
 Fixture-backed support includes:
 
-- `DROP`;
+- `DROP`, including `FUNCTION` / `PROCEDURE` with unnamed input-type signatures,
+  empty or omitted signatures, qualified/quoted names, multiple targets,
+  `IF EXISTS`, and `CASCADE` / `RESTRICT`;
 - `TRUNCATE`;
 - object and role `GRANT` / `REVOKE`;
 - `COMMENT ON`;
@@ -202,11 +206,20 @@ remain unsupported.
 
 ## Operational and migration statements
 
+Routine drops and top-level rollback are exercised by
+`tests/migration_routine_utilities.rs`; named/output drop arguments, DROP ROUTINE,
+DROP AGGREGATE, chained rollback and savepoints remain unsupported.
+`tests/migration_layout_regressions.rs` covers IN-list widths and FOR-query
+headers with nested queries and internal comments, including CRLF and repeat
+formatting. FOR-query SQL retains canonical query layout rather than flattening
+multiline output into the loop header.
+
 Reviewed support includes:
 
 - session/local `SET` values, `TO DEFAULT`, and `FROM CURRENT`;
 - `BEGIN` with reviewed transaction modes;
-- unchained `COMMIT`, including `WORK` / `TRANSACTION` spellings;
+- unchained `COMMIT` and `ROLLBACK`, including `WORK` / `TRANSACTION` and
+  explicit `AND NO CHAIN` spellings;
 - `COPY`, including protected `FROM STDIN` payloads;
 - `CALL`;
 - `EXPLAIN`;

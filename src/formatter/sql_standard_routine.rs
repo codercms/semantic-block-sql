@@ -315,7 +315,7 @@ fn format_body_statements(
 }
 
 /// Indent SQL trivia, never the continuation bytes of a multiline token.
-fn indent_sql_body(source: &str) -> Result<String, FormatDiagnostic> {
+pub(super) fn indent_sql_body(source: &str) -> Result<String, FormatDiagnostic> {
     let tokens = super::tokens::tokenize(source)?;
     let mut output = String::new();
     let mut offset = 0;

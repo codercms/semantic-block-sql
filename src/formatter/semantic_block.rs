@@ -246,6 +246,7 @@ pub(super) fn format(
             utilities: &utilities,
             values: &values,
             arrays: layout.arrays(),
+            in_lists: layout.in_lists(),
             calls: layout.function_calls(),
             definition_headers: &definition_headers,
         },
@@ -368,10 +369,10 @@ pub(super) fn format(
     plan_set_operations(&context, layout.set_operations(), &mut plan);
     plan_cases(&tokens, depths, &cases, &mut plan);
     plan_booleans(&tokens, depths, &boolean_ranges, parens, options, &mut plan);
-    // Array constructors may live in CASE/predicate groups whose final parent
+    // Delimited lists may live in CASE/predicate groups whose final parent
     // line is planned after argument lists. Rebase the already-owned bracket
     // subtree, including nested CASE/query groups, instead of replanning it.
-    for &(open, close) in layout.arrays() {
+    for &(open, close) in layout.arrays().iter().chain(layout.in_lists()) {
         if let Some(current) = plan.before.get(&close).map(|line_break| line_break.indent) {
             let desired = plan
                 .before

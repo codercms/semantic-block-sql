@@ -208,6 +208,11 @@ fn format_body_statement(
     options: &FormatOptions,
     variables: &HashSet<String>,
 ) -> Result<String, FormatDiagnostic> {
+    if kind == ir::BodyNodeKind::Loop
+        && let Some(rendered) = format_for_query_header(text.trim(), options, variables)?
+    {
+        return Ok(rendered);
+    }
     let (raw_code, comment) = split_line_comment(text);
     let code = raw_code.trim();
     if code.is_empty() && !comment.is_empty() {
@@ -229,9 +234,6 @@ fn format_body_statement(
     if kind == ir::BodyNodeKind::ReturnQuery {
         return format_return_query(code, &upper, options, variables)
             .map(|rendered| attach_line_comment(rendered, comment));
-    }
-    if let Some(rendered) = format_for_query_header(code, &upper, options, variables)? {
-        return Ok(attach_line_comment(rendered, comment));
     }
     if let Some(rendered) = format_cursor_query_declaration(code, &upper, options, variables)? {
         return Ok(attach_line_comment(rendered, comment));
@@ -562,24 +564,45 @@ fn format_return_query(
 
 fn format_for_query_header(
     code: &str,
-    upper: &str,
     options: &FormatOptions,
     variables: &HashSet<String>,
 ) -> Result<Option<String>, FormatDiagnostic> {
-    if !upper.starts_with("FOR ") || !upper.ends_with(" LOOP") {
+    use pg_query::protobuf::Token;
+    let tokens = super::tokens::tokenize(code)?;
+    let syntax = tokens
+        .iter()
+        .filter(|token| !token.is_comment())
+        .collect::<Vec<_>>();
+    if syntax.first().is_none_or(|token| token.kind != Token::For)
+        || syntax
+            .last()
+            .is_none_or(|token| !token.text.eq_ignore_ascii_case("LOOP"))
+    {
         return Ok(None);
     }
-    let Some(marker) = [" IN SELECT ", " IN WITH "]
-        .into_iter()
-        .find_map(|marker| upper.find(marker).map(|index| (index, marker)))
-    else {
+    let Some(marker) = syntax.windows(2).find(|pair| {
+        pair[0].kind == Token::InP && matches!(pair[1].kind, Token::Select | Token::With)
+    }) else {
         return Ok(None);
     };
-    let query_start = marker.0 + " IN ".len();
-    let query_end = code.len() - " LOOP".len();
-    let prefix = uppercase_procedural_words(code[..query_start].trim_end(), variables);
-    let query = format_query_fragment(&code[query_start..query_end], options)?;
-    Ok(Some(format!("{prefix} {query} LOOP")))
+    let prefix = normalize_procedural_code(&code[..marker[0].end], options, variables)?;
+    let prefix = uppercase_procedural_words(&prefix, variables);
+    let query_end = syntax.last().expect("loop terminator checked").start;
+    let query_source = code[marker[0].end..query_end].trim();
+    let mut query_options = options.clone();
+    query_options.soft_line_width = options.soft_line_width.saturating_sub(4).max(1);
+    query_options.hard_line_width = options
+        .hard_line_width
+        .saturating_sub(4)
+        .max(query_options.soft_line_width);
+    let query = super::format_sql(query_source, &query_options)?.output;
+    if !query.contains('\n')
+        && prefix.chars().count() + query.chars().count() + 6 <= options.soft_line_width
+    {
+        return Ok(Some(format!("{prefix} {query} LOOP")));
+    }
+    let query = super::sql_standard_routine::indent_sql_body(&query)?;
+    Ok(Some(format!("{prefix}\n{query}LOOP")))
 }
 
 fn format_cursor_query_declaration(

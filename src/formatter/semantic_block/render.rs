@@ -327,9 +327,9 @@ fn is_transaction_control_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool
                 | Token::Not
                 | Token::Deferrable
         ),
-        Token::Commit => matches!(
+        Token::Commit | Token::Rollback => matches!(
             tokens[index].kind,
-            Token::Commit | Token::Transaction | Token::Work | Token::Chain
+            Token::Commit | Token::Rollback | Token::Transaction | Token::Work | Token::Chain
         ),
         _ => false,
     }
@@ -337,6 +337,8 @@ fn is_transaction_control_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool
 
 fn is_contextual_grammar_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
     match tokens[index].kind {
+        Token::Procedure => previous_non_comment(tokens, index)
+            .is_some_and(|previous| tokens[previous].kind == Token::Drop),
         Token::Like | Token::Ilike => is_pattern_match_operator(tokens, index),
         Token::Similar => {
             next_non_comment(tokens, index).is_some_and(|next| tokens[next].kind == Token::To)

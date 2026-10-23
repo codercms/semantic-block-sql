@@ -16,6 +16,13 @@ stays together. Authored blank boundaries in reviewed table, index, view,
 materialized-view, and ALTER layouts are retained alongside mandatory nesting
 and action-group separation.
 
+Migration support includes `DROP FUNCTION` / `DROP PROCEDURE` with unnamed
+input-type signatures and unchained top-level `ROLLBACK`. Long `IN` / `NOT IN`
+value lists wrap at item boundaries. Query-backed PL/pgSQL `FOR` loops retain
+canonical SQL layout and comments inside the header. See [SQL coverage](sql-coverage.md)
+for the exact supported forms; unsupported neighbors keep the existing skip or
+strict-error behavior and exit codes.
+
 Expanded `json_build_object`/`jsonb_build_object` calls prefer a key and its value
 on the same line. The same rule applies to `json_object_agg`/`jsonb_object_agg`
 and their strict/unique variants. Existing separate argument lines may regroup
