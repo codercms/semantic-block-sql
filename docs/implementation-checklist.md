@@ -1982,7 +1982,7 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Pass full gates and review semantic preservation, idempotence, comments,
   authored groups, diagnostics, atomicity, dependencies and dead code.
 - [x] Commit the completed formatter batch before the minor-version batch.
-- [ ] Bump to 0.7.0, install the optimized PATH binary, verify its hash/version,
+- [x] Bump to 0.7.0, install the optimized PATH binary, verify its hash/version,
   and open an English PR.
 
 Formatter batch verification: all 541 tests pass (one existing opt-in SQLx
@@ -1994,3 +1994,5 @@ dependency necessity and dead code. No dependency or safety exemption was added.
 Release verification: optimized 0.7.0 is installed on PATH with a matching
 SHA-256. Fresh copies of the four reported migrations pass strict fmt/check
 and byte-identical repeated formatting; original migration hashes are unchanged.
+
+English PR: [#55](https://github.com/codercms/semantic-block-sql/pull/55).
