@@ -1984,3 +1984,13 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Commit the completed formatter batch before the minor-version batch.
 - [ ] Bump to 0.7.0, install the optimized PATH binary, verify its hash/version,
   and open an English PR.
+
+Formatter batch verification: all 541 tests pass (one existing opt-in SQLx
+compilation test is ignored); rustfmt, locked Clippy, Rustdoc and diff checks
+pass. Self-review covered semantic/protected-token preservation, typed ownership,
+module boundaries, idempotence, comments/authored groups, diagnostics, atomicity,
+dependency necessity and dead code. No dependency or safety exemption was added.
+
+Release verification: optimized 0.7.0 is installed on PATH with a matching
+SHA-256. Fresh copies of the four reported migrations pass strict fmt/check
+and byte-identical repeated formatting; original migration hashes are unchanged.
