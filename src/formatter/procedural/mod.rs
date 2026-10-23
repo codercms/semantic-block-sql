@@ -208,6 +208,9 @@ fn format_body_statement(
     options: &FormatOptions,
     variables: &HashSet<String>,
 ) -> Result<String, FormatDiagnostic> {
+    if let Some(rendered) = format_condition_header(kind, text.trim(), options)? {
+        return Ok(rendered);
+    }
     if kind == ir::BodyNodeKind::Loop
         && let Some(rendered) = format_for_query_header(text.trim(), options, variables)?
     {
@@ -256,6 +259,61 @@ fn format_body_statement(
         uppercase_procedural_words(&normalized, variables),
         comment,
     ))
+}
+
+fn format_condition_header(
+    kind: ir::BodyNodeKind,
+    source: &str,
+    options: &FormatOptions,
+) -> Result<Option<String>, FormatDiagnostic> {
+    use ir::BodyNodeKind;
+    if !matches!(
+        kind,
+        BodyNodeKind::If | BodyNodeKind::Elsif | BodyNodeKind::Loop
+    ) {
+        return Ok(None);
+    }
+    let tokens = super::tokens::tokenize(source)?;
+    let syntax = tokens
+        .iter()
+        .filter(|token| !token.is_comment())
+        .collect::<Vec<_>>();
+    let Some(first) = syntax.first() else {
+        return Ok(None);
+    };
+    let (prefix, suffix) = match kind {
+        BodyNodeKind::If => ("IF", "THEN"),
+        BodyNodeKind::Elsif => ("ELSIF", "THEN"),
+        BodyNodeKind::Loop if first.text.eq_ignore_ascii_case("WHILE") => ("WHILE", "LOOP"),
+        _ => return Ok(None),
+    };
+    let end = syntax
+        .last()
+        .filter(|token| token.text.eq_ignore_ascii_case(suffix))
+        .ok_or_else(|| FormatDiagnostic::Ownership("condition header has no terminator".into()))?;
+    // A trailing line comment must not consume the synthetic SQL terminator.
+    let expression = format!("{}\n", source[first.end..end.start].trim());
+    super::validation::parse_supported_postgresql(&format!("SELECT {expression};"))?;
+    let mut expression_options = options.clone();
+    expression_options.soft_line_width = options
+        .soft_line_width
+        .saturating_sub(suffix.len() + 1)
+        .max(1);
+    expression_options.hard_line_width = options
+        .hard_line_width
+        .saturating_sub(suffix.len() + 1)
+        .max(expression_options.soft_line_width);
+    let rendered = format_sql_expression(prefix, &expression, &expression_options)?;
+    let rendered = rendered.strip_suffix(';').ok_or_else(|| {
+        FormatDiagnostic::Ownership("condition expression lost its terminator".into())
+    })?;
+    let separator = if rendered.trim_end().len() < rendered.len() {
+        "\n"
+    } else {
+        " "
+    };
+    let rendered = rendered.trim_end();
+    Ok(Some(format!("{rendered}{separator}{suffix}")))
 }
 
 fn normalize_procedural_code(

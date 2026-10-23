@@ -2023,3 +2023,21 @@ atomicity, diagnostics and dependency/dead-code boundaries. Fresh strict corpus
 audit now passes 18/20 files; both remaining files expose a separate over-width
 EXISTS condition in procedural headers after DDL capability validation succeeds.
 Original hashes remain unchanged. Finish that layout correction in the next batch.
+
+## Procedural condition layout follow-up
+
+- [x] Reproduce long EXISTS headers independently of private application SQL.
+- [x] Reuse canonical expression layout for IF/ELSIF/WHILE and reserve suffix width.
+- [x] Cover nested Boolean widths, comments before THEN, comments/literals inside
+  queries, authored groups, CRLF and repeat formatting with synthetic cases.
+- [x] Preserve unreviewed condition expressions with unsupported diagnostics.
+- [x] Complete engineering gates and commit this coherent behavior batch.
+- [ ] Bump the minor version, install and audit the optimized PATH binary,
+  update the English PR, and prune obsolete Rust debug artifacts.
+
+Condition batch: all 566 tests pass (one existing opt-in ignored); rustfmt,
+locked Clippy with warnings denied, Rustdoc and diff checks pass. Self-review
+covers semantics/protected tokens, AST ownership and module boundaries,
+idempotence, comment/group attachment, unsupported diagnostics, strict
+atomicity and dead code. Both remaining private migration copies now pass
+strict fmt/check; the final release audit will recheck the complete corpus.

@@ -36,6 +36,8 @@ capability checks and layout, including column compression changes. Unsupported
 leaves keep their source text and diagnostics; strict mode retains the complete
 document. Both `ANALYZE` and `ANALYSE` are accepted, including VACUUM options;
 formatting preserves the selected spelling in uppercase.
+IF/ELSIF and WHILE conditions also reuse SQL expression and subquery layout,
+so long EXISTS queries wrap while retaining comments and authored groups.
 
 Expanded `json_build_object`/`jsonb_build_object` calls prefer a key and its value
 on the same line. The same rule applies to `json_object_agg`/`jsonb_object_agg`

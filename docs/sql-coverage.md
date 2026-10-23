@@ -275,6 +275,9 @@ PL/pgSQL coverage includes:
   authored position separately from SQL table targets;
 - `COMMIT` and `ROLLBACK`, including `AND CHAIN` and `AND NO CHAIN`;
 - `IF` / `ELSIF` / `ELSE`;
+- canonical SQL layout in IF/ELSIF and WHILE conditions, including nested EXISTS
+  queries, comments, authored groups, long Boolean chains and CRLF, exercised by
+  `tests/procedural_condition_layout.rs`;
 - exception handlers;
 - loops;
 - `FOREACH`;

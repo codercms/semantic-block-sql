@@ -1459,3 +1459,11 @@ enter the existing canonical SQL capability pipeline. This adds reviewed
 ownership only; unsupported children retain their bytes and diagnostics, with
 whole-document atomicity in strict mode. No safety gate or parser fallback is
 introduced. ANALYZE/ANALYSE share the same AST owner and preserve their spelling.
+
+IF/ELSIF and WHILE conditions validate the synthetic SELECT expression owner
+and reuse canonical expression/query layout before any line-comment extraction.
+The header reserves space for THEN/LOOP and the procedural adapter reserves its
+outer indentation. Internal comments and authored groups therefore stay inside
+the condition rather than being flattened into a procedural token string.
+Unreviewed condition expressions preserve the complete routine with the normal
+unsupported diagnostic; no permissive header fallback is used.
