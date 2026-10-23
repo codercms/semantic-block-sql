@@ -11,6 +11,7 @@ pub(super) struct ParenthesizedListSources<'a> {
     pub utilities: &'a [UtilityBlock],
     pub values: &'a [ValuesBlock],
     pub arrays: &'a [(usize, usize)],
+    pub in_lists: &'a [(usize, usize)],
     pub calls: &'a [crate::formatter::layout_ir::FunctionCallBlock],
     pub definition_headers: &'a [(usize, usize, usize)],
 }
@@ -46,7 +47,8 @@ pub(super) fn parenthesized_lists(
                     .definition_headers
                     .iter()
                     .any(|&(list, _, _)| list == open)
-                || sources.arrays.iter().any(|&(array, _)| array == open))
+                || sources.arrays.iter().any(|&(array, _)| array == open)
+                || sources.in_lists.iter().any(|&(list, _)| list == open))
         {
             continue;
         }
@@ -251,7 +253,7 @@ pub(super) fn plan_keyword_list_at_indent(
     )
 }
 
-fn plan_keyword_list_with_prefix(
+pub(super) fn plan_keyword_list_with_prefix(
     context: &PlanningContext<'_, '_>,
     prefix: TokenRange,
     end: usize,

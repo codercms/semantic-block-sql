@@ -80,6 +80,7 @@ pub(super) fn parse_supported_postgresql(
     let source_tokens = super::tokens::tokenize(source)?;
     let mut arrays = Vec::new();
     let mut ast_identifiers = Vec::new();
+    let mut in_lists = Vec::new();
     for (statement_index, raw) in parsed.protobuf.stmts.iter().enumerate() {
         let root = raw
             .stmt
@@ -105,6 +106,22 @@ pub(super) fn parse_supported_postgresql(
             end: source.len(),
         })?;
         collect_ast_identifiers(root, &source_tokens, &mut ast_identifiers);
+        for visit in DepthFirst::new(root) {
+            if let NodeRef::AExpr(expression) = visit.node
+                && pg_query::protobuf::AExprKind::try_from(expression.kind)
+                    == Ok(pg_query::protobuf::AExprKind::AexprIn)
+                && let Some(NodeEnum::List(items)) = expression
+                    .rexpr
+                    .as_deref()
+                    .and_then(|node| node.node.as_ref())
+            {
+                in_lists.push(super::ownership::InListSpec {
+                    location: usize::try_from(expression.location)
+                        .map_err(|_| FormatDiagnostic::Ownership("unlocated IN list".into()))?,
+                    elements: items.items.len(),
+                });
+            }
+        }
     }
     queries.sort_by_key(|query| (query.statement_index, query.anchor.unwrap_or(usize::MAX)));
 
@@ -114,6 +131,7 @@ pub(super) fn parse_supported_postgresql(
         values_relations,
         function_calls,
         arrays,
+        in_lists,
         ast_identifiers,
     ))
 }
@@ -146,7 +164,11 @@ fn collect_ast_identifiers(
                 }
                 bind_dotted_identifiers(tokens, loc, &names, out);
             }
-            NodeRef::ResTarget(target) if target.location >= 0 && !target.name.is_empty() => {
+            NodeRef::ResTarget(target)
+                if target.location >= 0
+                    && !target.name.is_empty()
+                    && !matches!(visit.parent, Some(NodeRef::SelectStmt(_))) =>
+            {
                 let loc = target.location as usize;
                 if let Some(index) = tokens.iter().position(|t| t.start == loc) {
                     if token_matches_identifier(&tokens[index], &target.name) {
@@ -160,6 +182,20 @@ fn collect_ast_identifiers(
                     if token_matches_identifier(&tokens[index], &col.colname) {
                         out.push(index);
                     }
+                }
+            }
+            NodeRef::AlterTableCmd(command)
+                if pg_query::protobuf::AlterTableType::try_from(command.subtype)
+                    == Ok(AlterTableType::AtAlterColumnType) =>
+            {
+                if let Some(NodeEnum::ColumnDef(column)) =
+                    command.def.as_deref().and_then(|node| node.node.as_ref())
+                    && let Some(index) = tokens.iter().position(|token| {
+                        token.start == column.location as usize
+                            && token_matches_identifier(token, &command.name)
+                    })
+                {
+                    out.push(index);
                 }
             }
             _ => {}
@@ -504,6 +540,33 @@ fn validate_statement(raw: &RawStmt) -> Result<StatementSpec, &'static str> {
         }
         NodeEnum::TransactionStmt(statement) => {
             Ok(StatementSpec::Utility(validate_transaction(statement)?))
+        }
+        NodeEnum::LockStmt(statement) => {
+            use super::ownership::TableLockMode;
+            if statement.relations.is_empty()
+                || statement.relations.iter().any(|node| {
+                    !matches!(node.node.as_ref(), Some(NodeEnum::RangeVar(relation))
+                    if relation.alias.is_none() && !relation.relname.is_empty())
+                })
+            {
+                return Err("unreviewed LOCK relation");
+            }
+            let mode = match statement.mode {
+                1 => TableLockMode::AccessShare,
+                2 => TableLockMode::RowShare,
+                3 => TableLockMode::RowExclusive,
+                4 => TableLockMode::ShareUpdateExclusive,
+                5 => TableLockMode::Share,
+                6 => TableLockMode::ShareRowExclusive,
+                7 => TableLockMode::Exclusive,
+                8 => TableLockMode::AccessExclusive,
+                _ => return Err("unreviewed table lock mode"),
+            };
+            Ok(StatementSpec::Utility(UtilityStatementKind::Lock {
+                relations: statement.relations.len(),
+                mode,
+                nowait: statement.nowait,
+            }))
         }
         NodeEnum::DropStmt(statement) => {
             validate_drop(statement)?;
@@ -869,6 +932,11 @@ fn validate_transaction(statement: &TransactionStmt) -> Result<UtilityStatementK
         {
             Ok(UtilityStatementKind::Commit)
         }
+        TransactionStmtKind::TransStmtRollback
+            if statement.options.is_empty() && !statement.chain =>
+        {
+            Ok(UtilityStatementKind::Rollback)
+        }
         _ => Err("unreviewed transaction statement"),
     }
 }
@@ -959,6 +1027,19 @@ fn validate_rename(statement: &pg_query::protobuf::RenameStmt) -> Result<(), &'s
         return Err("ALTER ... RENAME without new name");
     }
     let kind = ObjectType::try_from(statement.rename_type).unwrap_or(ObjectType::Undefined);
+    if matches!(
+        kind,
+        ObjectType::ObjectTable | ObjectType::ObjectTabconstraint
+    ) && (statement
+        .relation
+        .as_ref()
+        .is_none_or(|relation| relation.relname.is_empty() || relation.alias.is_some())
+        || statement.object.is_some()
+        || (kind == ObjectType::ObjectTable && !statement.subname.is_empty())
+        || (kind == ObjectType::ObjectTabconstraint && statement.subname.is_empty()))
+    {
+        return Err("unreviewed table RENAME shape");
+    }
     if !matches!(
         kind,
         ObjectType::ObjectType
@@ -966,6 +1047,8 @@ fn validate_rename(statement: &pg_query::protobuf::RenameStmt) -> Result<(), &'s
             | ObjectType::ObjectIndex
             | ObjectType::ObjectMatview
             | ObjectType::ObjectTrigger
+            | ObjectType::ObjectTable
+            | ObjectType::ObjectTabconstraint
     ) {
         return Err("unreviewed ALTER ... RENAME object kind");
     }
@@ -989,11 +1072,40 @@ fn validate_drop(statement: &DropStmt) -> Result<(), &'static str> {
             | ObjectType::ObjectSchema
             | ObjectType::ObjectTrigger
             | ObjectType::ObjectPolicy
+            | ObjectType::ObjectFunction
+            | ObjectType::ObjectProcedure
     ) {
         return Err("unreviewed DROP object kind");
     }
     if statement.concurrent && object != ObjectType::ObjectIndex {
         return Err("CONCURRENTLY on non-index DROP");
+    }
+    if matches!(
+        object,
+        ObjectType::ObjectFunction | ObjectType::ObjectProcedure
+    ) {
+        for routine in &statement.objects {
+            let Some(NodeEnum::ObjectWithArgs(routine)) = routine.node.as_ref() else {
+                return Err("unrecognized DROP routine signature");
+            };
+            string_nodes(&routine.objname, "DROP routine name")?;
+            if (routine.args_unspecified && !routine.objargs.is_empty())
+                || routine.objargs.iter().any(|argument| {
+                    !matches!(argument.node.as_ref(), Some(NodeEnum::TypeName(_)))
+                })
+                || routine.objfuncargs.iter().any(|argument| {
+                    !matches!(argument.node.as_ref(), Some(NodeEnum::FunctionParameter(parameter))
+                        if parameter.name.is_empty()
+                            && parameter.arg_type.is_some()
+                            && parameter.defexpr.is_none()
+                            && matches!(pg_query::protobuf::FunctionParameterMode::try_from(parameter.mode),
+                                Ok(pg_query::protobuf::FunctionParameterMode::FuncParamDefault
+                                    | pg_query::protobuf::FunctionParameterMode::FuncParamIn)))
+                })
+            {
+                return Err("unreviewed DROP routine arguments");
+            }
+        }
     }
     validate_drop_behavior(statement.behavior)
 }
@@ -1667,7 +1779,17 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
         } else if let Some(definition) = command.def.as_deref() {
             let check_constraints = match definition.node.as_ref() {
                 Some(NodeEnum::ColumnDef(column)) => {
-                    validate_column_def(column)?;
+                    if subtype == AlterTableType::AtAlterColumnType {
+                        if command.name.is_empty()
+                            || !column.colname.is_empty()
+                            || !column.constraints.is_empty()
+                        {
+                            return Err("unreviewed ALTER COLUMN TYPE definition");
+                        }
+                        validate_column_type(column)?;
+                    } else {
+                        validate_column_def(column)?;
+                    }
                     column_check_constraint_count(column)
                 }
                 Some(NodeEnum::Constraint(constraint)) => {
@@ -1775,8 +1897,15 @@ fn alter_action_group(subtype: AlterTableType) -> Result<AlterTableActionGroup, 
 }
 
 fn validate_column_def(column: &ColumnDef) -> Result<(), &'static str> {
-    if column.colname.is_empty() || column.type_name.is_none() {
+    if column.colname.is_empty() {
         return Err("CREATE/ALTER column without a name or type");
+    }
+    validate_column_type(column)
+}
+
+fn validate_column_type(column: &ColumnDef) -> Result<(), &'static str> {
+    if column.type_name.is_none() {
+        return Err("column definition without a type");
     }
     if !column.fdwoptions.is_empty() {
         return Err("foreign-table column options");

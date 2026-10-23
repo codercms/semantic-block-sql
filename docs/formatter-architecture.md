@@ -41,6 +41,7 @@ src/formatter/
 │   ├── query.rs                SELECT, WITH, predicate, and set-operation binding
 │   ├── values.rs               counted VALUES rows and query suffix binding
 │   ├── arrays.rs               constructor element groups, distinct from subscripts
+│   ├── in_lists.rs             AST-located IN value lists and element counts
 │   ├── function_calls.rs       AST-owned names, call parentheses, escape helpers
 │   └── migration_ddl.rs        sequence, identity, trigger, and foreign-key clauses
 ├── routine_header.rs           shared signatures, options, and literal arguments

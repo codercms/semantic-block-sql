@@ -1,5 +1,23 @@
 # Formatter design
 
+## Deploy safety corrections
+
+SELECT output aliases are bound by their query owner. ResTarget.location points
+to the start of the expression, not necessarily the alias: a same-spelled call
+such as `count(*) AS count` must not become identifier-owned. DML target names
+retain their separate AST binding and identifier spelling validation stays on.
+
+The complete normalization, style/width diagnostics and alias pipeline now runs
+inside each trusted SQL region around COPY FROM STDIN. Payload bytes never enter
+SQL scanning, even when they contain quotes, comment delimiters or numeric-looking
+text. The existing region assembler shifts diagnostic byte ranges and output
+warning lines without changing payload bytes. Strict policy remains document-wide.
+
+CREATE INDEX plans key-list expansion before its following clauses, so a partial
+index does not acquire an additional WHERE break on the second pass. Expanded
+Boolean expressions may break before the IS operator, including IS [NOT] DISTINCT
+FROM, using the existing displayed-prefix hard-width decision.
+
 ## Boolean expression ownership and idempotence (0.6.0)
 
 CASE conditions/results own their Boolean operators; enclosing expressions must
@@ -841,6 +859,24 @@ No open decision authorizes bypassing the safety invariants.
 
 ## Expanded PostgreSQL capability boundary
 
+The October 2026 migration regressions extend DROP to FUNCTION / PROCEDURE
+targets with unnamed input-type signatures (including empty or omitted
+signatures), qualified/quoted names, multiple targets, IF EXISTS and drop
+behavior. ObjectWithArgs names and argument nodes are validated explicitly;
+named or output parameters, DROP ROUTINE and DROP AGGREGATE remain unsupported.
+
+IN / NOT IN value lists now carry their A_Expr location and AST element count
+through a dedicated binder into the shared list planner. Query-backed IN stays
+with query ownership. Expanded list geometry is rebased after its predicate or
+CASE parent, using the same existing operation as array constructors.
+
+FOR-query headers are handled before trailing-comment extraction. Token-bound
+IN/query/LOOP boundaries replace whitespace-sensitive matching, and the canonical
+SQL result retains its comments, nested layout and indentation-adjusted width.
+Short queries remain inline when the complete header fits; multiline queries
+indent beneath FOR ... IN with LOOP aligned to FOR. This fixes the previous
+comment-induced indentation growth without weakening the idempotence gate.
+
 The ordinary statement validator now admits a closed set of common migration
 utilities in addition to the layout-bearing query/DML/DDL families. `DROP`,
 `TRUNCATE`, object and role `GRANT` / `REVOKE`, `COMMENT ON`, enum/composite
@@ -852,12 +888,12 @@ object kinds or option combinations still return `syntax.unsupported`.
 Top-level transaction control follows the same closed utility path. The
 formatter accepts `TransactionStmt` only for `BEGIN` with parser-owned
 `ISOLATION LEVEL`, `READ ONLY` / `READ WRITE`, and `[NOT] DEFERRABLE` modes, or
-for `COMMIT` whose AST chain flag is false, including explicit `AND NO CHAIN`.
+for `COMMIT` / `ROLLBACK` whose AST chain flag is false, including explicit `AND NO CHAIN`.
 `WORK` and `TRANSACTION` spellings that map to those AST shapes are accepted.
 These statements need no transaction-specific
 nesting planner: the generic utility binder preserves token order, while a
 statement-scoped casing rule handles their unreserved keywords. Leading
-comments remain attached to `BEGIN`. `START TRANSACTION`, rollback, savepoint,
+comments remain attached to `BEGIN`. `START TRANSACTION`, savepoint,
 prepared-transaction, and chained-commit shapes remain byte-identical with
 `syntax.unsupported`; PL/pgSQL transaction control remains opaque as described
 below.
@@ -1406,3 +1442,28 @@ When formatting embedded SQL in Go or Rust source files:
 - A compiler-style diagnostic is emitted with rule `syntax.parse_failure`, `Severity::Error`, and exact source coordinates pointing to the host literal location.
 - Valid sibling SQL expressions within the same Go or Rust file are formatted correctly in memory while the malformed literal remains byte-identical.
 - Under whole-project preflight and safety invariants ("Never partially rewrite a file"), the compiler diagnostic is emitted to stderr, exit code 3 is returned, and files containing fatal syntax errors are protected from partial modifications on disk.
+
+### Deploy DDL ownership expansion
+
+LOCK statements carry the AST relation count, an exhaustive eight-mode enum,
+and NOWAIT presence. Binding verifies the mode words and target cardinality;
+the shared list planner owns target groups and a separate mode clause. Table
+and constraint rename support validates the corresponding RenameStmt shape
+and binds new/constraint names as identifiers before casing.
+
+ALTER COLUMN TYPE uses PostgreSQL's actual AST shape: AlterTableCmd owns the
+column name, while its ColumnDef contains only the type, collation and USING
+expression. It reuses column type validation without requiring a declaration
+name or fabricating an AST. Static procedural ALTER/CREATE/DROP/LOCK leaves
+enter the existing canonical SQL capability pipeline. This adds reviewed
+ownership only; unsupported children retain their bytes and diagnostics, with
+whole-document atomicity in strict mode. No safety gate or parser fallback is
+introduced. ANALYZE/ANALYSE share the same AST owner and preserve their spelling.
+
+IF/ELSIF and WHILE conditions validate the synthetic SELECT expression owner
+and reuse canonical expression/query layout before any line-comment extraction.
+The header reserves space for THEN/LOOP and the procedural adapter reserves its
+outer indentation. Internal comments and authored groups therefore stay inside
+the condition rather than being flattened into a procedural token string.
+Unreviewed condition expressions preserve the complete routine with the normal
+unsupported diagnostic; no permissive header fallback is used.

@@ -306,7 +306,15 @@ fn format_document_once(
     source: &str,
     options: &FormatOptions,
 ) -> Result<FormattedContent, FormatDiagnostic> {
-    let content = format_document_content(source, options)?;
+    format_document_content(source, options)
+}
+
+fn format_regular_document_once(
+    source: &str,
+    options: &FormatOptions,
+    source_line_offset: usize,
+) -> Result<FormattedContent, FormatDiagnostic> {
+    let content = format_regular_document_content(source, options, source_line_offset)?;
     let base_output = content.output;
     let source_aliases = type_aliases::normalize(source, options, &content.opaque_source_ranges)?;
     let output_aliases =
@@ -314,7 +322,8 @@ fn format_document_once(
     let (output, final_opaque_output_ranges) = if output_aliases.output == base_output {
         (base_output.clone(), content.opaque_output_ranges.clone())
     } else {
-        let final_content = format_document_content(&output_aliases.output, options)?;
+        let final_content =
+            format_regular_document_content(&output_aliases.output, options, source_line_offset)?;
         (final_content.output, final_content.opaque_output_ranges)
     };
     let mut diagnostics = content.diagnostics;
@@ -362,7 +371,7 @@ fn format_document_content_at(
     source_line_offset: usize,
 ) -> Result<FormattedContent, FormatDiagnostic> {
     let Some(region) = find_copy_stdin_region(source)? else {
-        return format_regular_document_content(source, options, source_line_offset);
+        return format_regular_document_once(source, options, source_line_offset);
     };
     let source_index = SourceIndex::new(source);
 
@@ -371,7 +380,7 @@ fn format_document_content_at(
     let header_line_offset = SourceIndex::new(&prefix.output).completed_line_count();
     let header_source_line_offset =
         source_line_offset + source_index.location(region.header_start).line - 1;
-    let header = format_regular_document_content(
+    let header = format_regular_document_once(
         &source[region.header_start..region.header_end],
         options,
         header_source_line_offset,
@@ -389,6 +398,32 @@ fn format_document_content_at(
         suffix_source_line_offset,
     )
     .map_err(|error| shift_statement_error_lines(error, suffix_line_offset))?;
+
+    let warnings = prefix
+        .warnings
+        .into_iter()
+        .map(|warning| (warning, 0))
+        .chain(
+            header
+                .warnings
+                .into_iter()
+                .map(|warning| (warning, header_line_offset)),
+        )
+        .chain(
+            suffix
+                .warnings
+                .into_iter()
+                .map(|warning| (warning, suffix_line_offset)),
+        )
+        .map(|(warning, offset)| match warning {
+            FormatWarning::IndivisibleTokenExceedsHardWidth { line, width } => {
+                FormatWarning::IndivisibleTokenExceedsHardWidth {
+                    line: line + offset,
+                    width,
+                }
+            }
+        })
+        .collect();
 
     let header_output_offset = prefix.output.len();
     let suffix_output_offset = header_output_offset + header.output.len() + payload.len();
@@ -438,7 +473,7 @@ fn format_document_content_at(
     output.push_str(payload);
     output.push_str(&suffix.output);
     Ok(FormattedContent {
-        warnings: Vec::new(),
+        warnings,
         output,
         diagnostics,
         opaque_source_ranges,

@@ -200,7 +200,7 @@ For stdin, staged-file semantics, exit codes, directives, configuration, and oth
 - `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `RETURNING`, and `ON CONFLICT`;
 - common and advanced relation sources including joins, `LATERAL`, derived tables, functions, `ROWS FROM`, and `TABLESAMPLE`;
 - tables and partitions, indexes, views, materialized views, types, domains, sequences, triggers, policies, and reviewed `ALTER` forms;
-- migration and operational statements such as `COPY`, `CALL`, `EXPLAIN`, `VACUUM`, `ANALYZE`, `REFRESH MATERIALIZED VIEW`, `GRANT`, `REVOKE`, and `COMMENT ON`;
+- migration and operational statements such as `COPY`, `LOCK TABLE`, `CALL`, `EXPLAIN`, `VACUUM`, `ANALYZE`/`ANALYSE`, `REFRESH MATERIALIZED VIEW`, `GRANT`, `REVOKE`, and `COMMENT ON`;
 - PostgreSQL operators and expressions including JSON/JSONB, JSONPath, `hstore`, arrays, ranges, full-text search, regex, and network operators;
 - SQL routines with dollar-quoted, inline RETURN, or multi-statement atomic bodies, plus protected C/internal declarations;
 - substantial PL/pgSQL support including datatype references, procedural `INTO`, transaction control, conditionals, loops, exception handlers, dynamic `EXECUTE`, cursors, and `RETURN QUERY`.

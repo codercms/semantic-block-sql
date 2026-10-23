@@ -66,7 +66,11 @@ fn formats_plain_top_level_transactions_without_comment_diagnostics() {
 
 #[test]
 fn unreviewed_transaction_controls_remain_unsupported() {
-    for source in ["START TRANSACTION;", "COMMIT AND CHAIN;", "ROLLBACK;"] {
+    for source in [
+        "START TRANSACTION;",
+        "COMMIT AND CHAIN;",
+        "ROLLBACK AND CHAIN;",
+    ] {
         let result = format_sql_result(source, &FormatOptions::default());
         assert_eq!(result.output, source, "{source}");
         assert!(!result.changed, "{source}");

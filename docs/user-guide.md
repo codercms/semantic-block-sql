@@ -4,6 +4,12 @@ This guide contains operational details intentionally kept out of the project RE
 
 ## Commands
 
+COPY FROM STDIN payloads are preserved byte-for-byte and excluded from SQL
+scanning, type-alias normalization and width diagnostics. Statements on either
+side still receive normal formatting and precise diagnostics; strict failures
+restore the complete document. Synthetic safety cases are recorded in
+`tests/deploy_safety_regressions.rs`.
+
 Short SQL authored with separate `SELECT`, `FROM`, and `WHERE` lines keeps those
 clause breaks, including in Go and Rust literals. An already compliant query
 therefore produces no formatting difference in `check` or `diff`. Short queries
@@ -15,6 +21,23 @@ including partial multiline layouts and `ON CONFLICT` actions. `DEFAULT VALUES`
 stays together. Authored blank boundaries in reviewed table, index, view,
 materialized-view, and ALTER layouts are retained alongside mandatory nesting
 and action-group separation.
+
+Migration support includes `DROP FUNCTION` / `DROP PROCEDURE` with unnamed
+input-type signatures and unchained top-level `ROLLBACK`. Long `IN` / `NOT IN`
+value lists wrap at item boundaries. Query-backed PL/pgSQL `FOR` loops retain
+canonical SQL layout and comments inside the header. See [SQL coverage](sql-coverage.md)
+for the exact supported forms; unsupported neighbors keep the existing skip or
+strict-error behavior and exit codes.
+
+Reviewed migration DDL also includes table and constraint renames, column type
+changes with `USING`, and `LOCK TABLE` with all eight modes and `NOWAIT`.
+Static ALTER/CREATE/DROP/LOCK statements inside PL/pgSQL use the same SQL
+capability checks and layout, including column compression changes. Unsupported
+leaves keep their source text and diagnostics; strict mode retains the complete
+document. Both `ANALYZE` and `ANALYSE` are accepted, including VACUUM options;
+formatting preserves the selected spelling in uppercase.
+IF/ELSIF and WHILE conditions also reuse SQL expression and subquery layout,
+so long EXISTS queries wrap while retaining comments and authored groups.
 
 Expanded `json_build_object`/`jsonb_build_object` calls prefer a key and its value
 on the same line. The same rule applies to `json_object_agg`/`jsonb_object_agg`

@@ -10,6 +10,7 @@ use super::tokens::SqlToken;
 
 mod arrays;
 mod function_calls;
+mod in_lists;
 mod migration_ddl;
 mod query;
 mod statement;
@@ -433,12 +434,20 @@ pub(super) struct AlterTableBlock {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LockBlock {
+    pub targets: TokenRange,
+    pub mode: Option<usize>,
+    pub nowait: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UtilityBlock {
     pub span: TokenSpan,
     pub kind: UtilityStatementKind,
     pub lists: [Option<(usize, usize)>; 2],
     pub clauses: Vec<usize>,
     pub identifier_tokens: Vec<usize>,
+    pub lock: Option<LockBlock>,
 }
 
 /// Exhaustive top-level layout dispatcher.
@@ -471,6 +480,7 @@ pub(super) struct LayoutDocument {
     identifier_tokens: Vec<usize>,
     function_calls: Vec<FunctionCallBlock>,
     arrays: Vec<(usize, usize)>,
+    in_lists: Vec<(usize, usize)>,
 }
 
 impl LayoutDocument {
@@ -481,6 +491,7 @@ impl LayoutDocument {
     ) -> Result<Self, FormatDiagnostic> {
         let function_calls = function_calls::bind(tokens, structure, document.function_calls())?;
         let arrays = arrays::bind(tokens, structure, document.arrays())?;
+        let in_lists = in_lists::bind(tokens, structure, document.in_lists())?;
         // Relation alias binding needs to distinguish a real call name from a
         // same-spelled alias before expression layout starts. Keep caller tokens
         // immutable while binding this shared source-role view.
@@ -659,6 +670,7 @@ impl LayoutDocument {
             identifier_tokens,
             function_calls,
             arrays,
+            in_lists,
         })
     }
 
@@ -701,6 +713,10 @@ impl LayoutDocument {
 
     pub fn arrays(&self) -> &[(usize, usize)] {
         &self.arrays
+    }
+
+    pub fn in_lists(&self) -> &[(usize, usize)] {
+        &self.in_lists
     }
 
     pub fn statement_spans(&self) -> impl Iterator<Item = TokenSpan> + '_ {
@@ -869,6 +885,52 @@ mod tests {
     use super::*;
     use crate::formatter::tokens::tokenize;
     use crate::formatter::validation::parse_supported_postgresql;
+
+    #[test]
+    fn lock_ownership_rejects_ast_mode_count_and_nowait_disagreements() {
+        use crate::formatter::SourceRange;
+        use crate::formatter::ownership::{SourceStatement, TableLockMode};
+        for (source, relations, mode, nowait) in [
+            (
+                "LOCK TABLE demo.samples IN SHARE MODE;",
+                2,
+                TableLockMode::Share,
+                false,
+            ),
+            (
+                "LOCK TABLE demo.samples IN SHARE MODE;",
+                1,
+                TableLockMode::Exclusive,
+                false,
+            ),
+            ("LOCK TABLE demo.samples;", 1, TableLockMode::Share, false),
+            (
+                "LOCK TABLE demo.samples;",
+                1,
+                TableLockMode::AccessExclusive,
+                true,
+            ),
+        ] {
+            let document = SupportedDocument::new(vec![SourceStatement {
+                spec: StatementSpec::Utility(UtilityStatementKind::Lock {
+                    relations,
+                    mode,
+                    nowait,
+                }),
+                ctes: Vec::new(),
+                range: SourceRange::new(0, source.len()),
+            }]);
+            let tokens = tokenize(source).unwrap();
+            let structure = TokenStructure::new(&tokens);
+            assert!(
+                matches!(
+                    LayoutDocument::bind(&document, &tokens, &structure),
+                    Err(FormatDiagnostic::Ownership(_))
+                ),
+                "{source}"
+            );
+        }
+    }
 
     #[test]
     fn rejects_token_ownership_that_disagrees_with_the_validated_shape() {

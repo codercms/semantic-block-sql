@@ -37,6 +37,8 @@ Reviewed structural support includes:
 - `UNION`, `INTERSECT`, and `EXCEPT`, including reviewed nested and parenthesized trees;
 - scalar and predicate subqueries;
 - result lists and function arguments;
+- AST-bound `IN` / `NOT IN` value lists, including width-driven expansion,
+  authored groups, comments, row values, and nested predicate owners;
 - `WHERE` and `HAVING`;
 - `GROUP BY` and `ORDER BY`;
 - `LIMIT`, `OFFSET`, and `FETCH`;
@@ -49,6 +51,11 @@ Reviewed structural support includes:
 - reviewed subqueries inside DML expressions.
 
 Authored multiline list and predicate groups, blank lines, and comment boundaries are preserved as structural presentation choices.
+
+Deploy safety fixtures in `tests/deploy_safety_regressions.rs` cover aggregate
+calls sharing their alias name, partial-index first-pass layout, distinctness
+comparison wrapping, and arbitrary COPY payload text with multiple regions,
+type policies, CRLF, warning coordinates and strict atomicity.
 Array constructors own verified element lists, including nested constructors,
 comments, CASE conditions, and CHECK constraints. Array subscripts remain
 separate syntax. Parenthesized join trees retain typed ownership of ON
@@ -165,7 +172,9 @@ PostgreSQL 17 `MERGE` is supported for reviewed:
 
 Fixture-backed support includes:
 
-- `DROP`;
+- `DROP`, including `FUNCTION` / `PROCEDURE` with unnamed input-type signatures,
+  empty or omitted signatures, qualified/quoted names, multiple targets,
+  `IF EXISTS`, and `CASCADE` / `RESTRICT`;
 - `TRUNCATE`;
 - object and role `GRANT` / `REVOKE`;
 - `COMMENT ON`;
@@ -185,6 +194,8 @@ Fixture-backed support includes:
 - reviewed access method, storage, tablespace, and `ON COMMIT` options;
 - feature-rich `CREATE INDEX`;
 - multi-action `ALTER TABLE`;
+- `ALTER TABLE ... RENAME TO` and `RENAME CONSTRAINT ... TO`;
+- `ALTER COLUMN ... TYPE` / `SET DATA TYPE`, including `COLLATE` and `USING`;
 - `CREATE VIEW`, including CTE-led queries and wrapped set-operation branches;
 - `CREATE MATERIALIZED VIEW`, including reviewed storage options, CTE-led
   queries, and wrapped set-operation branches with owned data clauses.
@@ -202,21 +213,36 @@ remain unsupported.
 
 ## Operational and migration statements
 
+Routine drops and top-level rollback are exercised by
+`tests/migration_routine_utilities.rs`; named/output drop arguments, DROP ROUTINE,
+DROP AGGREGATE, chained rollback and savepoints remain unsupported.
+`tests/migration_layout_regressions.rs` covers IN-list widths and FOR-query
+headers with nested queries and internal comments, including CRLF and repeat
+formatting. FOR-query SQL retains canonical query layout rather than flattening
+multiline output into the loop header.
+
 Reviewed support includes:
 
 - session/local `SET` values, `TO DEFAULT`, and `FROM CURRENT`;
 - `BEGIN` with reviewed transaction modes;
-- unchained `COMMIT`, including `WORK` / `TRANSACTION` spellings;
+- unchained `COMMIT` and `ROLLBACK`, including `WORK` / `TRANSACTION` and
+  explicit `AND NO CHAIN` spellings;
 - `COPY`, including protected `FROM STDIN` payloads;
 - `CALL`;
 - `EXPLAIN`;
 - `VACUUM`;
-- `ANALYZE`;
+- `ANALYZE` and `ANALYSE`, including both spellings in `VACUUM` options;
+- `LOCK [TABLE]`, all eight lock modes, `ONLY`, relation lists and `NOWAIT`;
 - `REFRESH MATERIALIZED VIEW`;
 - `LISTEN`;
 - `NOTIFY`;
 - reviewed extension, schema, statistics, collation, and cast creation;
 - reviewed `ALTER TYPE`, domain, policy, and rename forms.
+
+`tests/deploy_ddl_coverage.rs` exercises these lock, table-rename and type-change
+forms with golden outputs, keyword-like/quoted identifiers, list groups,
+comments, width expansion and repeat formatting. Column renames remain outside
+the reviewed rename capability set.
 
 ## SQL routines and PL/pgSQL
 
@@ -242,11 +268,16 @@ PL/pgSQL coverage includes:
 
 - declarations, including parser-owned `%TYPE` and `%ROWTYPE` references;
 - embedded SQL statements, including CTE-led SELECT/INSERT/UPDATE/DELETE and
-  static `GRANT`, `ANALYZE`/`ANALYSE`, and `TRUNCATE`;
+  static `GRANT`, `ANALYZE`/`ANALYSE`, `TRUNCATE`, and reviewed
+  `ALTER`/`CREATE`/`DROP`/`LOCK` forms through the canonical SQL formatter,
+  including `ALTER COLUMN ... SET COMPRESSION`;
 - procedural SELECT/RETURNING `INTO` targets and `STRICT`, preserved at their
   authored position separately from SQL table targets;
 - `COMMIT` and `ROLLBACK`, including `AND CHAIN` and `AND NO CHAIN`;
 - `IF` / `ELSIF` / `ELSE`;
+- canonical SQL layout in IF/ELSIF and WHILE conditions, including nested EXISTS
+  queries, comments, authored groups, long Boolean chains and CRLF, exercised by
+  `tests/procedural_condition_layout.rs`;
 - exception handlers;
 - loops;
 - `FOREACH`;

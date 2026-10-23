@@ -1968,3 +1968,94 @@ under Features, Fixes and Chores; published releases remain unchanged.
 - [x] Add comprehensive tests in `tests/host_error_isolation.rs` and update existing host test expectations.
 - [x] Bump package version to `0.5.0` in `Cargo.toml` and `Cargo.lock`.
 - [x] Pass all verification gates (`cargo fmt`, `cargo clippy`, `cargo test`, `cargo doc`, `git diff --check`).
+
+## Migration routine utilities and list/header regressions
+
+- [x] Reproduce routine DROP and top-level ROLLBACK gaps with invented SQL.
+- [x] Reproduce FOR-query comment indentation growth and over-width IN lists
+  with separate synthetic regression cases; copy no private migration SQL.
+- [x] Validate routine argument shapes and unchained rollback explicitly;
+  preserve adjacent unreviewed forms and strict document atomicity.
+- [x] Bind AST IN-list locations/counts and reuse list planning/parent rebasing.
+- [x] Route FOR query headers through canonical SQL before comment extraction.
+- [x] Verify all four private migration copies with strict fmt/check.
+- [x] Pass full gates and review semantic preservation, idempotence, comments,
+  authored groups, diagnostics, atomicity, dependencies and dead code.
+- [x] Commit the completed formatter batch before the minor-version batch.
+- [x] Bump to 0.7.0, install the optimized PATH binary, verify its hash/version,
+  and open an English PR.
+
+Formatter batch verification: all 541 tests pass (one existing opt-in SQLx
+compilation test is ignored); rustfmt, locked Clippy, Rustdoc and diff checks
+pass. Self-review covered semantic/protected-token preservation, typed ownership,
+module boundaries, idempotence, comments/authored groups, diagnostics, atomicity,
+dependency necessity and dead code. No dependency or safety exemption was added.
+
+Release verification: optimized 0.7.0 is installed on PATH with a matching
+SHA-256. Fresh copies of the four reported migrations pass strict fmt/check
+and byte-identical repeated formatting; original migration hashes are unchanged.
+
+English PR: [#55](https://github.com/codercms/semantic-block-sql/pull/55).
+
+## Deploy corpus safety corrections
+
+- [x] Add independent synthetic red cases for alias ownership, arbitrary COPY
+  payloads, partial-index idempotence and distinctness-comparison width.
+- [x] Cover same-spelled aliases in SELECT/CTE/DML/atomic routines; preserve the
+  identifier safety gate and DML target ownership.
+- [x] Run all normalization/diagnostics inside trusted SQL regions around COPY;
+  test multiple payloads, comments/quotes, CRLF, aliases and warning coordinates.
+- [x] Cover partial-index groups/comments/options and comparison expression owners.
+- [x] Verify four formerly failing private migration copies now pass strict fmt.
+- [x] Complete full engineering gates and self-review; commit before DDL expansion.
+- [x] Add fixture-backed LOCK/RENAME/type-change and procedural DDL support.
+- [x] Audit all 20 deploy migrations with strict fmt/check/repeat, preserving originals.
+
+Safety batch: 550 tests pass (one existing opt-in ignored). All five gates pass.
+Self-review confirms canonical AST/protected-token checks remain enabled, COPY
+data stay outside scanning, source/output coordinates compose correctly, strict
+failures retain the document, and no dependencies or dead helpers were added.
+
+DDL batch: 560 tests pass (one existing opt-in ignored), including the separate
+AST/token lock disagreement test. All five gates pass. Self-review covers
+semantic preservation, typed ownership, comments/groups, idempotence, strict
+atomicity, diagnostics and dependency/dead-code boundaries. Fresh strict corpus
+audit now passes 18/20 files; both remaining files expose a separate over-width
+EXISTS condition in procedural headers after DDL capability validation succeeds.
+Original hashes remain unchanged. Finish that layout correction in the next batch.
+
+## Procedural condition layout follow-up
+
+- [x] Reproduce long EXISTS headers independently of private application SQL.
+- [x] Reuse canonical expression layout for IF/ELSIF/WHILE and reserve suffix width.
+- [x] Cover nested Boolean widths, comments before THEN, comments/literals inside
+  queries, authored groups, CRLF and repeat formatting with synthetic cases.
+- [x] Preserve unreviewed condition expressions with unsupported diagnostics.
+- [x] Complete engineering gates and commit this coherent behavior batch.
+- [x] Bump the minor version, install and audit the optimized PATH binary,
+  update the English PR, and prune obsolete Rust debug artifacts.
+
+Condition batch: all 566 tests pass (one existing opt-in ignored); rustfmt,
+locked Clippy with warnings denied, Rustdoc and diff checks pass. Self-review
+covers semantics/protected tokens, AST ownership and module boundaries,
+idempotence, comment/group attachment, unsupported diagnostics, strict
+atomicity and dead code. Both remaining private migration copies now pass
+strict fmt/check; the final release audit will recheck the complete corpus.
+
+Optimized 0.7.0 is installed at `C:\Users\coder\bin\semblock.exe`; its SHA-256
+matches the rebuilt release artifact:
+`605DBCB7CE27E974C65A73970858B9FA681D68204517F3A7E76DABC608EE5DC4`.
+All 20 deploy files and all four initially reported watch-notification files
+pass strict fmt/check and byte-identical repeated formatting with the same formatter implementation.
+Original file hashes are unchanged. Application SQL remains outside the tests.
+
+Release gates: 566 tests pass, one existing opt-in SQLx compilation test is
+ignored. Rustfmt, locked Clippy, Rustdoc and diff checks pass for 0.7.0.
+Debug cleanup removed 632 obsolete files and 361 older incremental directories,
+freeing 14.57 GiB while retaining current Cargo artifacts, dependency caches,
+and recent incremental state. All test targets remain buildable in 3.37 seconds;
+the 15 focused DDL/condition tests pass after cleanup.
+English PR #55 contains the completed migration fixes and 0.7.0 release.
+
+Version correction: this single PR releases 0.7.0 from main 0.6.0. The extra
+minor bump was removed; formatter source and synthetic tests are unchanged.

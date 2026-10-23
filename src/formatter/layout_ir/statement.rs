@@ -273,7 +273,54 @@ pub(super) fn bind_utility(
         UtilityStatementKind::CreateTrigger(spec) => {
             super::migration_ddl::bind_trigger(tokens, structure, statement, spec)?
         }
+        UtilityStatementKind::RenameObject => {
+            let rename = find_kind(
+                tokens,
+                structure.depths(),
+                statement.range.start,
+                statement.range.end,
+                statement.base_depth,
+                Token::Rename,
+            )
+            .ok_or_else(|| FormatDiagnostic::Ownership("RENAME token is missing".into()))?;
+            let to = find_kind(
+                tokens,
+                structure.depths(),
+                rename + 1,
+                statement.range.end,
+                statement.base_depth,
+                Token::To,
+            )
+            .ok_or_else(|| FormatDiagnostic::Ownership("RENAME has no TO token".into()))?;
+            let mut identifiers = vec![
+                next_non_comment(tokens, to)
+                    .filter(|index| *index < statement.range.end)
+                    .ok_or_else(|| FormatDiagnostic::Ownership("RENAME has no new name".into()))?,
+            ];
+            if let Some(constraint) = next_non_comment(tokens, rename)
+                .filter(|index| tokens[*index].kind == Token::Constraint)
+            {
+                identifiers.push(
+                    next_non_comment(tokens, constraint)
+                        .filter(|index| *index < to)
+                        .ok_or_else(|| {
+                            FormatDiagnostic::Ownership("RENAME has no constraint name".into())
+                        })?,
+                );
+            }
+            (vec![rename], identifiers)
+        }
         _ => (Vec::new(), Vec::new()),
+    };
+    let lock = match kind {
+        UtilityStatementKind::Lock {
+            relations,
+            mode,
+            nowait,
+        } => Some(bind_lock(
+            tokens, structure, statement, relations, mode, nowait,
+        )?),
+        _ => None,
     };
     Ok(UtilityBlock {
         span: TokenSpan {
@@ -285,6 +332,80 @@ pub(super) fn bind_utility(
         lists,
         clauses,
         identifier_tokens,
+        lock,
+    })
+}
+
+fn bind_lock(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    statement: &StatementTokens,
+    relations: usize,
+    mode: crate::formatter::ownership::TableLockMode,
+    nowait: bool,
+) -> Result<LockBlock, FormatDiagnostic> {
+    use crate::formatter::ownership::TableLockMode;
+    let significant = (statement.range.start..statement.range.end)
+        .filter(|index| !tokens[*index].is_comment())
+        .collect::<Vec<_>>();
+    let mut start = 1;
+    if significant
+        .get(start)
+        .is_some_and(|index| tokens[*index].kind == Token::Table)
+    {
+        start += 1;
+    }
+    let targets_start = *significant
+        .get(start)
+        .ok_or_else(|| FormatDiagnostic::Ownership("LOCK has no relations".into()))?;
+    let nowait_index = nowait.then(|| *significant.last().expect("LOCK has a header"));
+    if nowait_index.is_some_and(|index| tokens[index].kind != Token::Nowait) {
+        return Err(FormatDiagnostic::Ownership(
+            "LOCK NOWAIT disagrees with AST".into(),
+        ));
+    }
+    let mode_index = significant[start..]
+        .iter()
+        .copied()
+        .find(|index| tokens[*index].kind == Token::InP);
+    if let Some(index) = mode_index {
+        let actual = significant
+            .iter()
+            .copied()
+            .filter(|i| *i > index && *i < nowait_index.unwrap_or(statement.range.end))
+            .map(|i| tokens[i].kind)
+            .collect::<Vec<_>>();
+        let mut expected = mode.tokens().to_vec();
+        expected.push(Token::Mode);
+        if actual != expected {
+            return Err(FormatDiagnostic::Ownership(
+                "LOCK mode disagrees with AST".into(),
+            ));
+        }
+    } else if mode != TableLockMode::AccessExclusive {
+        return Err(FormatDiagnostic::Ownership(
+            "LOCK default mode disagrees with AST".into(),
+        ));
+    }
+    let end = mode_index.or(nowait_index).unwrap_or(statement.range.end);
+    let targets = TokenRange::new(targets_start, end)?;
+    require_count(
+        "LOCK TABLE",
+        "relation count",
+        split_item_ranges(
+            tokens,
+            structure.depths(),
+            targets.start,
+            targets.end,
+            statement.base_depth,
+        )?
+        .len(),
+        relations,
+    )?;
+    Ok(LockBlock {
+        targets,
+        mode: mode_index,
+        nowait: nowait_index,
     })
 }
 
