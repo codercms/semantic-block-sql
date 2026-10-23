@@ -1,6 +1,7 @@
 use super::lists::plan_keyword_list;
 use super::*;
 use crate::formatter::layout_ir::{DeleteBlock, InsertSource, RelationSourceBlock, UpdateBlock};
+use crate::formatter::ownership::TokenRange;
 
 pub(super) fn plan_update_statements(
     context: &PlanningContext<'_, '_>,
@@ -414,6 +415,34 @@ pub(super) fn plan_utility_statements(
         let expanded = authored || width > context.options.soft_line_width;
 
         match utility.kind {
+            UtilityStatementKind::Lock { .. } => {
+                let lock = utility.lock.as_ref().expect("LOCK has bound relations");
+                let list_expanded = super::lists::plan_keyword_list_with_prefix(
+                    context,
+                    TokenRange::new(span.start, lock.targets.start).expect("LOCK prefix"),
+                    lock.targets.end,
+                    span.base_depth,
+                    span.base_depth,
+                    false,
+                    plan,
+                );
+                plan_clause_boundaries(
+                    context,
+                    lock.mode.or(lock.nowait),
+                    span.base_depth,
+                    list_expanded || width > context.options.soft_line_width,
+                    plan,
+                );
+            }
+            UtilityStatementKind::RenameObject if expanded => {
+                plan_clause_boundaries(
+                    context,
+                    utility.clauses.iter().copied(),
+                    span.base_depth,
+                    true,
+                    plan,
+                );
+            }
             UtilityStatementKind::CreateSequence(_) | UtilityStatementKind::CreateTrigger(_)
                 if expanded =>
             {

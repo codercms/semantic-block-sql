@@ -253,7 +253,7 @@ pub(super) fn plan_keyword_list_at_indent(
     )
 }
 
-fn plan_keyword_list_with_prefix(
+pub(super) fn plan_keyword_list_with_prefix(
     context: &PlanningContext<'_, '_>,
     prefix: TokenRange,
     end: usize,

@@ -1442,3 +1442,20 @@ When formatting embedded SQL in Go or Rust source files:
 - A compiler-style diagnostic is emitted with rule `syntax.parse_failure`, `Severity::Error`, and exact source coordinates pointing to the host literal location.
 - Valid sibling SQL expressions within the same Go or Rust file are formatted correctly in memory while the malformed literal remains byte-identical.
 - Under whole-project preflight and safety invariants ("Never partially rewrite a file"), the compiler diagnostic is emitted to stderr, exit code 3 is returned, and files containing fatal syntax errors are protected from partial modifications on disk.
+
+### Deploy DDL ownership expansion
+
+LOCK statements carry the AST relation count, an exhaustive eight-mode enum,
+and NOWAIT presence. Binding verifies the mode words and target cardinality;
+the shared list planner owns target groups and a separate mode clause. Table
+and constraint rename support validates the corresponding RenameStmt shape
+and binds new/constraint names as identifiers before casing.
+
+ALTER COLUMN TYPE uses PostgreSQL's actual AST shape: AlterTableCmd owns the
+column name, while its ColumnDef contains only the type, collation and USING
+expression. It reuses column type validation without requiring a declaration
+name or fabricating an AST. Static procedural ALTER/CREATE/DROP/LOCK leaves
+enter the existing canonical SQL capability pipeline. This adds reviewed
+ownership only; unsupported children retain their bytes and diagnostics, with
+whole-document atomicity in strict mode. No safety gate or parser fallback is
+introduced. ANALYZE/ANALYSE share the same AST owner and preserve their spelling.

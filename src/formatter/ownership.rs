@@ -429,12 +429,45 @@ pub(super) enum AggregateSignatureSpec {
     Parameters { count: usize },
 }
 
+/// PostgreSQL table-lock modes, validated against the AST.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TableLockMode {
+    AccessShare,
+    RowShare,
+    RowExclusive,
+    ShareUpdateExclusive,
+    Share,
+    ShareRowExclusive,
+    Exclusive,
+    AccessExclusive,
+}
+
+impl TableLockMode {
+    pub fn tokens(self) -> &'static [Token] {
+        match self {
+            Self::AccessShare => &[Token::Access, Token::Share],
+            Self::RowShare => &[Token::Row, Token::Share],
+            Self::RowExclusive => &[Token::Row, Token::Exclusive],
+            Self::ShareUpdateExclusive => &[Token::Share, Token::Update, Token::Exclusive],
+            Self::Share => &[Token::Share],
+            Self::ShareRowExclusive => &[Token::Share, Token::Row, Token::Exclusive],
+            Self::Exclusive => &[Token::Exclusive],
+            Self::AccessExclusive => &[Token::Access, Token::Exclusive],
+        }
+    }
+}
+
 /// Reviewed top-level migration/utility statement family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UtilityStatementKind {
     Begin,
     Commit,
     Rollback,
+    Lock {
+        relations: usize,
+        mode: TableLockMode,
+        nowait: bool,
+    },
     Drop,
     Truncate,
     Grant,
@@ -483,6 +516,7 @@ impl UtilityStatementKind {
             Self::Begin => Token::BeginP,
             Self::Commit => Token::Commit,
             Self::Rollback => Token::Rollback,
+            Self::Lock { .. } => Token::LockP,
             Self::Drop => Token::Drop,
             Self::Truncate => Token::Truncate,
             Self::Grant | Self::GrantRole => Token::Grant,
@@ -524,6 +558,7 @@ impl UtilityStatementKind {
             Self::Begin => "BEGIN",
             Self::Commit => "COMMIT",
             Self::Rollback => "ROLLBACK",
+            Self::Lock { .. } => "LOCK TABLE",
             Self::Drop => "DROP",
             Self::Truncate => "TRUNCATE",
             Self::Grant => "GRANT",

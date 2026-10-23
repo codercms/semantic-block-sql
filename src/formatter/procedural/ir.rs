@@ -310,7 +310,7 @@ fn classify_statement(
     let second = tokens.get(start + 1).map(upper);
     match first.as_str() {
         "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH" | "GRANT" | "ANALYZE"
-        | "ANALYSE" | "TRUNCATE" => BodyNodeKind::Sql,
+        | "ANALYSE" | "TRUNCATE" | "ALTER" | "CREATE" | "DROP" | "LOCK" => BodyNodeKind::Sql,
         "PERFORM" => BodyNodeKind::Perform,
         "RETURN" if second.as_deref() == Some("NEXT") => BodyNodeKind::ReturnNext,
         "RETURN" if second.as_deref() == Some("QUERY") => BodyNodeKind::ReturnQuery,

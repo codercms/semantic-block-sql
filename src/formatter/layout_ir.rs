@@ -434,12 +434,20 @@ pub(super) struct AlterTableBlock {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LockBlock {
+    pub targets: TokenRange,
+    pub mode: Option<usize>,
+    pub nowait: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UtilityBlock {
     pub span: TokenSpan,
     pub kind: UtilityStatementKind,
     pub lists: [Option<(usize, usize)>; 2],
     pub clauses: Vec<usize>,
     pub identifier_tokens: Vec<usize>,
+    pub lock: Option<LockBlock>,
 }
 
 /// Exhaustive top-level layout dispatcher.
@@ -877,6 +885,52 @@ mod tests {
     use super::*;
     use crate::formatter::tokens::tokenize;
     use crate::formatter::validation::parse_supported_postgresql;
+
+    #[test]
+    fn lock_ownership_rejects_ast_mode_count_and_nowait_disagreements() {
+        use crate::formatter::SourceRange;
+        use crate::formatter::ownership::{SourceStatement, TableLockMode};
+        for (source, relations, mode, nowait) in [
+            (
+                "LOCK TABLE demo.samples IN SHARE MODE;",
+                2,
+                TableLockMode::Share,
+                false,
+            ),
+            (
+                "LOCK TABLE demo.samples IN SHARE MODE;",
+                1,
+                TableLockMode::Exclusive,
+                false,
+            ),
+            ("LOCK TABLE demo.samples;", 1, TableLockMode::Share, false),
+            (
+                "LOCK TABLE demo.samples;",
+                1,
+                TableLockMode::AccessExclusive,
+                true,
+            ),
+        ] {
+            let document = SupportedDocument::new(vec![SourceStatement {
+                spec: StatementSpec::Utility(UtilityStatementKind::Lock {
+                    relations,
+                    mode,
+                    nowait,
+                }),
+                ctes: Vec::new(),
+                range: SourceRange::new(0, source.len()),
+            }]);
+            let tokens = tokenize(source).unwrap();
+            let structure = TokenStructure::new(&tokens);
+            assert!(
+                matches!(
+                    LayoutDocument::bind(&document, &tokens, &structure),
+                    Err(FormatDiagnostic::Ownership(_))
+                ),
+                "{source}"
+            );
+        }
+    }
 
     #[test]
     fn rejects_token_ownership_that_disagrees_with_the_validated_shape() {

@@ -2008,10 +2008,18 @@ English PR: [#55](https://github.com/codercms/semantic-block-sql/pull/55).
 - [x] Cover partial-index groups/comments/options and comparison expression owners.
 - [x] Verify four formerly failing private migration copies now pass strict fmt.
 - [x] Complete full engineering gates and self-review; commit before DDL expansion.
-- [ ] Add fixture-backed LOCK/RENAME/type-change and procedural DDL support.
+- [x] Add fixture-backed LOCK/RENAME/type-change and procedural DDL support.
 - [ ] Audit all 20 deploy migrations with strict fmt/check/repeat, preserving originals.
 
 Safety batch: 550 tests pass (one existing opt-in ignored). All five gates pass.
 Self-review confirms canonical AST/protected-token checks remain enabled, COPY
 data stay outside scanning, source/output coordinates compose correctly, strict
 failures retain the document, and no dependencies or dead helpers were added.
+
+DDL batch: 560 tests pass (one existing opt-in ignored), including the separate
+AST/token lock disagreement test. All five gates pass. Self-review covers
+semantic preservation, typed ownership, comments/groups, idempotence, strict
+atomicity, diagnostics and dependency/dead-code boundaries. Fresh strict corpus
+audit now passes 18/20 files; both remaining files expose a separate over-width
+EXISTS condition in procedural headers after DDL capability validation succeeds.
+Original hashes remain unchanged. Finish that layout correction in the next batch.

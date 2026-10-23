@@ -194,6 +194,8 @@ Fixture-backed support includes:
 - reviewed access method, storage, tablespace, and `ON COMMIT` options;
 - feature-rich `CREATE INDEX`;
 - multi-action `ALTER TABLE`;
+- `ALTER TABLE ... RENAME TO` and `RENAME CONSTRAINT ... TO`;
+- `ALTER COLUMN ... TYPE` / `SET DATA TYPE`, including `COLLATE` and `USING`;
 - `CREATE VIEW`, including CTE-led queries and wrapped set-operation branches;
 - `CREATE MATERIALIZED VIEW`, including reviewed storage options, CTE-led
   queries, and wrapped set-operation branches with owned data clauses.
@@ -229,12 +231,18 @@ Reviewed support includes:
 - `CALL`;
 - `EXPLAIN`;
 - `VACUUM`;
-- `ANALYZE`;
+- `ANALYZE` and `ANALYSE`, including both spellings in `VACUUM` options;
+- `LOCK [TABLE]`, all eight lock modes, `ONLY`, relation lists and `NOWAIT`;
 - `REFRESH MATERIALIZED VIEW`;
 - `LISTEN`;
 - `NOTIFY`;
 - reviewed extension, schema, statistics, collation, and cast creation;
 - reviewed `ALTER TYPE`, domain, policy, and rename forms.
+
+`tests/deploy_ddl_coverage.rs` exercises these lock, table-rename and type-change
+forms with golden outputs, keyword-like/quoted identifiers, list groups,
+comments, width expansion and repeat formatting. Column renames remain outside
+the reviewed rename capability set.
 
 ## SQL routines and PL/pgSQL
 
@@ -260,7 +268,9 @@ PL/pgSQL coverage includes:
 
 - declarations, including parser-owned `%TYPE` and `%ROWTYPE` references;
 - embedded SQL statements, including CTE-led SELECT/INSERT/UPDATE/DELETE and
-  static `GRANT`, `ANALYZE`/`ANALYSE`, and `TRUNCATE`;
+  static `GRANT`, `ANALYZE`/`ANALYSE`, `TRUNCATE`, and reviewed
+  `ALTER`/`CREATE`/`DROP`/`LOCK` forms through the canonical SQL formatter,
+  including `ALTER COLUMN ... SET COMPRESSION`;
 - procedural SELECT/RETURNING `INTO` targets and `STRICT`, preserved at their
   authored position separately from SQL table targets;
 - `COMMIT` and `ROLLBACK`, including `AND CHAIN` and `AND NO CHAIN`;

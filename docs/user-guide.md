@@ -29,6 +29,14 @@ canonical SQL layout and comments inside the header. See [SQL coverage](sql-cove
 for the exact supported forms; unsupported neighbors keep the existing skip or
 strict-error behavior and exit codes.
 
+Reviewed migration DDL also includes table and constraint renames, column type
+changes with `USING`, and `LOCK TABLE` with all eight modes and `NOWAIT`.
+Static ALTER/CREATE/DROP/LOCK statements inside PL/pgSQL use the same SQL
+capability checks and layout, including column compression changes. Unsupported
+leaves keep their source text and diagnostics; strict mode retains the complete
+document. Both `ANALYZE` and `ANALYSE` are accepted, including VACUUM options;
+formatting preserves the selected spelling in uppercase.
+
 Expanded `json_build_object`/`jsonb_build_object` calls prefer a key and its value
 on the same line. The same rule applies to `json_object_agg`/`jsonb_object_agg`
 and their strict/unique variants. Existing separate argument lines may regroup
