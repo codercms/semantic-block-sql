@@ -2042,17 +2042,20 @@ idempotence, comment/group attachment, unsupported diagnostics, strict
 atomicity and dead code. Both remaining private migration copies now pass
 strict fmt/check; the final release audit will recheck the complete corpus.
 
-Optimized 0.8.0 is installed at `C:\Users\coder\bin\semblock.exe`; its SHA-256
-matches the release artifact:
-`88F83FB088C822EA295789B7F5CCD1FA10D7CBB15129BAE7C98261DEB3E26148`.
+Optimized 0.7.0 is installed at `C:\Users\coder\bin\semblock.exe`; its SHA-256
+matches the rebuilt release artifact:
+`605DBCB7CE27E974C65A73970858B9FA681D68204517F3A7E76DABC608EE5DC4`.
 All 20 deploy files and all four initially reported watch-notification files
-pass strict fmt/check and byte-identical repeated formatting with that binary.
+pass strict fmt/check and byte-identical repeated formatting with the same formatter implementation.
 Original file hashes are unchanged. Application SQL remains outside the tests.
 
 Release gates: 566 tests pass, one existing opt-in SQLx compilation test is
-ignored. Rustfmt, locked Clippy, Rustdoc and diff checks pass for 0.8.0.
+ignored. Rustfmt, locked Clippy, Rustdoc and diff checks pass for 0.7.0.
 Debug cleanup removed 632 obsolete files and 361 older incremental directories,
 freeing 14.57 GiB while retaining current Cargo artifacts, dependency caches,
 and recent incremental state. All test targets remain buildable in 3.37 seconds;
 the 15 focused DDL/condition tests pass after cleanup.
-English PR #55 contains the completed migration fixes and 0.8.0 release.
+English PR #55 contains the completed migration fixes and 0.7.0 release.
+
+Version correction: this single PR releases 0.7.0 from main 0.6.0. The extra
+minor bump was removed; formatter source and synthetic tests are unchanged.
