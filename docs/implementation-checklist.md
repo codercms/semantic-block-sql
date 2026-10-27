@@ -2059,3 +2059,32 @@ English PR #55 contains the completed migration fixes and 0.7.0 release.
 
 Version correction: this single PR releases 0.7.0 from main 0.6.0. The extra
 minor bump was removed; formatter source and synthetic tests are unchanged.
+
+## CREATE/ALTER TABLE ownership audit
+
+- [x] Reproduce action IF EXISTS leakage with independent synthetic SQL.
+- [x] Audit reviewed CREATE/ALTER TABLE families and related expressions beyond
+  the initially reported DROP COLUMN case.
+- [x] Bind table/parent/type names through shared qualified-name ownership and
+  remove ALTER's incomplete action-keyword scan.
+- [x] Protect column/constraint targets and constraint key/name spelling;
+  separate ALTER CONSTRAINT properties from ADD foreign-key clauses.
+- [x] Cover partition-column options and comments between multiword clauses.
+- [x] Add golden, matrix, width, CRLF, unsupported-neighbor and conflicting-AST
+  tests; preserve parse/equivalence/protected-token/idempotence safety gates.
+- [x] Compare lowercase/uppercase keyword variants, introduce AST-proven grammar
+  roles, preserve role/trigger/index names and quoted storage modes, and cover
+  exclusion lists/access methods plus NOT LIKE expression casing.
+- [x] Complete full engineering gates and self-review, then commit the batch.
+
+README/user-guide review: no CLI, configuration, discovery or safety-policy
+change. Detailed syntax coverage and ownership corrections are documented above.
+
+Verification: 585 tests pass; one existing opt-in SQLx compilation test remains
+ignored. Rustfmt, locked Clippy with warnings denied, Rustdoc and diff checks pass.
+Strict CLI stdin fmt/check/repeat also passes for the synthetic multi-DROP case.
+Self-review covers semantic/protected-token preservation, typed ownership,
+idempotence, comments/groups, strict atomicity, diagnostics, module boundaries,
+dependencies and dead code. Temporary AST-probe sources/binaries were removed;
+no dependency or parser/safety fallback was introduced. Version and installed
+release remain unchanged pending separate release work.

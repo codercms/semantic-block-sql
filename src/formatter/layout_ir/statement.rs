@@ -4,9 +4,10 @@ use super::*;
 use crate::formatter::ownership::{
     AggregateSignatureSpec, AliasSpec, AlterTableSpec, ConflictActionSpec, CreateIndexSpec,
     CreateTableSpec, CteStatementSpec, DeleteSpec, InsertSourceSpec, InsertSpec,
-    MaterializedViewSpec, MergeActionSpec, MergeSpec, OverrideSpec, RelationIdentifierSpec,
-    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
-    RelationListSpec, SelectSpec, StatementTokens, UpdateSpec, ValuesSpec, ViewCheckSpec, ViewSpec,
+    MaterializedViewSpec, MergeActionSpec, MergeSpec, OverrideSpec, QualifiedNameSpec,
+    RelationIdentifierSpec, RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec,
+    RelationJoinTypeSpec, RelationListSpec, SelectSpec, StatementTokens, UpdateSpec, ValuesSpec,
+    ViewCheckSpec, ViewSpec,
 };
 use crate::formatter::tokens::{
     is_join_start, is_query_clause_start, next_non_comment, previous_non_comment,
@@ -708,6 +709,46 @@ pub(super) fn bind_create_table(
     let end = statement.range.end;
     let table = find_kind(tokens, depths, body_start + 1, end, base, Token::Table)
         .ok_or_else(|| FormatDiagnostic::Ownership("CREATE TABLE has no TABLE token".into()))?;
+    let mut identifier_tokens = Vec::new();
+    for name in &spec.header_names {
+        let range = bind_qualified_name(tokens, statement.range, name)?;
+        identifier_tokens.extend(
+            (range.start..range.end).filter(|index| {
+                !tokens[*index].is_comment() && tokens[*index].kind != Token::Ascii46
+            }),
+        );
+    }
+    for (kind, name) in [
+        (Token::Using, &spec.access_method),
+        (Token::Tablespace, &spec.tablespace),
+    ] {
+        if let Some(name) = name {
+            let introducer = (table + 1..end)
+                .find(|index| {
+                    depths[*index] == base
+                        && tokens[*index].kind == kind
+                        && !identifier_tokens.contains(index)
+                })
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("CREATE TABLE named clause is missing".into())
+                })?;
+            let index = next_non_comment(tokens, introducer)
+                .filter(|index| *index < end)
+                .ok_or_else(|| {
+                    FormatDiagnostic::Ownership("CREATE TABLE clause has no name".into())
+                })?;
+            if !token_matches_identifier(&tokens[index], name) {
+                return Err(FormatDiagnostic::Ownership(
+                    "CREATE TABLE clause name disagrees with AST".into(),
+                ));
+            }
+            identifier_tokens.push(index);
+        }
+    }
+    let keyword =
+        |index: usize, kind| tokens[index].kind == kind && !identifier_tokens.contains(&index);
+    let find_keyword =
+        |kind| (table + 1..end).find(|index| depths[*index] == base && keyword(*index, kind));
     require_presence(
         "CREATE TABLE",
         "IF NOT EXISTS clause",
@@ -726,10 +767,9 @@ pub(super) fn bind_create_table(
         "OF type clause",
         (table + 1..end).any(|index| {
             depths[index] == base
-                && tokens[index].kind == Token::Of
-                && tokens
-                    .get(index.wrapping_sub(1))
-                    .is_none_or(|previous| previous.kind != Token::Partition)
+                && keyword(index, Token::Of)
+                && previous_non_comment(tokens, index)
+                    .is_none_or(|previous| tokens[previous].kind != Token::Partition)
         }),
         spec.typed_table,
     )?;
@@ -738,10 +778,9 @@ pub(super) fn bind_create_table(
         "PARTITION BY clause",
         (table + 1..end).any(|index| {
             depths[index] == base
-                && tokens[index].kind == Token::Partition
-                && tokens
-                    .get(index + 1)
-                    .is_some_and(|next| next.kind == Token::By)
+                && keyword(index, Token::Partition)
+                && next_non_comment(tokens, index)
+                    .is_some_and(|next| next < end && tokens[next].kind == Token::By)
         }),
         spec.has_partition_spec,
     )?;
@@ -750,42 +789,40 @@ pub(super) fn bind_create_table(
         "PARTITION OF clause",
         (table + 1..end).any(|index| {
             depths[index] == base
-                && tokens[index].kind == Token::Partition
-                && tokens
-                    .get(index + 1)
-                    .is_some_and(|next| next.kind == Token::Of)
+                && keyword(index, Token::Partition)
+                && next_non_comment(tokens, index)
+                    .is_some_and(|next| next < end && tokens[next].kind == Token::Of)
         }),
         spec.has_partition_bound,
     )?;
     require_presence(
         "CREATE TABLE",
         "INHERITS clause",
-        find_kind(tokens, depths, table + 1, end, base, Token::Inherits).is_some(),
+        find_keyword(Token::Inherits).is_some(),
         spec.inheritance_relations > 0 && !spec.has_partition_bound,
     )?;
     require_presence(
         "CREATE TABLE",
         "USING access method",
-        find_kind(tokens, depths, table + 1, end, base, Token::Using).is_some(),
-        spec.has_access_method,
+        find_keyword(Token::Using).is_some(),
+        spec.access_method.is_some(),
     )?;
     require_presence(
         "CREATE TABLE",
         "ON COMMIT clause",
         (table + 1..end).any(|index| {
             depths[index] == base
-                && tokens[index].kind == Token::On
-                && tokens
-                    .get(index + 1)
-                    .is_some_and(|next| next.kind == Token::Commit)
+                && keyword(index, Token::On)
+                && next_non_comment(tokens, index)
+                    .is_some_and(|next| next < end && tokens[next].kind == Token::Commit)
         }),
         spec.has_on_commit,
     )?;
     require_presence(
         "CREATE TABLE",
         "TABLESPACE clause",
-        find_kind(tokens, depths, table + 1, end, base, Token::Tablespace).is_some(),
-        spec.has_tablespace,
+        find_keyword(Token::Tablespace).is_some(),
+        spec.tablespace.is_some(),
     )?;
 
     let (open, close, items) = if spec.elements.is_empty() {
@@ -844,7 +881,7 @@ pub(super) fn bind_create_table(
     let mut clauses = Vec::new();
     let mut with_candidates = Vec::new();
     for index in search_start..end {
-        if depths[index] != base {
+        if depths[index] != base || identifier_tokens.contains(&index) {
             continue;
         }
         let is_clause = match tokens[index].kind {
@@ -853,16 +890,14 @@ pub(super) fn bind_create_table(
             Token::Inherits => true,
             Token::Using => true,
             Token::With
-                if tokens
-                    .get(index + 1)
-                    .is_some_and(|next| next.kind == Token::Ascii40) =>
+                if next_non_comment(tokens, index)
+                    .is_some_and(|next| next < end && tokens[next].kind == Token::Ascii40) =>
             {
                 with_candidates.push(index);
                 false
             }
-            Token::On => tokens
-                .get(index + 1)
-                .is_some_and(|next| next.kind == Token::Commit),
+            Token::On => next_non_comment(tokens, index)
+                .is_some_and(|next| next < end && tokens[next].kind == Token::Commit),
             Token::Tablespace => true,
             _ => false,
         };
@@ -894,6 +929,10 @@ pub(super) fn bind_create_table(
         close,
         items,
         clauses,
+        identifier_tokens,
+        grammar_tokens: (body_start..table)
+            .filter(|index| tokens[*index].kind == Token::Global)
+            .collect(),
     })
 }
 
@@ -1054,6 +1093,36 @@ pub(super) fn bind_create_index(
     })
 }
 
+fn bind_qualified_name(
+    tokens: &[SqlToken<'_>],
+    range: TokenRange,
+    spec: &QualifiedNameSpec,
+) -> Result<TokenRange, FormatDiagnostic> {
+    let error =
+        || FormatDiagnostic::Ownership("qualified name disagrees with its AST owner".into());
+    let start = (range.start..range.end)
+        .find(|index| tokens[*index].start == spec.location)
+        .ok_or_else(error)?;
+    if spec.names.is_empty() {
+        return Err(error());
+    }
+    let mut end = start;
+    for (part, name) in spec.names.iter().enumerate() {
+        if part > 0 {
+            let dot = next_non_comment(tokens, end)
+                .filter(|index| *index < range.end && tokens[*index].kind == Token::Ascii46)
+                .ok_or_else(error)?;
+            end = next_non_comment(tokens, dot)
+                .filter(|index| *index < range.end)
+                .ok_or_else(error)?;
+        }
+        if !token_matches_identifier(&tokens[end], name) {
+            return Err(error());
+        }
+    }
+    TokenRange::new(start, end + 1)
+}
+
 pub(super) fn bind_alter_table(
     tokens: &[SqlToken<'_>],
     structure: &TokenStructure,
@@ -1072,6 +1141,9 @@ pub(super) fn bind_alter_table(
         Token::Table,
     )
     .ok_or_else(|| FormatDiagnostic::Ownership("ALTER TABLE has no TABLE token".into()))?;
+    let relation = bind_qualified_name(tokens, statement.range, &spec.relation)?;
+    let relation_start = relation.start;
+    let mut relation_end = relation.end - 1;
     require_presence(
         "ALTER TABLE",
         "IF EXISTS clause",
@@ -1079,15 +1151,30 @@ pub(super) fn bind_alter_table(
             tokens,
             depths,
             table + 1,
-            statement.range.end,
+            relation_start,
             base,
             &[Token::IfP, Token::Exists],
         ),
         spec.if_exists,
     )?;
-    let action_start = (table + 1..statement.range.end)
-        .find(|index| depths[*index] == base && is_alter_action_start(tokens[*index].kind))
+    if let Some(open) = structure
+        .ancestor_parentheses(relation_start)
+        .find(|open| depths[*open] == base)
+    {
+        relation_end = structure.matching_parenthesis(open).ok_or_else(|| {
+            FormatDiagnostic::Ownership("ALTER TABLE ONLY relation is unclosed".into())
+        })?;
+    }
+    let mut action_start = next_non_comment(tokens, relation_end)
+        .filter(|index| *index < statement.range.end)
         .ok_or_else(|| FormatDiagnostic::Ownership("ALTER TABLE has no action".into()))?;
+    if tokens[action_start].kind == Token::Ascii42 {
+        action_start = next_non_comment(tokens, action_start)
+            .filter(|index| *index < statement.range.end)
+            .ok_or_else(|| {
+                FormatDiagnostic::Ownership("ALTER TABLE has no action after *".into())
+            })?;
+    }
     let ranges = split_item_ranges(tokens, depths, action_start, statement.range.end, base)?;
     require_count(
         "ALTER TABLE",
@@ -1095,10 +1182,47 @@ pub(super) fn bind_alter_table(
         ranges.len(),
         spec.actions.len(),
     )?;
+    let mut identifier_tokens = Vec::new();
+    let mut grammar_tokens = Vec::new();
     let actions = ranges
         .into_iter()
-        .zip(spec.actions.iter().copied())
+        .zip(&spec.actions)
         .map(|(range, action)| {
+            let first = (range.start..range.end)
+                .find(|index| !tokens[*index].is_comment())
+                .ok_or_else(|| FormatDiagnostic::Ownership("ALTER TABLE action is empty".into()))?;
+            grammar_tokens.push(first);
+            if action.trailing_keyword {
+                let last = (first..range.end)
+                    .rev()
+                    .find(|index| {
+                        !tokens[*index].is_comment() && tokens[*index].kind != Token::Ascii44
+                    })
+                    .expect("action has its introducer");
+                if (tokens[last].kind == Token::Ident && !tokens[last].text.starts_with('"'))
+                    || tokens[last].keyword_kind != pg_query::protobuf::KeywordKind::NoKeyword
+                {
+                    grammar_tokens.push(last);
+                }
+            }
+            let mut prefix_end = first;
+            for expected in action.target_prefix {
+                prefix_end = next_non_comment(tokens, prefix_end)
+                    .filter(|index| *index < range.end && tokens[*index].kind == *expected)
+                    .ok_or_else(|| {
+                        FormatDiagnostic::Ownership(
+                            "ALTER TABLE target prefix differs from AST".into(),
+                        )
+                    })?;
+                grammar_tokens.push(prefix_end);
+            }
+            grammar_tokens.extend(
+                (prefix_end + 1..range.end)
+                    .filter(|index| action.grammar_keywords.contains(&tokens[*index].kind)),
+            );
+            if let Some(name) = &action.target_name {
+                identifier_tokens.push(bind_alter_target(tokens, range, prefix_end, name)?);
+            }
             let relation_options = action
                 .relation_options
                 .map(|expected_items| {
@@ -1166,7 +1290,36 @@ pub(super) fn bind_alter_table(
             base_depth: base,
         },
         actions,
+        identifier_tokens,
+        grammar_tokens,
     })
+}
+
+fn bind_alter_target(
+    tokens: &[SqlToken<'_>],
+    range: TokenRange,
+    introducer: usize,
+    name: &str,
+) -> Result<usize, FormatDiagnostic> {
+    let mut syntax = (introducer..range.end).filter(|index| !tokens[*index].is_comment());
+    let error =
+        || FormatDiagnostic::Ownership("ALTER TABLE action target disagrees with the AST".into());
+    syntax.next().ok_or_else(error)?;
+    let mut target = syntax.next().ok_or_else(error)?;
+    if matches!(tokens[target].kind, Token::Column | Token::Constraint) {
+        target = syntax.next().ok_or_else(error)?;
+    }
+    if tokens[target].kind == Token::IfP {
+        let exists = syntax.next().ok_or_else(error)?;
+        if tokens[exists].kind != Token::Exists {
+            return Err(error());
+        }
+        target = syntax.next().ok_or_else(error)?;
+    }
+    if !token_matches_identifier(&tokens[target], name) {
+        return Err(error());
+    }
+    Ok(target)
 }
 
 fn bind_check_predicates(
@@ -2747,26 +2900,6 @@ fn has_sequence(
             .zip(sequence)
             .all(|(index, expected)| tokens[*index].kind == *expected)
     })
-}
-
-fn is_alter_action_start(kind: Token) -> bool {
-    matches!(
-        kind,
-        Token::AddP
-            | Token::Alter
-            | Token::Drop
-            | Token::Set
-            | Token::Reset
-            | Token::EnableP
-            | Token::DisableP
-            | Token::Force
-            | Token::No
-            | Token::Owner
-            | Token::Cluster
-            | Token::Attach
-            | Token::Detach
-            | Token::Validate
-    )
 }
 
 fn bound_override(

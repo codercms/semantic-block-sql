@@ -397,6 +397,8 @@ pub(super) struct CreateTableBlock {
     pub close: Option<usize>,
     pub items: Vec<CreateTableItem>,
     pub clauses: Vec<usize>,
+    pub identifier_tokens: Vec<usize>,
+    pub grammar_tokens: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -431,6 +433,8 @@ pub(super) struct AlterTableAction {
 pub(super) struct AlterTableBlock {
     pub span: TokenSpan,
     pub actions: Vec<AlterTableAction>,
+    pub identifier_tokens: Vec<usize>,
+    pub grammar_tokens: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -478,6 +482,7 @@ pub(super) struct LayoutDocument {
     set_operations: Vec<SetOperationBlock>,
     window_blocks: Vec<WindowBlock>,
     identifier_tokens: Vec<usize>,
+    grammar_tokens: Vec<usize>,
     function_calls: Vec<FunctionCallBlock>,
     arrays: Vec<(usize, usize)>,
     in_lists: Vec<(usize, usize)>,
@@ -658,6 +663,16 @@ impl LayoutDocument {
             .collect::<Vec<_>>();
         identifier_tokens.sort_unstable();
         identifier_tokens.dedup();
+        let grammar_tokens = statements
+            .iter()
+            .flat_map(|statement| match statement {
+                StatementLayout::CreateTable(block) => block.grammar_tokens.as_slice(),
+                StatementLayout::AlterTable(block) => block.grammar_tokens.as_slice(),
+                _ => &[],
+            })
+            .copied()
+            .chain(document.ast_keywords().iter().copied())
+            .collect();
 
         Ok(Self {
             statements,
@@ -668,6 +683,7 @@ impl LayoutDocument {
             set_operations,
             window_blocks,
             identifier_tokens,
+            grammar_tokens,
             function_calls,
             arrays,
             in_lists,
@@ -705,6 +721,10 @@ impl LayoutDocument {
 
     pub fn identifier_tokens(&self) -> &[usize] {
         &self.identifier_tokens
+    }
+
+    pub fn grammar_tokens(&self) -> &[usize] {
+        &self.grammar_tokens
     }
 
     pub fn function_calls(&self) -> &[FunctionCallBlock] {
@@ -874,6 +894,8 @@ fn statement_identifier_tokens<'a>(
                 .chain(block.source.identifier_tokens.iter().copied()),
         ),
         StatementLayout::View(block) => Box::new(owned_list(block.aliases)),
+        StatementLayout::AlterTable(block) => Box::new(block.identifier_tokens.iter().copied()),
+        StatementLayout::CreateTable(block) => Box::new(block.identifier_tokens.iter().copied()),
         StatementLayout::Utility(block) => Box::new(block.identifier_tokens.iter().copied()),
         StatementLayout::MaterializedView(block) => Box::new(owned_list(block.aliases)),
         _ => Box::new(std::iter::empty()),
@@ -885,6 +907,42 @@ mod tests {
     use super::*;
     use crate::formatter::tokens::tokenize;
     use crate::formatter::validation::parse_supported_postgresql;
+
+    #[test]
+    fn table_owners_reject_conflicting_ast_names_and_header_guards() {
+        for source in [
+            "ALTER TABLE lab.readings DROP COLUMN IF EXISTS legacy_value;",
+            "CREATE TABLE lab.readings (id int) USING heap TABLESPACE measurements_space;",
+        ] {
+            let parsed = parse_supported_postgresql(source).unwrap();
+            let tokens = tokenize(source).unwrap();
+            let structure = TokenStructure::new(&tokens);
+            for variant in 0..3 {
+                let mut statement = parsed.statements()[0].clone();
+                match &mut statement.spec {
+                    StatementSpec::AlterTable(spec) => match variant {
+                        0 => spec.if_exists = true,
+                        1 => spec.relation.names[0] = "wrong_schema".into(),
+                        _ => spec.actions[0].target_name = Some("wrong_column".into()),
+                    },
+                    StatementSpec::CreateTable(spec) => match variant {
+                        0 => spec.if_not_exists = true,
+                        1 => spec.header_names[0].location += 1,
+                        _ => spec.tablespace = Some("wrong_tablespace".into()),
+                    },
+                    _ => unreachable!(),
+                }
+                let document = SupportedDocument::new(vec![statement]);
+                assert!(
+                    matches!(
+                        LayoutDocument::bind(&document, &tokens, &structure),
+                        Err(FormatDiagnostic::Ownership(_))
+                    ),
+                    "{source}, variant {variant}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn lock_ownership_rejects_ast_mode_count_and_nowait_disagreements() {

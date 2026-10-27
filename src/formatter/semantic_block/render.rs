@@ -35,6 +35,9 @@ pub(in crate::formatter) fn render_token(
     if token.role == TokenRole::Identifier {
         return token.text.to_owned();
     }
+    if token.role == TokenRole::GrammarKeyword {
+        return token.text.to_uppercase();
+    }
     if token.role == TokenRole::FunctionName {
         return if token.text.starts_with('"') {
             token.text.to_owned()
@@ -92,6 +95,9 @@ pub(in crate::formatter) fn is_function_call_name(tokens: &[SqlToken<'_>], index
 
 pub(in crate::formatter) fn is_function_call_syntax(tokens: &[SqlToken<'_>], index: usize) -> bool {
     next_non_comment(tokens, index).is_some_and(|next| tokens[next].kind == Token::Ascii40)
+        && !(tokens[index].role == TokenRole::Identifier
+            && previous_non_comment(tokens, index)
+                .is_some_and(|previous| tokens[previous].kind == Token::Using))
         && (tokens[index].role == TokenRole::FunctionName
             || matches!(
                 tokens[index].kind,
@@ -338,14 +344,6 @@ fn is_transaction_control_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool
 fn is_contextual_grammar_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
     match tokens[index].kind {
         Token::LockP => true,
-        Token::Compression => {
-            previous_non_comment(tokens, index)
-                .is_some_and(|previous| tokens[previous].kind == Token::Set)
-                && tokens
-                    .iter()
-                    .find(|token| !token.is_comment())
-                    .is_some_and(|token| token.kind == Token::Alter)
-        }
         Token::Access | Token::Exclusive | Token::Mode | Token::Nowait => tokens
             .iter()
             .find(|token| !token.is_comment())
@@ -390,6 +388,9 @@ fn is_with_data_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
 }
 
 fn is_type_declaration_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
+    if tokens[index].role == TokenRole::Identifier {
+        return false;
+    }
     if tokens[index].kind != Token::TypeP {
         return false;
     }
@@ -408,9 +409,15 @@ fn is_type_declaration_keyword(tokens: &[SqlToken<'_>], index: usize) -> bool {
 }
 
 fn is_pattern_match_operator(tokens: &[SqlToken<'_>], index: usize) -> bool {
-    let Some(previous) = previous_non_comment(tokens, index) else {
+    let Some(mut previous) = previous_non_comment(tokens, index) else {
         return false;
     };
+    if tokens[previous].kind == Token::Not {
+        let Some(operand) = previous_non_comment(tokens, previous) else {
+            return false;
+        };
+        previous = operand;
+    }
     let Some(next) = next_non_comment(tokens, index) else {
         return false;
     };

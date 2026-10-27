@@ -310,10 +310,18 @@ impl CreateTableElementSpec {
     }
 }
 
+/// Source anchor and components of an AST-proven qualified name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct QualifiedNameSpec {
+    pub location: usize,
+    pub names: Vec<String>,
+}
+
 /// Exact CREATE TABLE capabilities proven by PostgreSQL AST validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CreateTableSpec {
     pub if_not_exists: bool,
+    pub header_names: Vec<QualifiedNameSpec>,
     pub elements: Vec<CreateTableElementSpec>,
     pub inheritance_relations: usize,
     pub has_partition_spec: bool,
@@ -321,8 +329,8 @@ pub(super) struct CreateTableSpec {
     pub typed_table: bool,
     pub options: usize,
     pub has_on_commit: bool,
-    pub has_tablespace: bool,
-    pub has_access_method: bool,
+    pub tablespace: Option<String>,
+    pub access_method: Option<String>,
 }
 
 /// Exact CREATE INDEX capabilities proven by PostgreSQL AST validation.
@@ -349,9 +357,14 @@ pub(super) enum AlterTableActionGroup {
 }
 
 /// Exact ALTER TABLE capabilities proven by PostgreSQL AST validation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct AlterTableActionSpec {
     pub group: AlterTableActionGroup,
+    pub target_name: Option<String>,
+    pub target_prefix: &'static [Token],
+    pub grammar_keywords: &'static [Token],
+    // SET STORAGE modes are scanner identifiers rather than keyword tokens.
+    pub trailing_keyword: bool,
     pub relation_options: Option<usize>,
     pub check_constraints: usize,
     pub foreign_key: Option<ForeignKeySpec>,
@@ -419,6 +432,7 @@ pub(super) enum TriggerTiming {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct AlterTableSpec {
     pub if_exists: bool,
+    pub relation: QualifiedNameSpec,
     pub actions: Vec<AlterTableActionSpec>,
 }
 
@@ -701,6 +715,7 @@ pub(super) struct SupportedDocument {
     arrays: Vec<ArrayListSpec>,
     in_lists: Vec<InListSpec>,
     ast_identifiers: Vec<usize>,
+    ast_keywords: Vec<usize>,
 }
 
 impl SupportedDocument {
@@ -714,6 +729,7 @@ impl SupportedDocument {
             arrays: Vec::new(),
             in_lists: Vec::new(),
             ast_identifiers: Vec::new(),
+            ast_keywords: Vec::new(),
         }
     }
 
@@ -734,6 +750,7 @@ impl SupportedDocument {
             arrays,
             in_lists,
             ast_identifiers,
+            ast_keywords: Vec::new(),
         }
     }
 
@@ -763,6 +780,15 @@ impl SupportedDocument {
 
     pub fn ast_identifiers(&self) -> &[usize] {
         &self.ast_identifiers
+    }
+
+    pub fn with_ast_keywords(mut self, keywords: Vec<usize>) -> Self {
+        self.ast_keywords = keywords;
+        self
+    }
+
+    pub fn ast_keywords(&self) -> &[usize] {
+        &self.ast_keywords
     }
 }
 

@@ -9,6 +9,12 @@ and does not define formatting policy; the core specification remains
 
 ## Core rule
 
+For table DDL, bind qualified names, action targets and constraint lists before
+assigning grammar roles. Reviewed action prefixes and AST-owned column/constraint
+keywords may use `TokenRole::GrammarKeyword`; never promote arbitrary unreserved
+tokens globally. Identifier and function-name roles take precedence. Cover both
+keyword-case variants, quoted/literal controls and strict repeat formatting.
+
 PostgreSQL parser acceptance is necessary but not sufficient. A syntax shape is
 supported only when all three layers agree:
 

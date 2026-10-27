@@ -1,5 +1,33 @@
 # Formatter design
 
+## Table header and action ownership
+
+CREATE/ALTER TABLE qualified names carry their PostgreSQL AST source anchor and
+name components into a shared binder. CREATE additionally owns parent/type names,
+access methods and tablespaces, so identifier tokens cannot impersonate INHERITS,
+OF or TABLESPACE clauses. Clause-word matching ignores comments between grammar
+words. ALTER's table IF EXISTS check stops at its relation; action-local guards
+cannot satisfy it. The first action follows the complete owned relation, ONLY
+wrapper and optional inheritance star, replacing the incomplete action-keyword
+scan. AST action cardinality and protected-token checks remain mandatory.
+
+Named column/constraint action targets and constraint names/key lists receive
+identifier ownership before casing. ALTER CONSTRAINT property changes do not
+create a foreign-key clause owner; only ADD CONSTRAINT owns those reference
+actions. PARTITION OF column options reuse the existing inherited-column
+validator. These changes implement the core ownership/safety contract without
+extending it through a permissive fallback or accepting unreviewed table forms.
+
+Reviewed table action prefixes and AST-owned constraint/column grammar carry
+explicit `GrammarKeyword` token roles. Identifier ownership wins over grammar;
+parser-owned function names retain function handling. This fixes casing of
+storage modes, generated/compression clauses, deferrability, trigger/security
+actions and other table grammar without uppercasing arbitrary unreserved words.
+Quoted storage modes and literals remain protected. The matrices compare lower-
+and uppercase keyword input while preserving literal/quoted-token contents.
+Exclusion access methods are identifier-owned grammar list heads, distinct from
+function calls; exclusion keys and existing-index constraint names are protected.
+
 ## Deploy safety corrections
 
 SELECT output aliases are bound by their query owner. ResTarget.location points
