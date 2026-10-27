@@ -2088,3 +2088,18 @@ idempotence, comments/groups, strict atomicity, diagnostics, module boundaries,
 dependencies and dead code. Temporary AST-probe sources/binaries were removed;
 no dependency or parser/safety fallback was introduced. Version and installed
 release remain unchanged pending separate release work.
+
+## 0.7.1 patch release preparation
+
+- [x] Bump the package and lockfile once, from 0.7.0 to 0.7.1.
+- [x] Fetch the pinned SQLx fixture dependencies and run its opt-in integration
+  test: actual macros compile offline before and after formatting; goldens,
+  clean check and repeated formatting pass.
+- [x] Repeat engineering gates for 0.7.1: 585 regular tests pass; the normally
+  ignored SQLx test passes separately (586 tests exercised in total). Rustfmt,
+  locked Clippy with warnings denied, Rustdoc and diff checks pass.
+- [x] Build the optimized 0.7.1 executable and verify its reported version.
+- [x] Structure the English PR description as feat / fix / chores.
+
+No formatter implementation or dependency changes are included in this release
+preparation batch. Merge and PATH installation follow the new commit's CI.
