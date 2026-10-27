@@ -11,6 +11,7 @@ pub(super) enum TokenRole {
     Unowned,
     Identifier,
     FunctionName,
+    GrammarKeyword,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

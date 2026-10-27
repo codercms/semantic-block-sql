@@ -142,6 +142,11 @@ pub(super) fn format(
     for &index in layout.identifier_tokens() {
         tokens[index].role = TokenRole::Identifier;
     }
+    for &index in layout.grammar_tokens() {
+        if tokens[index].role == TokenRole::Unowned {
+            tokens[index].role = TokenRole::GrammarKeyword;
+        }
+    }
     for call in layout.function_calls() {
         tokens[call.name].role = TokenRole::FunctionName;
     }

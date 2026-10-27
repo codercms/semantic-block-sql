@@ -196,6 +196,11 @@ Fixture-backed support includes:
 - multi-action `ALTER TABLE`;
 - `ALTER TABLE ... RENAME TO` and `RENAME CONSTRAINT ... TO`;
 - `ALTER COLUMN ... TYPE` / `SET DATA TYPE`, including `COLLATE` and `USING`;
+- independent table/action `IF EXISTS` guards, including multiple DROP COLUMN /
+  DROP CONSTRAINT actions, optional COLUMN, CASCADE/RESTRICT, ONLY and `*`;
+- reviewed REPLICA IDENTITY, INHERIT / NO INHERIT, OF / NOT OF, and
+  ALTER CONSTRAINT deferrability changes;
+- inherited-column options inside `CREATE TABLE ... PARTITION OF`;
 - `CREATE VIEW`, including CTE-led queries and wrapped set-operation branches;
 - `CREATE MATERIALIZED VIEW`, including reviewed storage options, CTE-led
   queries, and wrapped set-operation branches with owned data clauses.
@@ -207,6 +212,18 @@ NAME and authored option/comment groups.
 Trigger headers own timing, UPDATE OF columns, relation, condition, execution,
 and OLD/NEW transition-table clauses, including keyword-like transition aliases.
 ALTER TABLE foreign-key clauses wrap at verified key/reference/action boundaries.
+
+`tests/alter_table_clause_ownership.rs` and `tests/table_statement_matrix.rs`
+cover the table-definition/action families, defaults/generated/check expressions,
+foreign/primary/unique/exclusion keys, identity/storage/security/partition actions,
+keyword-like names, comment-separated clauses, authored groups, CRLF and widths.
+The matrices require strict acceptance, AST equivalence, idempotence and clean
+check output; targeted goldens assert exact casing/layout and identifier spelling.
+Constructed ownership tests reject contradictory AST guards, locations and names.
+Keyword-case variants cover the same forms without changing strings or quoted
+names. Grammar roles cover storage modes, generated/compression clauses,
+deferrability, trigger/security actions and exclusion access methods. Operator
+`NOT LIKE` retains keyword casing in table expressions.
 Synthetic controls cover NO ACTION, RESTRICT, CASCADE, SET NULL/DEFAULT,
 deferrability, and omission of referenced-column lists. Transition ROW aliases
 remain unsupported.

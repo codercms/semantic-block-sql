@@ -1,6 +1,6 @@
 use super::FormatDiagnostic;
 use super::ast::{DepthFirst, walk_complete_tree};
-use super::tokens::{next_non_comment, token_matches_identifier};
+use super::tokens::{next_non_comment, previous_non_comment, token_matches_identifier};
 use pg_query::NodeRef;
 use pg_query::protobuf::a_const::Val as AConstValue;
 use pg_query::protobuf::node::Node as NodeEnum;
@@ -22,10 +22,10 @@ use super::ownership::{
     ArrayListSpec, ConflictActionSpec, ConflictSpec, CreateIndexSpec, CreateTableElementSpec,
     CreateTableSpec, CteStatementSpec, DeleteSpec, ForeignKeyAction, ForeignKeySpec,
     FunctionCallSpec, IdentitySpec, InsertSourceSpec, InsertSpec, MaterializedViewSpec,
-    MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, QuerySpec, RelationIdentifierSpec,
-    RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec, RelationJoinTypeSpec,
-    RelationListSpec, SelectSpec, SequenceOptionKind, SequenceSpec, StatementSpec,
-    SupportedDocument, TriggerSpec, TriggerTiming, UpdateSpec, UtilityStatementKind,
+    MergeActionSpec, MergeBranchSpec, MergeSpec, OverrideSpec, QualifiedNameSpec, QuerySpec,
+    RelationIdentifierSpec, RelationItemSpec, RelationJoinConstraintSpec, RelationJoinSpec,
+    RelationJoinTypeSpec, RelationListSpec, SelectSpec, SequenceOptionKind, SequenceSpec,
+    StatementSpec, SupportedDocument, TriggerSpec, TriggerTiming, UpdateSpec, UtilityStatementKind,
     ValuesRelationSpec, ValuesSpec, ViewCheckSpec, ViewSpec, source_statement,
 };
 
@@ -80,6 +80,7 @@ pub(super) fn parse_supported_postgresql(
     let source_tokens = super::tokens::tokenize(source)?;
     let mut arrays = Vec::new();
     let mut ast_identifiers = Vec::new();
+    let mut ast_keywords = Vec::new();
     let mut in_lists = Vec::new();
     for (statement_index, raw) in parsed.protobuf.stmts.iter().enumerate() {
         let root = raw
@@ -106,6 +107,12 @@ pub(super) fn parse_supported_postgresql(
             end: source.len(),
         })?;
         collect_ast_identifiers(root, &source_tokens, &mut ast_identifiers);
+        collect_table_token_roles(
+            root,
+            &source_tokens,
+            &mut ast_identifiers,
+            &mut ast_keywords,
+        );
         for visit in DepthFirst::new(root) {
             if let NodeRef::AExpr(expression) = visit.node
                 && pg_query::protobuf::AExprKind::try_from(expression.kind)
@@ -133,7 +140,86 @@ pub(super) fn parse_supported_postgresql(
         arrays,
         in_lists,
         ast_identifiers,
-    ))
+    )
+    .with_ast_keywords(ast_keywords))
+}
+
+fn collect_table_token_roles(
+    root: &NodeEnum,
+    tokens: &[super::tokens::SqlToken<'_>],
+    identifiers: &mut Vec<usize>,
+    keywords: &mut Vec<usize>,
+) {
+    if !matches!(root, NodeEnum::CreateStmt(_) | NodeEnum::AlterTableStmt(_)) {
+        return;
+    }
+    let structure = super::structure::TokenStructure::new(tokens);
+    for visit in DepthFirst::new(root) {
+        match visit.node {
+            NodeRef::ColumnDef(column)
+                if column.location >= 0 && !column.compression.is_empty() =>
+            {
+                if let Some(range) = ddl_node_range(tokens, &structure, column.location as usize)
+                    && let Some((keyword, name)) = (range.start..range.end)
+                        .filter_map(|index| {
+                            if tokens[index].kind != Token::Compression {
+                                return None;
+                            }
+                            let name =
+                                next_non_comment(tokens, index).filter(|name| *name < range.end)?;
+                            token_matches_identifier(&tokens[name], &column.compression)
+                                .then_some((index, name))
+                        })
+                        .next_back()
+                {
+                    keywords.push(keyword);
+                    if tokens[name].kind == Token::Default {
+                        keywords.push(name);
+                    } else {
+                        identifiers.push(name);
+                    }
+                }
+            }
+            NodeRef::Constraint(constraint) if constraint.location >= 0 => {
+                let Some(range) = ddl_node_range(tokens, &structure, constraint.location as usize)
+                else {
+                    continue;
+                };
+                let kind =
+                    ConstrType::try_from(constraint.contype).unwrap_or(ConstrType::Undefined);
+                for index in range.start..range.end {
+                    let grammar = match tokens[index].kind {
+                        Token::Stored => kind == ConstrType::ConstrGenerated,
+                        Token::Match => kind == ConstrType::ConstrForeign,
+                        Token::Deferred | Token::Immediate => previous_non_comment(tokens, index)
+                            .is_some_and(|previous| tokens[previous].kind == Token::Initially),
+                        _ => false,
+                    };
+                    if grammar {
+                        keywords.push(index);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn ddl_node_range(
+    tokens: &[super::tokens::SqlToken<'_>],
+    structure: &super::structure::TokenStructure,
+    location: usize,
+) -> Option<super::ownership::TokenRange> {
+    let start = tokens.iter().position(|token| token.start == location)?;
+    let depth = structure.depth(start);
+    let end = (start + 1..tokens.len())
+        .find(|index| {
+            structure.depth(*index) < depth
+                || (structure.depth(*index) == depth
+                    && matches!(tokens[*index].kind, Token::Ascii44 | Token::Ascii59))
+        })
+        .unwrap_or(tokens.len());
+    super::ownership::TokenRange::new(start, end).ok()
 }
 
 fn collect_ast_identifiers(
@@ -141,6 +227,7 @@ fn collect_ast_identifiers(
     tokens: &[super::tokens::SqlToken<'_>],
     out: &mut Vec<usize>,
 ) {
+    let mut structure = None;
     for visit in DepthFirst::new(root) {
         match visit.node {
             NodeRef::ColumnRef(col) if col.location >= 0 => {
@@ -184,6 +271,14 @@ fn collect_ast_identifiers(
                     }
                 }
             }
+            NodeRef::Constraint(constraint) if constraint.location >= 0 => {
+                let structure =
+                    structure.get_or_insert_with(|| super::structure::TokenStructure::new(tokens));
+                bind_constraint_identifiers(tokens, structure, constraint, out);
+            }
+            NodeRef::RoleSpec(role) if role.location >= 0 && !role.rolename.is_empty() => {
+                bind_dotted_identifiers(tokens, role.location as usize, &[&role.rolename], out);
+            }
             NodeRef::AlterTableCmd(command)
                 if pg_query::protobuf::AlterTableType::try_from(command.subtype)
                     == Ok(AlterTableType::AtAlterColumnType) =>
@@ -199,6 +294,136 @@ fn collect_ast_identifiers(
                 }
             }
             _ => {}
+        }
+    }
+}
+
+fn bind_constraint_identifiers(
+    tokens: &[super::tokens::SqlToken<'_>],
+    structure: &super::structure::TokenStructure,
+    constraint: &Constraint,
+    out: &mut Vec<usize>,
+) {
+    let Some(mut cursor) = tokens
+        .iter()
+        .position(|token| token.start == constraint.location as usize)
+    else {
+        return;
+    };
+    let depth = structure.depth(cursor);
+    let end = (cursor + 1..tokens.len())
+        .find(|index| {
+            structure.depth(*index) < depth
+                || (structure.depth(*index) == depth
+                    && matches!(tokens[*index].kind, Token::Ascii44 | Token::Ascii59))
+        })
+        .unwrap_or(tokens.len());
+    if !constraint.conname.is_empty() && tokens[cursor].kind == Token::Constraint {
+        let Some(name) = next_non_comment(tokens, cursor) else {
+            return;
+        };
+        if !token_matches_identifier(&tokens[name], &constraint.conname) {
+            return;
+        }
+        out.push(name);
+        cursor = name + 1;
+    }
+    if !constraint.access_method.is_empty()
+        && let Some(using) = (cursor..end)
+            .find(|index| structure.depth(*index) == depth && tokens[*index].kind == Token::Using)
+        && let Some(name) = next_non_comment(tokens, using).filter(|name| *name < end)
+        && token_matches_identifier(&tokens[name], &constraint.access_method)
+    {
+        out.push(name);
+    }
+    if !constraint.exclusions.is_empty() {
+        let Some(open) = (cursor..end).find(|index| tokens[*index].kind == Token::Ascii40) else {
+            return;
+        };
+        let Some(close) = structure
+            .matching_parenthesis(open)
+            .filter(|close| *close < end)
+        else {
+            return;
+        };
+        let mut starts = vec![open + 1];
+        starts.extend(
+            (open + 1..close)
+                .filter(|index| {
+                    structure.depth(*index) == depth + 1 && tokens[*index].kind == Token::Ascii44
+                })
+                .map(|comma| comma + 1),
+        );
+        if starts.len() != constraint.exclusions.len() {
+            return;
+        }
+        for (start, exclusion) in starts.into_iter().zip(&constraint.exclusions) {
+            let Some(NodeEnum::List(pair)) = exclusion.node.as_ref() else {
+                return;
+            };
+            if let Some(NodeEnum::IndexElem(element)) =
+                pair.items.first().and_then(|node| node.node.as_ref())
+                && !element.name.is_empty()
+                && let Some(index) = (start..close).find(|index| !tokens[*index].is_comment())
+                && token_matches_identifier(&tokens[index], &element.name)
+            {
+                out.push(index);
+            }
+        }
+        cursor = close + 1;
+    }
+    for names in [
+        &constraint.keys,
+        &constraint.fk_attrs,
+        &constraint.pk_attrs,
+        &constraint.including,
+        &constraint.fk_del_set_cols,
+    ] {
+        if names.is_empty() {
+            continue;
+        }
+        let Some(open) = (cursor..end).find(|index| tokens[*index].kind == Token::Ascii40) else {
+            return;
+        };
+        let mut syntax = (open + 1..end).filter(|index| !tokens[*index].is_comment());
+        let mut bound = Vec::new();
+        for (position, node) in names.iter().enumerate() {
+            let Some(NodeEnum::String(name)) = node.node.as_ref() else {
+                return;
+            };
+            if position > 0
+                && syntax
+                    .next()
+                    .is_none_or(|index| tokens[index].kind != Token::Ascii44)
+            {
+                return;
+            }
+            let Some(index) = syntax.next() else { return };
+            if !token_matches_identifier(&tokens[index], &name.sval) {
+                return;
+            }
+            bound.push(index);
+        }
+        let Some(close) = syntax
+            .next()
+            .filter(|index| tokens[*index].kind == Token::Ascii41)
+        else {
+            return;
+        };
+        out.extend(bound);
+        cursor = close + 1;
+    }
+    for (keyword, name) in [
+        (Token::Index, &constraint.indexname),
+        (Token::Tablespace, &constraint.indexspace),
+    ] {
+        if !name.is_empty()
+            && let Some(introducer) = (cursor..end)
+                .find(|index| structure.depth(*index) == depth && tokens[*index].kind == keyword)
+            && let Some(index) = next_non_comment(tokens, introducer).filter(|index| *index < end)
+            && token_matches_identifier(&tokens[index], name)
+        {
+            out.push(index);
         }
     }
 }
@@ -1531,7 +1756,7 @@ fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'stati
     for element in &create.table_elts {
         match element.node.as_ref() {
             Some(NodeEnum::ColumnDef(column)) => {
-                if typed_table {
+                if typed_table || create.partbound.is_some() {
                     validate_typed_column_def(column)?;
                 } else {
                     validate_column_def(column)?;
@@ -1553,8 +1778,24 @@ fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'stati
         }
     }
 
+    let mut header_names = vec![qualified_relation(
+        create.relation.as_ref().expect("relation validated"),
+    )?];
+    for parent in &create.inh_relations {
+        if let Some(NodeEnum::RangeVar(relation)) = parent.node.as_ref() {
+            header_names.push(qualified_relation(relation)?);
+        }
+    }
+    if let Some(typename) = &create.of_typename {
+        header_names.push(QualifiedNameSpec {
+            location: usize::try_from(typename.location)
+                .map_err(|_| "unlocated typed-table type")?,
+            names: string_nodes(&typename.names, "unreviewed typed-table type")?,
+        });
+    }
     Ok(CreateTableSpec {
         if_not_exists: create.if_not_exists,
+        header_names,
         elements,
         inheritance_relations: create.inh_relations.len(),
         has_partition_spec: create.partspec.is_some(),
@@ -1563,8 +1804,8 @@ fn validate_create_table(create: &CreateStmt) -> Result<CreateTableSpec, &'stati
         options: create.options.len(),
         has_on_commit: OnCommitAction::try_from(create.oncommit)
             .is_ok_and(|action| action != OnCommitAction::OncommitNoop),
-        has_tablespace: !create.tablespacename.is_empty(),
-        has_access_method: !create.access_method.is_empty(),
+        tablespace: (!create.tablespacename.is_empty()).then(|| create.tablespacename.clone()),
+        access_method: (!create.access_method.is_empty()).then(|| create.access_method.clone()),
     })
 }
 
@@ -1736,8 +1977,12 @@ fn validate_index_element(element: &Node, include: bool) -> Result<(), &'static 
 }
 
 fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'static str> {
-    if alter.relation.is_none() {
-        return Err("ALTER TABLE without a relation");
+    let relation = alter
+        .relation
+        .as_ref()
+        .ok_or("ALTER TABLE without a relation")?;
+    if relation.relname.is_empty() || relation.alias.is_some() {
+        return Err("unreviewed ALTER TABLE relation");
     }
     if ObjectType::try_from(alter.objtype).unwrap_or(ObjectType::Undefined)
         != ObjectType::ObjectTable
@@ -1808,6 +2053,81 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
         };
         actions.push(AlterTableActionSpec {
             group,
+            trailing_keyword: subtype == AlterTableType::AtSetStorage,
+            target_prefix: match subtype {
+                AlterTableType::AtSetAccessMethod => &[Token::Access, Token::Method],
+                AlterTableType::AtSetTableSpace => &[Token::Tablespace],
+                AlterTableType::AtChangeOwner => &[Token::To],
+                AlterTableType::AtClusterOn => &[Token::On],
+                AlterTableType::AtEnableTrig | AlterTableType::AtDisableTrig => &[Token::Trigger],
+                AlterTableType::AtEnableAlwaysTrig => &[Token::Always, Token::Trigger],
+                AlterTableType::AtEnableReplicaTrig => &[Token::Replica, Token::Trigger],
+                AlterTableType::AtEnableRule | AlterTableType::AtDisableRule => &[Token::Rule],
+                AlterTableType::AtEnableAlwaysRule => &[Token::Always, Token::Rule],
+                AlterTableType::AtEnableReplicaRule => &[Token::Replica, Token::Rule],
+                _ => &[],
+            },
+            grammar_keywords: match subtype {
+                AlterTableType::AtResetOptions => &[Token::Reset],
+                AlterTableType::AtSetStorage => &[Token::Storage],
+                AlterTableType::AtSetCompression => &[Token::Compression],
+                AlterTableType::AtSetLogged => &[Token::Logged],
+                AlterTableType::AtDropCluster => &[Token::Without, Token::Cluster],
+                AlterTableType::AtEnableRowSecurity
+                | AlterTableType::AtDisableRowSecurity
+                | AlterTableType::AtForceRowSecurity
+                | AlterTableType::AtNoForceRowSecurity => &[Token::Level, Token::Security],
+                AlterTableType::AtDetachPartitionFinalize => &[Token::Finalize],
+                AlterTableType::AtDropExpression | AlterTableType::AtSetExpression => {
+                    &[Token::Expression]
+                }
+                AlterTableType::AtDropInherit => &[Token::Inherit],
+                AlterTableType::AtAlterConstraint => &[Token::Deferred, Token::Immediate],
+                _ => &[],
+            },
+            target_name: matches!(
+                subtype,
+                AlterTableType::AtDropColumn
+                    | AlterTableType::AtDropConstraint
+                    | AlterTableType::AtDropIdentity
+                    | AlterTableType::AtDropExpression
+                    | AlterTableType::AtColumnDefault
+                    | AlterTableType::AtDropNotNull
+                    | AlterTableType::AtSetNotNull
+                    | AlterTableType::AtSetExpression
+                    | AlterTableType::AtAlterColumnType
+                    | AlterTableType::AtSetStatistics
+                    | AlterTableType::AtSetOptions
+                    | AlterTableType::AtResetOptions
+                    | AlterTableType::AtSetStorage
+                    | AlterTableType::AtSetCompression
+                    | AlterTableType::AtAddIdentity
+                    | AlterTableType::AtSetIdentity
+                    | AlterTableType::AtAlterConstraint
+                    | AlterTableType::AtValidateConstraint
+                    | AlterTableType::AtSetAccessMethod
+                    | AlterTableType::AtSetTableSpace
+                    | AlterTableType::AtClusterOn
+                    | AlterTableType::AtEnableTrig
+                    | AlterTableType::AtDisableTrig
+                    | AlterTableType::AtEnableAlwaysTrig
+                    | AlterTableType::AtEnableReplicaTrig
+                    | AlterTableType::AtEnableRule
+                    | AlterTableType::AtDisableRule
+                    | AlterTableType::AtEnableAlwaysRule
+                    | AlterTableType::AtEnableReplicaRule
+            )
+            .then(
+                || match command.def.as_deref().and_then(|node| node.node.as_ref()) {
+                    Some(NodeEnum::Constraint(constraint))
+                        if subtype == AlterTableType::AtAlterConstraint =>
+                    {
+                        constraint.conname.clone()
+                    }
+                    _ => command.name.clone(),
+                },
+            )
+            .filter(|name| !name.is_empty()),
             relation_options,
             check_constraints,
             identity: match command.def.as_deref().and_then(|node| node.node.as_ref()) {
@@ -1816,8 +2136,9 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
             },
             foreign_key: match command.def.as_deref().and_then(|node| node.node.as_ref()) {
                 Some(NodeEnum::Constraint(constraint))
-                    if ConstrType::try_from(constraint.contype)
-                        == Ok(ConstrType::ConstrForeign) =>
+                    if subtype == AlterTableType::AtAddConstraint
+                        && ConstrType::try_from(constraint.contype)
+                            == Ok(ConstrType::ConstrForeign) =>
                 {
                     Some(ForeignKeySpec {
                         keys: constraint.fk_attrs.len(),
@@ -1833,7 +2154,25 @@ fn validate_alter_table(alter: &AlterTableStmt) -> Result<AlterTableSpec, &'stat
 
     Ok(AlterTableSpec {
         if_exists: alter.missing_ok,
+        relation: qualified_relation(relation)?,
         actions,
+    })
+}
+
+fn qualified_relation(
+    relation: &pg_query::protobuf::RangeVar,
+) -> Result<QualifiedNameSpec, &'static str> {
+    Ok(QualifiedNameSpec {
+        location: usize::try_from(relation.location).map_err(|_| "unlocated table relation")?,
+        names: [
+            &relation.catalogname,
+            &relation.schemaname,
+            &relation.relname,
+        ]
+        .into_iter()
+        .filter(|name| !name.is_empty())
+        .cloned()
+        .collect(),
     })
 }
 
