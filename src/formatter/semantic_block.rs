@@ -192,6 +192,12 @@ pub(super) fn format(
                     .filter_map(|join| join.using_open.map(|open| (open, depths[open])))
             }),
     );
+    let expanded_values_wrappers = values
+        .iter()
+        .filter(|block| ddl::values_expand(&tokens, block, options))
+        .filter_map(|block| block.wrapper)
+        .collect::<Vec<_>>();
+    let expanded_values_wrappers = &expanded_values_wrappers;
     let definition_headers = layout
         .queries()
         .iter()
@@ -237,6 +243,14 @@ pub(super) fn format(
                             })
                     })
                     .unwrap_or(source.range.start);
+                let prefix = expanded_values_wrappers
+                    .iter()
+                    .filter(|&&(wrapper, close)| {
+                        prefix <= wrapper && close < open && depths[close] == depths[open]
+                    })
+                    .map(|&(_, close)| close)
+                    .max()
+                    .unwrap_or(prefix);
                 (
                     open,
                     prefix,

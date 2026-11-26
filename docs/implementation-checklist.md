@@ -2112,4 +2112,6 @@ preparation batch. Merge and PATH installation follow the new commit's CI.
   equivalence, repeat formatting, and clean check with focused tests.
 - [x] Use verified RowExpr boundaries to wrap long implicit tuples and ROW
   constructors in SELECT and predicates, including equality, distinctness and IN.
+- [x] Measure alias columns after an expanded VALUES wrapper from its closing
+  parenthesis, preserving the existing compact alias regression fixture.
 - [ ] Run the full required suite in CI.

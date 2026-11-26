@@ -7,34 +7,33 @@ use crate::formatter::ownership::TokenRange;
 use super::lists::{plan_keyword_list_at_indent, plan_owned_delimited_list};
 use super::*;
 
+pub(super) fn values_expand(
+    tokens: &[SqlToken<'_>],
+    values: &ValuesBlock,
+    options: &FormatOptions,
+) -> bool {
+    let authored = values
+        .rows
+        .iter()
+        .any(|(open, _)| tokens[*open].line_breaks_before > 0);
+    let width = values.span.base_depth * INDENT_WIDTH
+        + compact_width(tokens, values.span.start, values.span.end, options);
+    let has_authored_suffix = values
+        .clauses
+        .ordered_boundaries(values.span.end)
+        .into_iter()
+        .filter(|&index| index < values.span.end)
+        .any(|index| tokens[index].line_breaks_before > 0);
+    values.rows.len() > 1 || authored || has_authored_suffix || width > options.soft_line_width
+}
+
 pub(super) fn plan_values_statements(
     context: &PlanningContext<'_, '_>,
     statements: &[ValuesBlock],
     plan: &mut LayoutPlan,
 ) {
     for values in statements {
-        let authored = values
-            .rows
-            .iter()
-            .any(|(open, _)| context.tokens[*open].line_breaks_before > 0);
-        let width = values.span.base_depth * INDENT_WIDTH
-            + compact_width(
-                context.tokens,
-                values.span.start,
-                values.span.end,
-                context.options,
-            );
-        let has_authored_suffix = values
-            .clauses
-            .ordered_boundaries(values.span.end)
-            .into_iter()
-            .filter(|&index| index < values.span.end)
-            .any(|index| context.tokens[index].line_breaks_before > 0);
-        if values.rows.len() <= 1
-            && !authored
-            && !has_authored_suffix
-            && width <= context.options.soft_line_width
-        {
+        if !values_expand(context.tokens, values, context.options) {
             continue;
         }
         let keyword_indent = values
