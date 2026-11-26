@@ -214,7 +214,7 @@ pub(super) fn format(
                 .map(|merge| (&merge.source, merge.source.base_depth)),
         )
         .flat_map(|(source, indent)| {
-            source.definition_lists.iter().map(move |&(open, _)| {
+            source.column_lists.iter().map(move |&(open, _)| {
                 let prefix = source
                     .joins
                     .iter()
@@ -228,7 +228,13 @@ pub(super) fn format(
                             .items
                             .iter()
                             .find(|item| item.start <= open && open < item.end)
-                            .map(|item| item.start)
+                            .map(|item| {
+                                if source.items.len() == 1 && depths[open] == source.base_depth {
+                                    source.introducer
+                                } else {
+                                    item.start
+                                }
+                            })
                     })
                     .unwrap_or(source.range.start);
                 (

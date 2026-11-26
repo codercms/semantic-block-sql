@@ -76,6 +76,20 @@ FROM LATERAL generate_series(1, 10) WITH ORDINALITY AS value (n, ordinality);",
 }
 
 #[test]
+fn wraps_relation_alias_columns_when_call_and_alias_exceed_hard_width() {
+    let options = FormatOptions {
+        soft_line_width: 90,
+        hard_line_width: 90,
+        ..FormatOptions::default()
+    };
+    assert_format(
+        "select * from unnest($1::integer[], $2::integer[], $3::text[])\n    sample(sensor_number, sample_count, reading_label);",
+        "SELECT *\nFROM unnest($1::integer[], $2::integer[], $3::text[]) sample(\n    sensor_number,\n    sample_count,\n    reading_label\n);",
+        &options,
+    );
+}
+
+#[test]
 fn supports_window_functions_inside_insert_select() {
     assert_format(
         "insert into public.items (id) select row_number() over () from staging.items;",

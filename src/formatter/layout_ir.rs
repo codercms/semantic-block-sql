@@ -221,7 +221,7 @@ pub(super) struct RelationSourceBlock {
     pub wrappers: Vec<(usize, usize, usize)>,
     pub base_depth: usize,
     pub identifier_tokens: Vec<usize>,
-    pub definition_lists: Vec<(usize, usize)>,
+    pub column_lists: Vec<(usize, usize)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
