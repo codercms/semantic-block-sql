@@ -65,6 +65,12 @@ pub(super) struct InListSpec {
     pub elements: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RowListSpec {
+    pub location: usize,
+    pub elements: usize,
+}
+
 /// Top-level VALUES capabilities proven by PostgreSQL AST validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ValuesSpec {
@@ -714,6 +720,7 @@ pub(super) struct SupportedDocument {
     function_calls: Vec<FunctionCallSpec>,
     arrays: Vec<ArrayListSpec>,
     in_lists: Vec<InListSpec>,
+    row_lists: Vec<RowListSpec>,
     ast_identifiers: Vec<usize>,
     ast_keywords: Vec<usize>,
 }
@@ -728,6 +735,7 @@ impl SupportedDocument {
             function_calls: Vec::new(),
             arrays: Vec::new(),
             in_lists: Vec::new(),
+            row_lists: Vec::new(),
             ast_identifiers: Vec::new(),
             ast_keywords: Vec::new(),
         }
@@ -749,6 +757,7 @@ impl SupportedDocument {
             function_calls,
             arrays,
             in_lists,
+            row_lists: Vec::new(),
             ast_identifiers,
             ast_keywords: Vec::new(),
         }
@@ -776,6 +785,15 @@ impl SupportedDocument {
 
     pub fn in_lists(&self) -> &[InListSpec] {
         &self.in_lists
+    }
+
+    pub fn row_lists(&self) -> &[RowListSpec] {
+        &self.row_lists
+    }
+
+    pub fn with_row_lists(mut self, row_lists: Vec<RowListSpec>) -> Self {
+        self.row_lists = row_lists;
+        self
     }
 
     pub fn ast_identifiers(&self) -> &[usize] {

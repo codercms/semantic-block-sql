@@ -176,6 +176,32 @@ fn partial_indexes_cover_authored_groups_comments_and_options() {
 }
 
 #[test]
+fn wraps_tuple_expressions_below_hard_width() {
+    let options = semblock::FormatOptions {
+        soft_line_width: 45,
+        hard_line_width: 120,
+        ..Default::default()
+    };
+    for source in [
+        "SELECT (warehouse_number, inventory_count, package_label);",
+        "SELECT ROW(warehouse_number, inventory_count, package_label);",
+        "SELECT id FROM depot WHERE (a, b, c) = (warehouse_number, inventory_count, package_label);",
+        "SELECT id FROM depot WHERE (a, b, c) <> (warehouse_number, inventory_count, package_label);",
+        "SELECT id FROM depot WHERE (a, b, c) IS DISTINCT FROM (warehouse_number, inventory_count, package_label);",
+        "SELECT id FROM depot WHERE (a, b, c) IS NOT DISTINCT FROM (warehouse_number, inventory_count, package_label);",
+        "SELECT id FROM depot WHERE (a, b, c) IN ((warehouse_number, inventory_count, package_label));",
+    ] {
+        let result = semblock::format_sql(source, &options).unwrap();
+        assert!(
+            result.output.contains("warehouse_number,\n"),
+            "{source}: {}",
+            result.output
+        );
+        support::assert_sql_with(source, &result.output, &options);
+    }
+}
+
+#[test]
 fn distinctness_comparisons_wrap_across_expression_owners() {
     let options = semblock::FormatOptions {
         soft_line_width: 45,

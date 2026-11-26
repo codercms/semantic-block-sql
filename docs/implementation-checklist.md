@@ -2110,4 +2110,6 @@ preparation batch. Merge and PATH installation follow the new commit's CI.
 - [x] Include the FROM or JOIN prefix when measuring the alias column list.
 - [x] Cover width-driven wrapping with synthetic SQL and verify semantic
   equivalence, repeat formatting, and clean check with focused tests.
+- [x] Use verified RowExpr boundaries to wrap long implicit tuples and ROW
+  constructors in SELECT and predicates, including equality, distinctness and IN.
 - [ ] Run the full required suite in CI.

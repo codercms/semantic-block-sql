@@ -486,6 +486,7 @@ pub(super) struct LayoutDocument {
     function_calls: Vec<FunctionCallBlock>,
     arrays: Vec<(usize, usize)>,
     in_lists: Vec<(usize, usize)>,
+    row_lists: Vec<(usize, usize)>,
 }
 
 impl LayoutDocument {
@@ -497,6 +498,7 @@ impl LayoutDocument {
         let function_calls = function_calls::bind(tokens, structure, document.function_calls())?;
         let arrays = arrays::bind(tokens, structure, document.arrays())?;
         let in_lists = in_lists::bind(tokens, structure, document.in_lists())?;
+        let row_lists = in_lists::bind_rows(tokens, structure, document.row_lists())?;
         // Relation alias binding needs to distinguish a real call name from a
         // same-spelled alias before expression layout starts. Keep caller tokens
         // immutable while binding this shared source-role view.
@@ -687,6 +689,7 @@ impl LayoutDocument {
             function_calls,
             arrays,
             in_lists,
+            row_lists,
         })
     }
 
@@ -737,6 +740,10 @@ impl LayoutDocument {
 
     pub fn in_lists(&self) -> &[(usize, usize)] {
         &self.in_lists
+    }
+
+    pub fn row_lists(&self) -> &[(usize, usize)] {
+        &self.row_lists
     }
 
     pub fn statement_spans(&self) -> impl Iterator<Item = TokenSpan> + '_ {
