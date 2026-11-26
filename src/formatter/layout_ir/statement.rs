@@ -2414,13 +2414,13 @@ pub(super) fn bind_relation_source(
         wrappers,
         base_depth,
         identifier_tokens,
-        definition_lists: identifiers.definitions,
+        column_lists: identifiers.column_lists,
     })
 }
 
 struct RelationIdentifierBindings {
     tokens: Vec<usize>,
-    definitions: Vec<(usize, usize)>,
+    column_lists: Vec<(usize, usize)>,
 }
 
 fn bind_relation_identifiers(
@@ -2431,7 +2431,7 @@ fn bind_relation_identifiers(
     owner: &str,
 ) -> Result<RelationIdentifierBindings, FormatDiagnostic> {
     let mut result = Vec::new();
-    let mut definitions = Vec::new();
+    let mut column_lists = Vec::new();
     let mut cursor = range.start;
     for (position, identifier) in expected.iter().enumerate() {
         match identifier {
@@ -2479,7 +2479,11 @@ fn bind_relation_identifiers(
                         &alias.columns,
                         owner,
                     )?);
-                    cursor = structure.matching_parenthesis(open).unwrap_or(open) + 1;
+                    let close = structure.matching_parenthesis(open).ok_or_else(|| {
+                        FormatDiagnostic::Ownership("alias column list is unclosed".into())
+                    })?;
+                    column_lists.push((open, close));
+                    cursor = close + 1;
                 }
             }
             RelationIdentifierSpec::ColumnDefinitions(columns) => {
@@ -2498,7 +2502,7 @@ fn bind_relation_identifiers(
                 result.extend(bind_parenthesized_names(
                     tokens, structure, open, columns, owner,
                 )?);
-                definitions.push((
+                column_lists.push((
                     open,
                     structure.matching_parenthesis(open).ok_or_else(|| {
                         FormatDiagnostic::Ownership("column-definition list is unclosed".into())
@@ -2510,7 +2514,7 @@ fn bind_relation_identifiers(
     }
     Ok(RelationIdentifierBindings {
         tokens: result,
-        definitions,
+        column_lists,
     })
 }
 

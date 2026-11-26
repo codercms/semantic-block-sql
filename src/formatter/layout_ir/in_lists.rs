@@ -28,26 +28,66 @@ pub(super) fn bind(
         let close = structure
             .matching_parenthesis(open)
             .ok_or_else(|| FormatDiagnostic::Ownership("IN list is unclosed".into()))?;
-        let count = usize::from(
-            tokens[open + 1..close]
-                .iter()
-                .any(|token| !token.is_comment()),
-        ) + (open + 1..close)
-            .filter(|&index| {
-                tokens[index].kind == Token::Ascii44
-                    && structure.depth(index) == structure.depth(open) + 1
-            })
-            .count();
-        if count != spec.elements {
-            return Err(FormatDiagnostic::Ownership(
-                "IN list item count disagrees with its AST".into(),
-            ));
-        }
+        verify_item_count(tokens, structure, open, close, spec.elements, "IN list")?;
         lists.push((open, close));
     }
     lists.sort_unstable();
     lists.dedup();
     Ok(lists)
+}
+
+pub(super) fn bind_rows(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    specs: &[crate::formatter::ownership::RowListSpec],
+) -> Result<Vec<(usize, usize)>, FormatDiagnostic> {
+    let mut lists = Vec::with_capacity(specs.len());
+    for spec in specs {
+        let anchor = tokens
+            .binary_search_by_key(&spec.location, |token| token.start)
+            .map_err(|_| FormatDiagnostic::Ownership("row location is missing".into()))?;
+        let open = match tokens[anchor].kind {
+            Token::Row => next_non_comment(tokens, anchor),
+            Token::Ascii40 => Some(anchor),
+            _ => None,
+        }
+        .filter(|&index| tokens[index].kind == Token::Ascii40)
+        .ok_or_else(|| FormatDiagnostic::Ownership("row has no opening parenthesis".into()))?;
+        let close = structure
+            .matching_parenthesis(open)
+            .ok_or_else(|| FormatDiagnostic::Ownership("row is unclosed".into()))?;
+        verify_item_count(tokens, structure, open, close, spec.elements, "row")?;
+        lists.push((open, close));
+    }
+    lists.sort_unstable();
+    lists.dedup();
+    Ok(lists)
+}
+
+fn verify_item_count(
+    tokens: &[SqlToken<'_>],
+    structure: &TokenStructure,
+    open: usize,
+    close: usize,
+    expected: usize,
+    owner: &str,
+) -> Result<(), FormatDiagnostic> {
+    let count = usize::from(
+        tokens[open + 1..close]
+            .iter()
+            .any(|token| !token.is_comment()),
+    ) + (open + 1..close)
+        .filter(|&index| {
+            tokens[index].kind == Token::Ascii44
+                && structure.depth(index) == structure.depth(open) + 1
+        })
+        .count();
+    if count != expected {
+        return Err(FormatDiagnostic::Ownership(format!(
+            "{owner} item count disagrees with its AST"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -192,6 +192,12 @@ pub(super) fn format(
                     .filter_map(|join| join.using_open.map(|open| (open, depths[open])))
             }),
     );
+    let expanded_values_wrappers = values
+        .iter()
+        .filter(|block| ddl::values_expand(&tokens, block, options))
+        .filter_map(|block| block.wrapper)
+        .collect::<Vec<_>>();
+    let expanded_values_wrappers = &expanded_values_wrappers;
     let definition_headers = layout
         .queries()
         .iter()
@@ -214,7 +220,7 @@ pub(super) fn format(
                 .map(|merge| (&merge.source, merge.source.base_depth)),
         )
         .flat_map(|(source, indent)| {
-            source.definition_lists.iter().map(move |&(open, _)| {
+            source.column_lists.iter().map(move |&(open, _)| {
                 let prefix = source
                     .joins
                     .iter()
@@ -228,9 +234,23 @@ pub(super) fn format(
                             .items
                             .iter()
                             .find(|item| item.start <= open && open < item.end)
-                            .map(|item| item.start)
+                            .map(|item| {
+                                if source.items.len() == 1 && depths[open] == source.base_depth {
+                                    source.introducer
+                                } else {
+                                    item.start
+                                }
+                            })
                     })
                     .unwrap_or(source.range.start);
+                let prefix = expanded_values_wrappers
+                    .iter()
+                    .filter(|&&(wrapper, close)| {
+                        prefix <= wrapper && close < open && depths[close] == depths[open]
+                    })
+                    .map(|&(_, close)| close)
+                    .max()
+                    .unwrap_or(prefix);
                 (
                     open,
                     prefix,
@@ -252,6 +272,7 @@ pub(super) fn format(
             values: &values,
             arrays: layout.arrays(),
             in_lists: layout.in_lists(),
+            row_lists: layout.row_lists(),
             calls: layout.function_calls(),
             definition_headers: &definition_headers,
         },
@@ -377,7 +398,12 @@ pub(super) fn format(
     // Delimited lists may live in CASE/predicate groups whose final parent
     // line is planned after argument lists. Rebase the already-owned bracket
     // subtree, including nested CASE/query groups, instead of replanning it.
-    for &(open, close) in layout.arrays().iter().chain(layout.in_lists()) {
+    for &(open, close) in layout
+        .arrays()
+        .iter()
+        .chain(layout.in_lists())
+        .chain(layout.row_lists())
+    {
         if let Some(current) = plan.before.get(&close).map(|line_break| line_break.indent) {
             let desired = plan
                 .before

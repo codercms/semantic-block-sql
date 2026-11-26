@@ -8,7 +8,7 @@ use support::assert_sql as assert_format;
 fn formats_rows_from_tablesample_and_relation_column_lists() {
     assert_format(
         "select * from rows from (jsonb_each_text(payload) as (entry_key text,entry_value text),generate_series(1,3)) as rf(entry_key,entry_value,n);",
-        "SELECT *\nFROM ROWS FROM (jsonb_each_text(payload) AS (entry_key text, entry_value text), generate_series(1, 3)) AS rf(entry_key, entry_value, n);",
+        "SELECT *\nFROM ROWS FROM (jsonb_each_text(payload) AS (entry_key text, entry_value text), generate_series(1, 3)) AS rf(\n    entry_key,\n    entry_value,\n    n\n);",
     );
     assert_format(
         "select * from items as i(id,title) tablesample system(10) repeatable(42);",

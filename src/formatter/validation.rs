@@ -82,6 +82,7 @@ pub(super) fn parse_supported_postgresql(
     let mut ast_identifiers = Vec::new();
     let mut ast_keywords = Vec::new();
     let mut in_lists = Vec::new();
+    let mut row_lists = Vec::new();
     for (statement_index, raw) in parsed.protobuf.stmts.iter().enumerate() {
         let root = raw
             .stmt
@@ -114,6 +115,15 @@ pub(super) fn parse_supported_postgresql(
             &mut ast_keywords,
         );
         for visit in DepthFirst::new(root) {
+            if let NodeRef::RowExpr(row) = visit.node
+                && let Ok(location) = usize::try_from(row.location)
+                && !row.args.is_empty()
+            {
+                row_lists.push(super::ownership::RowListSpec {
+                    location,
+                    elements: row.args.len(),
+                });
+            }
             if let NodeRef::AExpr(expression) = visit.node
                 && pg_query::protobuf::AExprKind::try_from(expression.kind)
                     == Ok(pg_query::protobuf::AExprKind::AexprIn)
@@ -141,7 +151,8 @@ pub(super) fn parse_supported_postgresql(
         in_lists,
         ast_identifiers,
     )
-    .with_ast_keywords(ast_keywords))
+    .with_ast_keywords(ast_keywords)
+    .with_row_lists(row_lists))
 }
 
 fn collect_table_token_roles(

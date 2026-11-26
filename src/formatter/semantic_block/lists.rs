@@ -12,6 +12,7 @@ pub(super) struct ParenthesizedListSources<'a> {
     pub values: &'a [ValuesBlock],
     pub arrays: &'a [(usize, usize)],
     pub in_lists: &'a [(usize, usize)],
+    pub row_lists: &'a [(usize, usize)],
     pub calls: &'a [crate::formatter::layout_ir::FunctionCallBlock],
     pub definition_headers: &'a [(usize, usize, usize)],
 }
@@ -48,7 +49,8 @@ pub(super) fn parenthesized_lists(
                     .iter()
                     .any(|&(list, _, _)| list == open)
                 || sources.arrays.iter().any(|&(array, _)| array == open)
-                || sources.in_lists.iter().any(|&(list, _)| list == open))
+                || sources.in_lists.iter().any(|&(list, _)| list == open)
+                || sources.row_lists.iter().any(|&(list, _)| list == open))
         {
             continue;
         }
